@@ -6,7 +6,7 @@ from config import TOKEN
 from db.schema import setup_database
 from bot.commands import register_commands
 from game.actions import schedule_jobs
-
+from languages import get_text, get_player_language, set_player_language
 # Enable logging
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO

@@ -63,5 +63,22 @@ def main() -> None:
     application.run_polling(allowed_updates=Update.ALL_TYPES)
 
 
+
+def error_handler(update, context):
+    """Log the error and send a telegram message to notify the developer."""
+    logger.error(f"Exception while handling an update: {context.error}")
+
+    # Send message to developer
+    if update and update.effective_chat:
+        context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="Sorry, something went wrong. The error has been reported."
+        )
+
+
+
+
 if __name__ == "__main__":
     main()
+    # Add to your application
+    # application.add_error_handler(error_handler)

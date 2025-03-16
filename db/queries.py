@@ -31,14 +31,13 @@ def db_transaction(func):
 
 # Player-related queries
 @db_transaction
-def get_player(player_id):
+def get_player(conn, player_id):
     """Get player information by ID."""
-    conn = sqlite3.connect('belgrade_game.db')
     cursor = conn.cursor()
     cursor.execute("SELECT * FROM players WHERE player_id = ?", (player_id,))
     player = cursor.fetchone()
-    conn.close()
     return player
+
 
 def register_player(player_id, username, language="en"):
     """Register a new player."""

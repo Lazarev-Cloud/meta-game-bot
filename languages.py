@@ -84,6 +84,7 @@ TRANSLATIONS = {
         "international_note": "*Note:* International politicians can activate randomly each cycle. Their actions can significantly impact the political landscape in Belgrade. Use /news to stay informed about their latest activities.",
 
         # Ideology descriptions
+        "ideology": "Ideology",
         "ideology_strongly_conservative": "Strongly Conservative",
         "ideology_conservative": "Conservative",
         "ideology_neutral": "Neutral",

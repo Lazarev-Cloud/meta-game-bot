@@ -82,7 +82,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lang = get_player_language(user.id)
 
     help_text = (
-        f"*{get_text('help_title', lang)}*\n\n"
+        f"<b>{get_text('help_title', lang)}</b>\n\n"
         f"{get_text('help_basic', lang)}\n\n"
         f"{get_text('help_action', lang)}\n\n"
         f"{get_text('help_resource', lang)}\n\n"
@@ -90,7 +90,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"{get_text('help_footer', lang)}"
     )
 
-    await update.message.reply_text(help_text, parse_mode='Markdown')
+    await update.message.reply_text(help_text, parse_mode='HTML')
 
 
 async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
