@@ -35,8 +35,8 @@
 1. **Клонируйте репозиторий**
 
 ```bash
-git clone https://github.com/YourUsername/belgrade-game-bot.git
-cd belgrade-game-bot
+git clone https://github.com/Lazarev-Cloud/meta-game-bot.git
+cd meta-game-bot
 ```
 
 2. **Установите зависимости**
@@ -108,7 +108,7 @@ python main.py
 ### Структура проекта
 
 ```
-belgrade-game-bot/
+meta-game-bot/
 ├── bot/                  # Функциональность бота
 │   ├── __init__.py
 │   ├── callbacks.py      # Обработчики событий
