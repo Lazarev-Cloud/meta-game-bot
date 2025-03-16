@@ -2,7 +2,7 @@
 
 A feature-rich Telegram bot implementation of a political strategy game set in 1998 Belgrade, Yugoslavia. Players compete for control of city districts, manage resources, interact with politicians, and deal with international influences.
 
-![Version](https://img.shields.io/badge/version-1.0.0-blue)
+![Version](https://img.shields.io/badge/version-0.0.1-yellow)
 ![Python](https://img.shields.io/badge/python-3.8%2B-green)
 ![License](https://img.shields.io/badge/license-MIT-orange)
 
@@ -35,8 +35,8 @@ The Belgrade Game is set in September 1998, where players act as political actor
 1. **Clone the repository**
 
 ```bash
-git clone https://github.com/YourUsername/belgrade-game-bot.git
-cd belgrade-game-bot
+git clone https://github.com/Lazarev-Cloud/meta-game-bot.git
+cd meta-game-bot
 ```
 
 2. **Install dependencies**
@@ -108,7 +108,7 @@ python main.py
 ### Project Structure
 
 ```
-belgrade-game-bot/
+meta-game-bot/
 ├── bot/                  # Bot functionality
 │   ├── __init__.py
 │   ├── callbacks.py      # Callback handlers
