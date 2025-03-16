@@ -68,10 +68,18 @@ ADDITIONAL_TRANSLATIONS = {
 
         # Response messages for politician actions
         "politician_info_success": "You have gathered valuable information about {name}.",
+        "politician_info_title": "Intelligence Report: {name}",
+        "politician_info_no_resources": "You need at least 1 Information resource to gather info on a politician. Action cancelled.",
+        "politician_info_no_action": "You need a quick action to gather info on a politician. Action cancelled.",
         "politician_collaborate_success": "You have successfully collaborated with {name} on a political initiative.",
         "politician_request_success": "You have received resources from {name}.",
         "politician_power_success": "You have used {name}'s political influence to pressure your opponents.",
         "politician_undermine_success": "You have successfully undermined {name}'s influence.",
+        "politician_undermine_no_resources": "You need at least 2 Information resources to undermine a politician. Action cancelled.",
+        "politician_undermine_no_action": "You need a main action to undermine a politician. Action cancelled.",
+        "politician_influence_no_resources": "You need at least 2 Influence resources to influence a politician. Action cancelled.",
+        "politician_influence_no_action": "You need a main action to influence a politician. Action cancelled.",
+        "politician_influence_success": "You have used your influence on {name}. Your relationship with them may improve. Results will be processed at the end of the cycle.",
         "politician_rumors_success": "You have spread rumors about {name}, damaging their reputation.",
         "politician_scandal_success": "You have exposed {name} in a political scandal, severely damaging their position.",
         "politician_diplomatic_success": "You have established a diplomatic channel with {name}.",
@@ -84,6 +92,17 @@ ADDITIONAL_TRANSLATIONS = {
         "insufficient_resources_detailed": "Insufficient resources. You need {required} {resource_type}, but you only have {available}.",
         "invalid_action_error": "Invalid action. Please select a valid action type.",
         "language_detection_error": "Could not detect your language. Defaulting to English.",
+        "error_message": "Sorry, something went wrong. The error has been reported.",
+        "error_district_selection": "Error showing district selection. Please try again.",
+        "error_resource_selection": "Error showing resource selection. Please try again.",
+        "error_district_info": "Error retrieving district information.",
+        "error_politician_info": "Error retrieving politician information.",
+        "action_error": "Something went wrong with your action. Please try again.",
+
+        # Role text
+        "role": "Role",
+        "district": "District",
+        "key_relationships": "Key Relationships",
     },
 
     "ru": {
@@ -142,10 +161,18 @@ ADDITIONAL_TRANSLATIONS = {
 
         # Response messages for politician actions
         "politician_info_success": "Вы собрали ценную информацию о {name}.",
+        "politician_info_title": "Разведывательный отчёт: {name}",
+        "politician_info_no_resources": "Вам нужна минимум 1 единица Информации для сбора данных о политике. Действие отменено.",
+        "politician_info_no_action": "Вам нужна быстрая заявка для сбора данных о политике. Действие отменено.",
         "politician_collaborate_success": "Вы успешно сотрудничали с {name} по политической инициативе.",
         "politician_request_success": "Вы получили ресурсы от {name}.",
         "politician_power_success": "Вы использовали политическое влияние {name} для давления на оппонентов.",
         "politician_undermine_success": "Вы успешно подорвали влияние {name}.",
+        "politician_undermine_no_resources": "Вам нужно минимум 2 единицы Информации для подрыва влияния политика. Действие отменено.",
+        "politician_undermine_no_action": "Вам нужна основная заявка для подрыва влияния политика. Действие отменено.",
+        "politician_influence_no_resources": "Вам нужно минимум 2 единицы Влияния для воздействия на политика. Действие отменено.",
+        "politician_influence_no_action": "Вам нужна основная заявка для воздействия на политика. Действие отменено.",
+        "politician_influence_success": "Вы использовали своё влияние на {name}. Ваши отношения с ним могут улучшиться. Результаты будут обработаны в конце цикла.",
         "politician_rumors_success": "Вы распространили слухи о {name}, нанеся урон их репутации.",
         "politician_scandal_success": "Вы разоблачили {name} в политическом скандале, серьезно подорвав их позицию.",
         "politician_diplomatic_success": "Вы установили дипломатический канал с {name}.",
@@ -158,6 +185,17 @@ ADDITIONAL_TRANSLATIONS = {
         "insufficient_resources_detailed": "Недостаточно ресурсов. Вам нужно {required} {resource_type}, но у вас есть только {available}.",
         "invalid_action_error": "Недействительное действие. Пожалуйста, выберите правильный тип действия.",
         "language_detection_error": "Не удалось определить ваш язык. Используется английский по умолчанию.",
+        "error_message": "Извините, что-то пошло не так. Об ошибке сообщено.",
+        "error_district_selection": "Ошибка при показе списка районов. Пожалуйста, попробуйте снова.",
+        "error_resource_selection": "Ошибка при показе выбора ресурсов. Пожалуйста, попробуйте снова.",
+        "error_district_info": "Ошибка при получении информации о районе.",
+        "error_politician_info": "Ошибка при получении информации о политике.",
+        "action_error": "Что-то пошло не так с вашим действием. Пожалуйста, попробуйте снова.",
+
+        # Role text
+        "role": "Роль",
+        "district": "Район",
+        "key_relationships": "Ключевые отношения",
     }
 }
 

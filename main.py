@@ -10,6 +10,7 @@ import logging
 import sys
 from telegram import Update
 from telegram.ext import Application
+from languages import get_text, get_player_language
 from languages_update import init_language_support
 
 from bot.callbacks import register_callbacks
@@ -58,10 +59,13 @@ def main() -> None:
     logger.info("Setting up scheduled jobs...")
     application.job_queue.run_once(schedule_jobs, 1)
 
+    # Add error handler
+    logger.info("Setting up error handler...")
+    application.add_error_handler(error_handler)
+
     # Start the Bot
     logger.info("Bot starting up - Press Ctrl+C to stop")
     application.run_polling(allowed_updates=Update.ALL_TYPES)
-
 
 
 def error_handler(update, context):
@@ -70,15 +74,21 @@ def error_handler(update, context):
 
     # Send message to developer
     if update and update.effective_chat:
-        context.bot.send_message(
-            chat_id=update.effective_chat.id,
-            text="Sorry, something went wrong. The error has been reported."
-        )
+        try:
+            # Get user's language
+            user_id = update.effective_chat.id
+            lang = "en"  # Default to English
+            if hasattr(update, 'effective_user') and update.effective_user:
+                lang = get_player_language(update.effective_user.id)
 
-
+            context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                text=get_text("error_message", lang,
+                              default="Sorry, something went wrong. The error has been reported.")
+            )
+        except Exception as e:
+            logger.error(f"Error in error handler: {e}")
 
 
 if __name__ == "__main__":
     main()
-    # Add to your application
-    # application.add_error_handler(error_handler)
