@@ -31,16 +31,18 @@ def db_transaction(func):
 
 # Player-related queries
 @db_transaction
-def get_player(conn, player_id):
+def get_player(player_id):
     """Get player information by ID."""
+    conn = sqlite3.connect('belgrade_game.db')
     cursor = conn.cursor()
     cursor.execute("SELECT * FROM players WHERE player_id = ?", (player_id,))
-    return cursor.fetchone()
+    player = cursor.fetchone()
+    conn.close()
+    return player
 
-
-@db_transaction
-def register_player(conn, player_id, username, language="en"):
+def register_player(player_id, username, language="en"):
     """Register a new player."""
+    conn = sqlite3.connect('belgrade_game.db')
     cursor = conn.cursor()
 
     # Check if player already exists
@@ -58,19 +60,22 @@ def register_player(conn, player_id, username, language="en"):
             "INSERT INTO resources (player_id, influence, resources, information, force) VALUES (?, 5, 5, 5, 5)",
             (player_id,)
         )
-        return True
-    return False
 
+        conn.commit()
 
-@db_transaction
-def set_player_name(conn, player_id, character_name):
+    conn.close()
+
+def set_player_name(player_id, character_name):
     """Set player's character name."""
+    conn = sqlite3.connect('belgrade_game.db')
     cursor = conn.cursor()
     cursor.execute(
         "UPDATE players SET character_name = ? WHERE player_id = ?",
         (character_name, player_id)
     )
-    return cursor.rowcount > 0
+    conn.commit()
+    conn.close()
+
 
 
 @db_transaction

@@ -873,8 +873,8 @@ def register_commands(application):
     conv_handler = ConversationHandler(
         entry_points=[CommandHandler("start", start_command)],
         states={
-            WAITING_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, set_name_handler)],
-            WAITING_INFO_CONTENT: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_info_content)]
+            "WAITING_NAME": [MessageHandler(filters.TEXT & ~filters.COMMAND, set_name_handler)],
+            "WAITING_INFO_CONTENT": [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_info_content)]
         },
         fallbacks=[CommandHandler("cancel", cancel_handler)]
     )

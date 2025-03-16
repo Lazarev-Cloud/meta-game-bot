@@ -100,7 +100,7 @@ async def process_game_cycle(context):
 
 
 def process_action(action_id, player_id, action_type, target_type, target_id):
-    """Process a single action and return the result."""
+    """Process a single action and return the result"""
     result = {}
 
     if target_type == "district":
@@ -178,24 +178,11 @@ def process_action(action_id, player_id, action_type, target_type, target_id):
             control_data = get_district_control(target_id)
             district_info = get_district_info(target_id)
 
-            # Create a more readable format for the result
-            district_name = district_info[1] if district_info else target_id
-            control_summary = []
-
-            for player_id, control_points, player_name in control_data:
-                if control_points > 0:
-                    control_summary.append({
-                        "player_id": player_id,
-                        "player_name": player_name,
-                        "control_points": control_points
-                    })
-
             result = {
                 "status": "success",
-                "message": f"Reconnaissance of {district_name} complete",
-                "district_id": target_id,
-                "district_name": district_name,
-                "control_data": control_summary
+                "message": f"Reconnaissance of {target_id} complete",
+                "control_data": control_data,
+                "district_info": district_info
             }
 
         elif action_type == QUICK_ACTION_SUPPORT:
@@ -204,119 +191,95 @@ def process_action(action_id, player_id, action_type, target_type, target_id):
             result = {"status": "success", "message": f"Support action in {target_id} complete", "control_change": 5}
 
     elif target_type == "politician":
-        politician = get_politician_info(politician_id=target_id)
-        if not politician:
-            return {"status": "failure", "message": "Politician not found"}
-
-        pol_id, name, role, ideology, district_id, influence, friendliness, is_intl, description = politician
-
         if action_type == ACTION_INFLUENCE:
             # Process influence on politician
-            success_roll = random.randint(1, 100)
-
-            if success_roll > 70:  # Success
-                # Increase friendliness by 10
-                from db.queries import update_politician_friendliness
-                update_politician_friendliness(politician_id=pol_id, player_id=player_id, change=10)
+            politician = get_politician_info(politician_id=target_id)
+            if politician:
+                # Update friendliness
+                # This is simplified - in a real game you'd track per-player relationships
                 result = {
                     "status": "success",
-                    "message": f"Successfully improved relationship with {name}",
-                    "politician": name,
-                    "friendliness_change": 10
-                }
-            elif success_roll > 30:  # Partial success
-                # Increase friendliness by 5
-                from db.queries import update_politician_friendliness
-                update_politician_friendliness(politician_id=pol_id, player_id=player_id, change=5)
-                result = {
-                    "status": "partial",
-                    "message": f"Somewhat improved relationship with {name}",
-                    "politician": name,
-                    "friendliness_change": 5
-                }
-            else:  # Failure
-                result = {
-                    "status": "failure",
-                    "message": f"Failed to improve relationship with {name}",
-                    "politician": name,
-                    "friendliness_change": 0
-                }
-
-        elif action_type == "undermine":
-            # Process undermining a politician
-            success_roll = random.randint(1, 100)
-
-            if success_roll > 70:  # Success
-                # Decrease influence in their district
-                if district_id:
-                    # Find players who control this district
-                    control_data = get_district_control(district_id)
-                    for ctrl_player_id, ctrl_points, _ in control_data:
-                        # If this player matches the politician's ideology, reduce control points
-                        if ctrl_points >= 5:
-                            update_district_control(ctrl_player_id, district_id, -5)
-
-                # Generate news about the politician
-                add_news(
-                    f"Scandal Involving {name}",
-                    f"Reports have emerged questioning the integrity of {name}'s ({role}) recent actions.",
-                    is_public=True
-                )
-
-                result = {
-                    "status": "success",
-                    "message": f"Successfully undermined {name}'s influence",
-                    "politician": name
-                }
-            elif success_roll > 30:  # Partial success
-                # Generate milder news
-                add_news(
-                    f"Questions Raised About {name}",
-                    f"Some sources have raised concerns about {name}'s ({role}) recent decisions.",
-                    is_public=True
-                )
-
-                result = {
-                    "status": "partial",
-                    "message": f"Partially undermined {name}'s reputation",
-                    "politician": name
-                }
-            else:  # Failure
-                result = {
-                    "status": "failure",
-                    "message": f"Failed to undermine {name}'s influence",
-                    "politician": name
+                    "message": f"Improved relationship with {politician[1]}",
+                    "politician": politician[1]
                 }
 
     return result
 
 
 def process_international_politicians():
-    """Process actions by international politicians."""
-    try:
-        # Choose 1-3 random international politicians to activate
-        conn = sqlite3.connect('belgrade_game.db')
-        cursor = conn.cursor()
+    """Process actions by international politicians"""
+    # Choose 1-3 random international politicians to activate
+    conn = sqlite3.connect('belgrade_game.db')
+    cursor = conn.cursor()
 
-        cursor.execute("SELECT politician_id, name FROM politicians WHERE is_international = 1")
-        international_politicians = cursor.fetchall()
+    cursor.execute("SELECT politician_id, name FROM politicians WHERE is_international = 1")
+    international_politicians = cursor.fetchall()
 
-        num_active = random.randint(1, 3)
-        active_politicians = random.sample(international_politicians, min(num_active, len(international_politicians)))
+    num_active = random.randint(1, 3)
+    active_politicians = random.sample(international_politicians, min(num_active, len(international_politicians)))
 
-        activated_events = []
+    activated_events = []
 
-        for politician_id, name in active_politicians:
-            # Process this politician's action
-            event = process_international_politician_action(politician_id)
-            if event:
-                activated_events.append(event)
+    for politician_id, name in active_politicians:
+        # Process this politician's action
+        event = process_international_politician_action(politician_id)
+        if event:
+            activated_events.append(event)
 
-        conn.close()
-        return activated_events
-    except Exception as e:
-        logger.error(f"Error processing international politicians: {e}")
-        return []
+    conn.close()
+    return activated_events
+
+
+async def schedule_jobs(application):
+    """Set up scheduled jobs for game cycle processing."""
+    job_queue = application.job_queue
+
+    # Schedule morning cycle results
+    morning_time = datetime.time(hour=MORNING_CYCLE_RESULTS.hour, minute=MORNING_CYCLE_RESULTS.minute)
+    job_queue.run_daily(process_game_cycle, time=morning_time)
+
+    # Schedule evening cycle results
+    evening_time = datetime.time(hour=EVENING_CYCLE_RESULTS.hour, minute=EVENING_CYCLE_RESULTS.minute)
+    job_queue.run_daily(process_game_cycle, time=evening_time)
+
+    # Schedule periodic action refreshes every 3 hours
+    job_queue.run_repeating(refresh_actions, interval=3 * 60 * 60)
+
+    logger.info("Scheduled jobs set up")
+
+
+async def refresh_actions(context):
+    """Refresh actions for all players every 3 hours."""
+    conn = sqlite3.connect('belgrade_game.db')
+    cursor = conn.cursor()
+
+    # Get all active players
+    cursor.execute("SELECT player_id FROM players")
+    players = cursor.fetchall()
+
+    for player_id_tuple in players:
+        player_id = player_id_tuple[0]
+
+        # Refresh their actions
+        cursor.execute(
+            "UPDATE players SET main_actions_left = 1, quick_actions_left = 2, last_action_refresh = ? WHERE player_id = ?",
+            (datetime.datetime.now().isoformat(), player_id)
+        )
+
+        # Notify the player
+        try:
+            lang = get_player_language(player_id)
+            await context.bot.send_message(
+                chat_id=player_id,
+                text=get_text("actions_refreshed_notification", lang)
+            )
+        except Exception as e:
+            logger.error(f"Failed to notify player {player_id} about action refresh: {e}")
+
+    conn.commit()
+    conn.close()
+
+    logger.info("Actions refreshed for all players")
 
 
 def process_international_politician_action(politician_id):
