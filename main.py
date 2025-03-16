@@ -13,11 +13,12 @@ from telegram.ext import (
 import sqlite3
 import json
 import random
-import asyncio
+# import asyncio
 from config import TOKEN, ADMIN_IDS
 
 # Import the language support module
-from languages import get_text, get_cycle_name, get_resource_name, format_ideology, get_action_name
+from languages import get_text, get_cycle_name, get_resource_name, format_ideology, get_action_name, \
+    get_player_language, set_player_language
 
 # Enable logging
 logging.basicConfig(
@@ -1056,17 +1057,6 @@ def transaction_safe_update_district_control(conn, player_id, district_id, point
         )
 
     return True
-    It
-    looks
-    like
-    you
-    have
-    a
-    Python
-    script
-    that
-    interacts
-    with a database to manage district control records.The script checks if an update or insertion is needed based on the `points_change` value and then performs the appropriate action.Here's a more detailed breakdown of the script:
 
 
 async def notify_players_of_results(context, cycle):
