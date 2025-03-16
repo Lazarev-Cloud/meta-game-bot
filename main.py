@@ -930,7 +930,19 @@ def process_international_politicians():
 
 
 def process_international_politician_action(politician_id):
-    """Process a specific international politician's action"""
+    """
+    Process an action by an international politician.
+
+    This function determines what effect an international politician has on the
+    game world based on their ideology and role. Effects can include sanctions,
+    support for certain districts, or penalties to opposing ideologies.
+
+    Args:
+        politician_id (int): The ID of the politician to process
+
+    Returns:
+        dict: Details of the action taken, or None if no action was taken
+    """
     conn = sqlite3.connect('belgrade_game.db')
     cursor = conn.cursor()
 
