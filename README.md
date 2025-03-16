@@ -2,7 +2,7 @@
 
 A feature-rich Telegram bot implementation of a political strategy game set in 1998 Belgrade, Yugoslavia. Players compete for control of city districts, manage resources, interact with politicians, and deal with international influences.
 
-![Version](https://img.shields.io/badge/version-1.0.0-blue)
+![Version](https://img.shields.io/badge/version-0.0.1-yellow)
 ![Python](https://img.shields.io/badge/python-3.8%2B-green)
 ![License](https://img.shields.io/badge/license-MIT-orange)
 
