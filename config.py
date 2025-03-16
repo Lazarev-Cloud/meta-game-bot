@@ -1,11 +1,20 @@
-# Telegram Bot API Token
-# Replace this with your actual token from @BotFather
-TOKEN = "6123467074:AAE-CrhxwlleTpCHylh2Nth4cZEQEX_CK-M"
+import os
 
-# Administrator IDs (Telegram user IDs with admin privileges)
-# Replace these with your actual Telegram user ID and any co-administrators
-ADMIN_IDS = [
-    102886880,
-    172969329 # Replace with your Telegram user ID
-    # Add more admin IDs as needed
-]
+# Load the Telegram Bot API Token from environment variables
+TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+
+if TOKEN is None:
+    raise ValueError("The TELEGRAM_BOT_TOKEN environment variable is not set.")
+
+# Load Administrator IDs from environment variables
+# Admin IDs should be a comma-separated list of IDs
+ADMIN_IDS = os.getenv("TELEGRAM_ADMIN_IDS")
+
+if ADMIN_IDS is None:
+    raise ValueError("The TELEGRAM_ADMIN_IDS environment variable is not set.")
+else:
+    ADMIN_IDS = [int(admin_id) for admin_id in ADMIN_IDS.split(",")]
+
+# Example usage:
+print("Token:", TOKEN)
+print("Admin IDs:", ADMIN_IDS)
