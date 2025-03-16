@@ -10,6 +10,7 @@ import logging
 import sys
 from telegram import Update
 from telegram.ext import Application
+from languages_update import init_language_support
 
 from bot.callbacks import register_callbacks
 from bot.commands import register_commands
@@ -34,6 +35,8 @@ def main() -> None:
     """Start the bot."""
     # Display startup message
     logger.info("Starting Belgrade Game Bot...")
+
+    init_language_support()
 
     # Set up the database
     logger.info("Setting up database...")
