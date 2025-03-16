@@ -97,7 +97,38 @@ def set_player_language(conn, player_id, language):
     return cursor.rowcount > 0
 
 
-# Resource-related queries
+@db_transaction
+def update_player_resources(conn, player_id, resource_type, amount):
+    """Update player's resources."""
+    cursor = conn.cursor()
+
+    # Get current resource amount
+    cursor.execute(f"SELECT {resource_type} FROM resources WHERE player_id = ?", (player_id,))
+    result = cursor.fetchone()
+
+    if result is None:
+        # Player doesn't exist in resources table
+        logger.error(f"Player {player_id} not found in resources table")
+        return 0
+
+    current = result[0]
+
+    # Update resource
+    new_amount = current + amount
+    if new_amount < 0:
+        new_amount = 0
+
+    cursor.execute(
+        f"UPDATE resources SET {resource_type} = ? WHERE player_id = ?",
+        (new_amount, player_id)
+    )
+
+    # Make sure the change is committed
+    conn.commit()
+
+    return new_amount
+
+
 @db_transaction
 def get_player_resources(conn, player_id):
     """Get player's current resources."""
@@ -113,27 +144,6 @@ def get_player_resources(conn, player_id):
             "force": resources[4]
         }
     return None
-
-
-@db_transaction
-def update_player_resources(conn, player_id, resource_type, amount):
-    """Update player's resources."""
-    cursor = conn.cursor()
-
-    # Get current resource amount
-    cursor.execute(f"SELECT {resource_type} FROM resources WHERE player_id = ?", (player_id,))
-    current = cursor.fetchone()[0]
-
-    # Update resource
-    new_amount = current + amount
-    if new_amount < 0:
-        new_amount = 0
-
-    cursor.execute(
-        f"UPDATE resources SET {resource_type} = ? WHERE player_id = ?",
-        (new_amount, player_id)
-    )
-    return new_amount
 
 
 # District-related queries

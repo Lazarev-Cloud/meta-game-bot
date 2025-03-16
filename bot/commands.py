@@ -76,22 +76,389 @@ async def cancel_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return ConversationHandler.END
 
 
+async def admin_add_resources(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Admin command to add resources to a player."""
+    user = update.effective_user
+    lang = get_player_language(user.id)
+
+    if user.id not in ADMIN_IDS:
+        await update.message.reply_text(get_text("admin_only", lang))
+        return
+
+    args = context.args
+
+    if len(args) != 3:
+        await update.message.reply_text(get_text("admin_resources_usage", lang))
+        return
+
+    try:
+        player_id = int(args[0])
+        resource_type = args[1].lower()
+        amount = int(args[2])
+    except ValueError:
+        await update.message.reply_text(get_text("admin_invalid_args", lang))
+        return
+
+    if resource_type not in ["influence", "resources", "information", "force"]:
+        await update.message.reply_text(get_text("admin_invalid_resource", lang))
+        return
+
+    player = get_player(player_id)
+    if not player:
+        await update.message.reply_text(get_text("admin_player_not_found", lang, player_id=player_id))
+        return
+
+    # Directly update resources in the database to ensure consistency
+    try:
+        conn = sqlite3.connect('belgrade_game.db')
+        cursor = conn.cursor()
+
+        # Get current amount
+        cursor.execute(f"SELECT {resource_type} FROM resources WHERE player_id = ?", (player_id,))
+        result = cursor.fetchone()
+
+        if result:
+            current_amount = result[0]
+            new_amount = current_amount + amount
+            if new_amount < 0:
+                new_amount = 0
+
+            # Update resource
+            cursor.execute(
+                f"UPDATE resources SET {resource_type} = ? WHERE player_id = ?",
+                (new_amount, player_id)
+            )
+            conn.commit()
+
+            await update.message.reply_text(
+                get_text("admin_resources_added", lang,
+                         amount=amount,
+                         resource_type=get_resource_name(resource_type, lang),
+                         player_id=player_id,
+                         new_amount=new_amount)
+            )
+        else:
+            await update.message.reply_text(get_text("admin_player_resources_not_found", lang, player_id=player_id))
+    except Exception as e:
+        logger.error(f"Error in admin_add_resources: {e}")
+        await update.message.reply_text(get_text("admin_error", lang, error=str(e)))
+    finally:
+        conn.close()
+
+
+async def admin_set_control(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Admin command to set district control points."""
+    user = update.effective_user
+    lang = get_player_language(user.id)
+
+    if user.id not in ADMIN_IDS:
+        await update.message.reply_text(get_text("admin_only", lang))
+        return
+
+    args = context.args
+
+    if len(args) != 3:
+        await update.message.reply_text(get_text("admin_control_usage", lang))
+        return
+
+    try:
+        player_id = int(args[0])
+        district_id = args[1]
+        control_points = int(args[2])
+    except ValueError:
+        await update.message.reply_text(get_text("admin_invalid_args", lang))
+        return
+
+    player = get_player(player_id)
+    if not player:
+        await update.message.reply_text(get_text("admin_player_not_found", lang, player_id=player_id))
+        return
+
+    # Verify district exists
+    district = None
+    try:
+        conn = sqlite3.connect('belgrade_game.db')
+        cursor = conn.cursor()
+        cursor.execute("SELECT district_id, name FROM districts WHERE district_id = ?", (district_id,))
+        district = cursor.fetchone()
+        conn.close()
+    except Exception as e:
+        logger.error(f"Error checking district: {e}")
+
+    if not district:
+        await update.message.reply_text(get_text("admin_district_not_found", lang, district_id=district_id))
+        return
+
+    # Update control directly in the database
+    try:
+        conn = sqlite3.connect('belgrade_game.db')
+        cursor = conn.cursor()
+
+        cursor.execute(
+            "SELECT control_points FROM district_control WHERE player_id = ? AND district_id = ?",
+            (player_id, district_id)
+        )
+        existing = cursor.fetchone()
+
+        if existing:
+            cursor.execute(
+                "UPDATE district_control SET control_points = ?, last_action = ? WHERE player_id = ? AND district_id = ?",
+                (control_points, datetime.datetime.now().isoformat(), player_id, district_id)
+            )
+        else:
+            cursor.execute(
+                "INSERT INTO district_control (district_id, player_id, control_points, last_action) VALUES (?, ?, ?, ?)",
+                (district_id, player_id, control_points, datetime.datetime.now().isoformat())
+            )
+
+        conn.commit()
+        conn.close()
+
+        district_name = district[1] if district else district_id
+        await update.message.reply_text(
+            get_text("admin_control_updated", lang,
+                     player_id=player_id,
+                     district_id=district_name,
+                     control_points=control_points)
+        )
+    except Exception as e:
+        logger.error(f"Error in admin_set_control: {e}")
+        await update.message.reply_text(get_text("admin_error", lang, error=str(e)))
+
+
+async def admin_help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Admin-only command to show admin-specific help."""
+    user = update.effective_user
+    lang = get_player_language(user.id)
+
+    if user.id not in ADMIN_IDS:
+        await update.message.reply_text(get_text("admin_only", lang))
+        return
+
+    admin_help_text = (
+        f"*Admin Commands*\n\n"
+        f"*/admin_help* - Show this admin help message\n"
+        f"*/admin_add_news [title] [content]* - Add a news item\n"
+        f"*/admin_process_cycle* - Manually process a game cycle\n"
+        f"*/admin_add_resources [player_id] [resource_type] [amount]* - Add resources to a player\n"
+        f"*/admin_set_control [player_id] [district_id] [control_points]* - Set district control\n"
+        f"*/admin_set_ideology [player_id] [ideology_score]* - Set player ideology score (-5 to +5)\n"
+        f"*/admin_list_players* - List all registered players\n"
+        f"*/admin_reset_actions [player_id]* - Reset a player's available actions\n"
+        f"*/admin_reset_all_actions* - Reset all players' available actions\n"
+    )
+
+    await update.message.reply_text(admin_help_text, parse_mode='Markdown')
+
+
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Display help message with available commands."""
     user = update.effective_user
     lang = get_player_language(user.id)
 
+    # Check if the user is an admin
+    is_admin = user.id in ADMIN_IDS
+
+    # Basic commands for all users
     help_text = (
         f"<b>{get_text('help_title', lang)}</b>\n\n"
         f"{get_text('help_basic', lang)}\n\n"
         f"{get_text('help_action', lang)}\n\n"
         f"{get_text('help_resource', lang)}\n\n"
         f"{get_text('help_political', lang)}\n\n"
-        f"{get_text('help_footer', lang)}"
     )
+
+    # Add admin hint for admins
+    if is_admin:
+        help_text += (
+            f"<b>Admin Commands:</b>\n"
+            f"Use /admin_help to see all admin commands.\n\n"
+        )
+
+    help_text += get_text('help_footer', lang)
 
     await update.message.reply_text(help_text, parse_mode='HTML')
 
+
+async def admin_list_players(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Admin command to list all registered players."""
+    user = update.effective_user
+    lang = get_player_language(user.id)
+
+    if user.id not in ADMIN_IDS:
+        await update.message.reply_text(get_text("admin_only", lang))
+        return
+
+    try:
+        conn = sqlite3.connect('belgrade_game.db')
+        cursor = conn.cursor()
+
+        cursor.execute("""
+            SELECT p.player_id, p.character_name, p.username, p.ideology_score, 
+                   r.influence, r.resources, r.information, r.force
+            FROM players p
+            LEFT JOIN resources r ON p.player_id = r.player_id
+            ORDER BY p.player_id
+        """)
+
+        players = cursor.fetchall()
+        conn.close()
+
+        if not players:
+            await update.message.reply_text("No players registered.")
+            return
+
+        response = "<b>Registered Players:</b>\n\n"
+
+        for player in players:
+            player_id, character_name, username, ideology, influence, resources, information, force = player
+
+            character_name = character_name or "Unnamed"
+            username = username or "No username"
+
+            response += (
+                f"<b>ID:</b> {player_id}\n"
+                f"<b>Name:</b> {character_name}\n"
+                f"<b>Username:</b> @{username}\n"
+                f"<b>Ideology:</b> {ideology}\n"
+                f"<b>Resources:</b> {influence}/{resources}/{information}/{force}\n\n"
+            )
+
+        await update.message.reply_text(response, parse_mode='HTML')
+
+    except Exception as e:
+        logger.error(f"Error in admin_list_players: {e}")
+        await update.message.reply_text(f"Error listing players: {e}")
+
+
+async def admin_reset_actions(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Admin command to reset a player's available actions."""
+    user = update.effective_user
+    lang = get_player_language(user.id)
+
+    if user.id not in ADMIN_IDS:
+        await update.message.reply_text(get_text("admin_only", lang))
+        return
+
+    args = context.args
+
+    if not args:
+        await update.message.reply_text("Usage: /admin_reset_actions [player_id]")
+        return
+
+    try:
+        player_id = int(args[0])
+
+        conn = sqlite3.connect('belgrade_game.db')
+        cursor = conn.cursor()
+
+        # Check if player exists
+        cursor.execute("SELECT player_id FROM players WHERE player_id = ?", (player_id,))
+        if not cursor.fetchone():
+            conn.close()
+            await update.message.reply_text(f"Player {player_id} not found.")
+            return
+
+        # Reset actions
+        now = datetime.datetime.now().isoformat()
+        cursor.execute(
+            "UPDATE players SET main_actions_left = 1, quick_actions_left = 2, last_action_refresh = ? WHERE player_id = ?",
+            (now, player_id)
+        )
+
+        conn.commit()
+        conn.close()
+
+        await update.message.reply_text(f"Actions reset for player {player_id}.")
+
+    except ValueError:
+        await update.message.reply_text("Invalid player ID. Please provide a numeric ID.")
+    except Exception as e:
+        logger.error(f"Error in admin_reset_actions: {e}")
+        await update.message.reply_text(f"Error resetting actions: {e}")
+
+
+async def admin_reset_all_actions(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Admin command to reset all players' available actions."""
+    user = update.effective_user
+    lang = get_player_language(user.id)
+
+    if user.id not in ADMIN_IDS:
+        await update.message.reply_text(get_text("admin_only", lang))
+        return
+
+    try:
+        conn = sqlite3.connect('belgrade_game.db')
+        cursor = conn.cursor()
+
+        # Reset actions for all players
+        now = datetime.datetime.now().isoformat()
+        cursor.execute(
+            "UPDATE players SET main_actions_left = 1, quick_actions_left = 2, last_action_refresh = ?",
+            (now,)
+        )
+
+        affected_rows = cursor.rowcount
+        conn.commit()
+        conn.close()
+
+        await update.message.reply_text(f"Actions reset for {affected_rows} players.")
+
+    except Exception as e:
+        logger.error(f"Error in admin_reset_all_actions: {e}")
+        await update.message.reply_text(f"Error resetting actions: {e}")
+
+
+async def admin_set_ideology(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Admin command to set a player's ideology score."""
+    user = update.effective_user
+    lang = get_player_language(user.id)
+
+    if user.id not in ADMIN_IDS:
+        await update.message.reply_text(get_text("admin_only", lang))
+        return
+
+    args = context.args
+
+    if len(args) != 2:
+        await update.message.reply_text("Usage: /admin_set_ideology [player_id] [ideology_score]")
+        return
+
+    try:
+        player_id = int(args[0])
+        ideology_score = int(args[1])
+
+        # Validate ideology score
+        if ideology_score < -5 or ideology_score > 5:
+            await update.message.reply_text("Ideology score must be between -5 and +5.")
+            return
+
+        conn = sqlite3.connect('belgrade_game.db')
+        cursor = conn.cursor()
+
+        # Check if player exists
+        cursor.execute("SELECT player_id FROM players WHERE player_id = ?", (player_id,))
+        if not cursor.fetchone():
+            conn.close()
+            await update.message.reply_text(f"Player {player_id} not found.")
+            return
+
+        # Update ideology score
+        cursor.execute(
+            "UPDATE players SET ideology_score = ? WHERE player_id = ?",
+            (ideology_score, player_id)
+        )
+
+        conn.commit()
+        conn.close()
+
+        await update.message.reply_text(f"Ideology score for player {player_id} set to {ideology_score}.")
+
+    except ValueError:
+        await update.message.reply_text("Invalid arguments. Please provide numeric values.")
+    except Exception as e:
+        logger.error(f"Error in admin_set_ideology: {e}")
+        await update.message.reply_text(f"Error setting ideology: {e}")
 
 async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Display player's current status."""
@@ -758,113 +1125,6 @@ async def admin_process_cycle(update: Update, context: ContextTypes.DEFAULT_TYPE
     await update.message.reply_text(get_text("admin_cycle_processed", lang))
 
 
-async def admin_add_resources(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Admin command to add resources to a player."""
-    user = update.effective_user
-    lang = get_player_language(user.id)
-
-    if user.id not in ADMIN_IDS:
-        await update.message.reply_text(get_text("admin_only", lang))
-        return
-
-    args = context.args
-
-    if len(args) != 3:
-        await update.message.reply_text(get_text("admin_resources_usage", lang))
-        return
-
-    try:
-        player_id = int(args[0])
-        resource_type = args[1].lower()
-        amount = int(args[2])
-    except ValueError:
-        await update.message.reply_text(get_text("admin_invalid_args", lang))
-        return
-
-    if resource_type not in ["influence", "resources", "information", "force"]:
-        await update.message.reply_text(get_text("admin_invalid_resource", lang))
-        return
-
-    player = get_player(player_id)
-    if not player:
-        await update.message.reply_text(get_text("admin_player_not_found", lang, player_id=player_id))
-        return
-
-    new_amount = update_player_resources(player_id, resource_type, amount)
-
-    await update.message.reply_text(
-        get_text("admin_resources_added", lang,
-                 amount=amount,
-                 resource_type=get_resource_name(resource_type, lang),
-                 player_id=player_id,
-                 new_amount=new_amount)
-    )
-
-
-async def admin_set_control(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Admin command to set district control points."""
-    user = update.effective_user
-    lang = get_player_language(user.id)
-
-    if user.id not in ADMIN_IDS:
-        await update.message.reply_text(get_text("admin_only", lang))
-        return
-
-    args = context.args
-
-    if len(args) != 3:
-        await update.message.reply_text(get_text("admin_control_usage", lang))
-        return
-
-    try:
-        player_id = int(args[0])
-        district_id = args[1]
-        control_points = int(args[2])
-    except ValueError:
-        await update.message.reply_text(get_text("admin_invalid_args", lang))
-        return
-
-    player = get_player(player_id)
-    if not player:
-        await update.message.reply_text(get_text("admin_player_not_found", lang, player_id=player_id))
-        return
-
-    district = get_district_info(district_id)
-    if not district:
-        await update.message.reply_text(get_text("admin_district_not_found", lang, district_id=district_id))
-        return
-
-    # Update control directly in the database
-    import sqlite3
-    conn = sqlite3.connect('belgrade_game.db')
-    cursor = conn.cursor()
-
-    cursor.execute(
-        "SELECT control_points FROM district_control WHERE player_id = ? AND district_id = ?",
-        (player_id, district_id)
-    )
-    existing = cursor.fetchone()
-
-    if existing:
-        cursor.execute(
-            "UPDATE district_control SET control_points = ? WHERE player_id = ? AND district_id = ?",
-            (control_points, player_id, district_id)
-        )
-    else:
-        cursor.execute(
-            "INSERT INTO district_control (district_id, player_id, control_points, last_action) VALUES (?, ?, ?, ?)",
-            (district_id, player_id, control_points, datetime.datetime.now().isoformat())
-        )
-
-    conn.commit()
-    conn.close()
-
-    await update.message.reply_text(
-        get_text("admin_control_updated", lang,
-                 player_id=player_id,
-                 district_id=district_id,
-                 control_points=control_points)
-    )
 
 
 def register_commands(application):
@@ -908,9 +1168,14 @@ def register_commands(application):
     application.add_handler(CommandHandler("language", language_command))
 
     # Admin command handlers
+    application.add_handler(CommandHandler("admin_help", admin_help_command))
     application.add_handler(CommandHandler("admin_add_news", admin_add_news))
     application.add_handler(CommandHandler("admin_process_cycle", admin_process_cycle))
     application.add_handler(CommandHandler("admin_add_resources", admin_add_resources))
     application.add_handler(CommandHandler("admin_set_control", admin_set_control))
+    application.add_handler(CommandHandler("admin_list_players", admin_list_players))
+    application.add_handler(CommandHandler("admin_reset_actions", admin_reset_actions))
+    application.add_handler(CommandHandler("admin_reset_all_actions", admin_reset_all_actions))
+    application.add_handler(CommandHandler("admin_set_ideology", admin_set_ideology))
 
     logger.info("Command handlers registered")

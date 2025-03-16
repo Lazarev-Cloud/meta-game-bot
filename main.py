@@ -37,7 +37,12 @@ def main() -> None:
     # Display startup message
     logger.info("Starting Belgrade Game Bot...")
 
+    # Initialize language support
     init_language_support()
+
+    # Initialize admin language support
+    from languages_update import init_admin_language_support
+    init_admin_language_support()
 
     # Set up the database
     logger.info("Setting up database...")
@@ -66,7 +71,6 @@ def main() -> None:
     # Start the Bot
     logger.info("Bot starting up - Press Ctrl+C to stop")
     application.run_polling(allowed_updates=Update.ALL_TYPES)
-
 
 def error_handler(update, context):
     """Log the error and send a telegram message to notify the developer."""

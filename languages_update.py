@@ -199,6 +199,58 @@ ADDITIONAL_TRANSLATIONS = {
     }
 }
 
+# Additional translations for admin commands
+ADMIN_TRANSLATIONS = {
+    "en": {
+        "admin_error": "Admin error: {error}",
+        "admin_player_resources_not_found": "Player {player_id} exists but has no resources record.",
+        "admin_help_title": "Admin Commands",
+        "admin_reset_actions_usage": "Usage: /admin_reset_actions [player_id]",
+        "admin_reset_actions_success": "Actions reset for player {player_id}.",
+        "admin_reset_all_actions_success": "Actions reset for {count} players.",
+        "admin_set_ideology_usage": "Usage: /admin_set_ideology [player_id] [ideology_score]",
+        "admin_set_ideology_success": "Ideology score for player {player_id} set to {score}.",
+        "admin_set_ideology_invalid": "Ideology score must be between -5 and +5.",
+        "admin_player_not_found": "Player {player_id} not found.",
+        "admin_list_players_none": "No players registered.",
+        "admin_list_players_title": "Registered Players"
+    },
+    "ru": {
+        "admin_error": "Ошибка администратора: {error}",
+        "admin_player_resources_not_found": "Игрок {player_id} существует, но не имеет записи ресурсов.",
+        "admin_help_title": "Команды администратора",
+        "admin_reset_actions_usage": "Использование: /admin_reset_actions [ID игрока]",
+        "admin_reset_actions_success": "Действия сброшены для игрока {player_id}.",
+        "admin_reset_all_actions_success": "Действия сброшены для {count} игроков.",
+        "admin_set_ideology_usage": "Использование: /admin_set_ideology [ID игрока] [оценка идеологии]",
+        "admin_set_ideology_success": "Оценка идеологии для игрока {player_id} установлена на {score}.",
+        "admin_set_ideology_invalid": "Оценка идеологии должна быть от -5 до +5.",
+        "admin_player_not_found": "Игрок {player_id} не найден.",
+        "admin_list_players_none": "Нет зарегистрированных игроков.",
+        "admin_list_players_title": "Зарегистрированные игроки"
+    }
+}
+
+
+# To add these translations to the main translations dictionary
+def update_admin_translations():
+    """Update the main translations dictionary with admin translations"""
+    from languages import TRANSLATIONS
+
+    for lang in ADMIN_TRANSLATIONS:
+        if lang in TRANSLATIONS:
+            # Update existing language with admin translations
+            for key, value in ADMIN_TRANSLATIONS[lang].items():
+                TRANSLATIONS[lang][key] = value
+
+    logger.info("Admin translations added")
+
+
+# Call this function when initializing language support
+def init_admin_language_support():
+    """Initialize admin language support"""
+    update_admin_translations()
+    logger.info("Admin language support initialized")
 
 def update_translations():
     """
