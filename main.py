@@ -171,6 +171,19 @@ def setup_database():
             districts
         )
 
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS politician_relationships (
+        politician_id INTEGER,
+        player_id INTEGER,
+        friendliness INTEGER DEFAULT 50,
+        last_interaction TEXT,
+        interaction_count INTEGER DEFAULT 0,
+        PRIMARY KEY (politician_id, player_id),
+        FOREIGN KEY (politician_id) REFERENCES politicians (politician_id),
+        FOREIGN KEY (player_id) REFERENCES players (player_id)
+    )
+    ''')
+
     # Initialize politicians data
     politicians = [
         (1, 'Slobodan Milošević', 'President of Yugoslavia', 5, 'stari_grad', 6, 50, 0,
@@ -424,8 +437,91 @@ def get_all_politicians(is_international=False):
 
 
 def update_politician_friendliness(politician_id, player_id, change):
-    # Todo: implement relationship tracking between players and politicians
-    pass
+    """
+    Update the friendliness level between a player and a politician.
+
+    Args:
+        politician_id (int): ID of the politician
+        player_id (int): ID of the player
+        change (int): Amount to change friendliness (positive or negative)
+
+    Returns:
+        dict: Updated relationship details
+    """
+    conn = sqlite3.connect('belgrade_game.db')
+    cursor = conn.cursor()
+
+    try:
+        # Check if the relationship exists, if not, create it
+        cursor.execute(
+            """
+            INSERT OR IGNORE INTO politician_relationships 
+            (politician_id, player_id, friendliness, last_interaction, interaction_count) 
+            VALUES (?, ?, 50, ?, 0)
+            """,
+            (politician_id, player_id, datetime.datetime.now().isoformat())
+        )
+
+        # Update the relationship
+        cursor.execute(
+            """
+            UPDATE politician_relationships
+            SET 
+                friendliness = MAX(0, MIN(100, friendliness + ?)),
+                last_interaction = ?,
+                interaction_count = interaction_count + 1
+            WHERE politician_id = ? AND player_id = ?
+            """,
+            (change, datetime.datetime.now().isoformat(), politician_id, player_id)
+        )
+
+        # Get the updated relationship
+        cursor.execute(
+            """
+            SELECT friendliness, interaction_count, last_interaction
+            FROM politician_relationships
+            WHERE politician_id = ? AND player_id = ?
+            """,
+            (politician_id, player_id)
+        )
+        relationship = cursor.fetchone()
+
+        # Update the global politician friendliness
+        cursor.execute(
+            """
+            UPDATE politicians
+            SET friendliness = (
+                SELECT AVG(friendliness) 
+                FROM politician_relationships 
+                WHERE politician_id = ?
+            )
+            WHERE politician_id = ?
+            """,
+            (politician_id, politician_id)
+        )
+
+        conn.commit()
+
+        # Return detailed relationship information
+        if relationship:
+            friendliness, interaction_count, last_interaction = relationship
+            return {
+                "politician_id": politician_id,
+                "player_id": player_id,
+                "friendliness": friendliness,
+                "interaction_count": interaction_count,
+                "last_interaction": last_interaction,
+                "change": change
+            }
+
+        return None
+
+    except sqlite3.Error as e:
+        conn.rollback()
+        logger.error(f"Error updating politician friendliness: {e}")
+        return None
+    finally:
+        conn.close()
 
 
 def add_action(player_id, action_type, target_type, target_id, resources_used):
@@ -436,7 +532,7 @@ def add_action(player_id, action_type, target_type, target_id, resources_used):
 
     # Determine current cycle
     current_time = now.time()
-    if current_time >= MORNING_CYCLE_START and current_time < EVENING_CYCLE_START:
+    if MORNING_CYCLE_START <= current_time < EVENING_CYCLE_START:
         cycle = "morning"
     else:
         cycle = "evening"
@@ -1338,7 +1434,7 @@ async def time_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     current_time = now.time()
 
     # Determine current cycle
-    if current_time >= MORNING_CYCLE_START and current_time < EVENING_CYCLE_START:
+    if MORNING_CYCLE_START <= current_time < EVENING_CYCLE_START:
         current_cycle = get_cycle_name("morning", lang)
         next_deadline = datetime.datetime.combine(now.date(), MORNING_CYCLE_DEADLINE)
         next_results = datetime.datetime.combine(now.date(), MORNING_CYCLE_RESULTS)
