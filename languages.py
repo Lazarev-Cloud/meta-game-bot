@@ -1,5 +1,6 @@
 # Language support for Belgrade Game Bot
 # This file contains translations for all bot messages
+import sqlite3
 
 # Dictionary of translations
 TRANSLATIONS = {
@@ -10,7 +11,7 @@ TRANSLATIONS = {
         "invalid_name": "Please enter a valid name.",
         "operation_cancelled": "Operation cancelled.",
         "not_registered": "You are not registered. Use /start to begin the game.",
-        
+
         # Help and documentation
         "help_title": "Belgrade Game Command Guide",
         "help_basic": "*Basic Commands:*\n• /start - Begin the game and register your character\n• /help - Display this command list\n• /status - Check your resources and district control\n• /map - View the current control map\n• /time - Show current game cycle and time until next\n• /news - Display recent news\n• /language - Change interface language",
@@ -18,7 +19,7 @@ TRANSLATIONS = {
         "help_resource": "*Resource Commands:*\n• /resources - View your current resources\n• /convert_resource [type] [amount] - Convert resources\n• /check_income - Check your expected resource income",
         "help_political": "*Political Commands:*\n• /politicians - List available politicians\n• /politician_status [name] - Get information about a specific politician\n• /international - Information about international politicians",
         "help_footer": "For detailed game rules, refer to the game document.",
-        
+
         # Status information
         "status_title": "Status of {character_name}",
         "status_ideology": "Ideology: {ideology} ({score})",
@@ -26,7 +27,7 @@ TRANSLATIONS = {
         "status_actions": "*Actions Remaining:*\nMain Actions: {main}\nQuick Actions: {quick}",
         "status_districts": "*Controlled Districts:*",
         "status_no_districts": "*Controlled Districts:* None",
-        
+
         # Map and districts
         "map_title": "Current Control Map of Belgrade",
         "map_legend": "Legend:\n🔒 Strong control (80+ points)\n✅ Controlled (60-79 points)\n⚠️ Contested (20-59 points)\n❌ Weak presence (<20 points)",
@@ -34,7 +35,7 @@ TRANSLATIONS = {
         "map_too_large": "The map is being generated. Check the web UI for details.",
         "district_not_found": "District '{district_name}' not found. Use /view_district without arguments to see a list of districts.",
         "select_district": "Select a district to view:",
-        
+
         # Time information
         "time_info": "*Game Time Information*",
         "time_current": "Current Cycle: *{cycle}*",
@@ -43,11 +44,11 @@ TRANSLATIONS = {
         "time_refresh": "Remember: Actions refresh every 3 hours!",
         "deadline_passed": "Deadline passed",
         "minutes": "minutes",
-        
+
         # News
         "news_title": "Recent News",
         "no_news": "There is no news to report at this time.",
-        
+
         # Actions
         "no_main_actions": "You have no main actions left. Actions refresh every 3 hours or at the start of a new cycle.",
         "no_quick_actions": "You have no quick actions left. Actions refresh every 3 hours or at the start of a new cycle.",
@@ -57,7 +58,7 @@ TRANSLATIONS = {
         "no_pending_actions": "You have no pending actions to cancel.",
         "actions_refreshed": "Your actions have been refreshed!\n\nMain Actions: {main}\nQuick Actions: {quick}",
         "current_actions": "Current Actions Remaining:\n\nMain Actions: {main}\nQuick Actions: {quick}",
-        
+
         # Resource management
         "resources_title": "Your Current Resources",
         "resources_guide": "*Resource Usage Guide:*\n• *Influence* - Used for political maneuvers, gaining additional actions\n• *Resources* - Economy, finances, connections. Can be converted to other resources\n• *Information* - Intelligence, rumors. Used for reconnaissance\n• *Force* - Military, police, criminal structures. Effective for attacks and defense",
@@ -72,7 +73,7 @@ TRANSLATIONS = {
         "income_total": "*Total Per Cycle:*\n🔵 Influence: +{influence}\n💰 Resources: +{resources}\n🔍 Information: +{information}\n👊 Force: +{force}",
         "income_note": "*Note:* Resources are distributed at the end of each cycle.",
         "income_no_full_control": "You have districts with some presence, but none are fully controlled yet.\n\nYou need 60+ control points in a district to receive resources from it.",
-        
+
         # Politicians
         "politicians_title": "Key Politicians in Belgrade",
         "no_politicians": "No politicians found in the database.",
@@ -81,19 +82,19 @@ TRANSLATIONS = {
         "international_title": "International Politicians",
         "no_international": "No international politicians found in the database.",
         "international_note": "*Note:* International politicians can activate randomly each cycle. Their actions can significantly impact the political landscape in Belgrade. Use /news to stay informed about their latest activities.",
-        
+
         # Ideology descriptions
         "ideology_strongly_conservative": "Strongly Conservative",
         "ideology_conservative": "Conservative",
         "ideology_neutral": "Neutral",
         "ideology_reformist": "Reformist",
         "ideology_strongly_reformist": "Strongly Reformist",
-        
+
         # Relationship descriptions
         "compatibility_good": "Good ideological compatibility",
         "compatibility_moderate": "Moderate ideological differences",
         "compatibility_poor": "Significant ideological differences",
-        
+
         # Actions on politicians
         "politician_influence_no_resources": "You need at least 2 Influence resources to influence a politician. Action cancelled.",
         "politician_influence_no_action": "You need a main action to influence a politician. Action cancelled.",
@@ -104,7 +105,7 @@ TRANSLATIONS = {
         "politician_undermine_no_resources": "You need at least 2 Information resources to undermine a politician. Action cancelled.",
         "politician_undermine_no_action": "You need a main action to undermine a politician. Action cancelled.",
         "politician_undermine_success": "You have started undermining {name}'s influence. This may weaken their position in their district. Results will be processed at the end of the cycle.",
-        
+
         # Cycle results
         "cycle_results_title": "📊 *{cycle} Cycle Results*",
         "your_actions": "*Your Actions:*",
@@ -112,21 +113,21 @@ TRANSLATIONS = {
         "your_districts": "*Your Districts:*",
         "recent_news": "*Recent News:*",
         "current_resources": "*Current Resources:*",
-        
+
         # Control status
         "control_strong": "🔒 Strong control",
         "control_full": "✅ Controlled",
         "control_contested": "⚠️ Contested",
         "control_weak": "❌ Weak presence",
         "control_points": "points",
-        
+
         # Language settings
         "language_current": "Your current language is: {language}",
         "language_select": "Please select your preferred language:",
         "language_changed": "Language changed to English",
         "language_button_en": "English",
         "language_button_ru": "Русский",
-        
+
         # Action types
         "action_influence": "Influence",
         "action_attack": "Attack",
@@ -135,7 +136,7 @@ TRANSLATIONS = {
         "action_info": "Spread Information",
         "action_support": "Support",
         "action_cancel": "Cancel",
-        
+
         # Resources used in actions
         "select_resources": "Select resources to use for {action_type} action in {district_name}:",
         "insufficient_resources": "You don't have enough {resource_type} resources. Action cancelled.",
@@ -145,13 +146,13 @@ TRANSLATIONS = {
         "invalid_info_content": "Please provide valid information content.",
         "action_error": "Something went wrong. Please try again with /quick_action.",
         "info_from_user": "Information from {user}",
-        
+
         # Status indicators for results
         "status_success": "✅",
         "status_partial": "⚠️",
         "status_failure": "❌",
         "status_info": "ℹ️",
-        
+
         # Admin commands
         "admin_only": "This command is for administrators only.",
         "admin_news_usage": "Usage: /admin_add_news [title] [content]",
@@ -165,11 +166,11 @@ TRANSLATIONS = {
         "admin_control_usage": "Usage: /admin_set_control [player_id] [district_id] [control_points]",
         "admin_district_not_found": "District {district_id} not found.",
         "admin_control_updated": "Updated control for player {player_id} in district {district_id} to {control_points} points.",
-        
+
         # Notifications
         "actions_refreshed_notification": "Your actions have been refreshed! You now have 1 main action and 2 quick actions available."
     },
-    
+
     "ru": {
         # Basic commands and responses
         "welcome": "Добро пожаловать в Белградскую Игру, {user_name}! Эта игра моделирует политическую борьбу в Югославии 1998 года через контроль над районами Белграда.\n\nПожалуйста, введите имя вашего персонажа:",
@@ -177,7 +178,7 @@ TRANSLATIONS = {
         "invalid_name": "Пожалуйста, введите корректное имя.",
         "operation_cancelled": "Операция отменена.",
         "not_registered": "Вы не зарегистрированы. Используйте /start, чтобы начать игру.",
-        
+
         # Help and documentation
         "help_title": "Руководство по командам Белградской Игры",
         "help_basic": "*Основные команды:*\n• /start - Начать игру и зарегистрировать персонажа\n• /help - Показать список команд\n• /status - Проверить ресурсы и контроль районов\n• /map - Просмотреть текущую карту контроля\n• /time - Показать текущий игровой цикл и время до следующего\n• /news - Показать последние новости\n• /language - Изменить язык интерфейса",
@@ -185,7 +186,7 @@ TRANSLATIONS = {
         "help_resource": "*Команды ресурсов:*\n• /resources - Просмотр имеющихся ресурсов\n• /convert_resource [тип] [количество] - Конвертация ресурсов\n• /check_income - Проверка ожидаемого прихода ресурсов",
         "help_political": "*Политические команды:*\n• /politicians - Список доступных политиков\n• /politician_status [имя] - Информация о конкретном политике\n• /international - Информация о международных политиках",
         "help_footer": "Для подробных правил игры обратитесь к игровому документу.",
-        
+
         # Status information
         "status_title": "Статус персонажа {character_name}",
         "status_ideology": "Идеология: {ideology} ({score})",
@@ -193,7 +194,7 @@ TRANSLATIONS = {
         "status_actions": "*Оставшиеся действия:*\nОсновные заявки: {main}\nБыстрые заявки: {quick}",
         "status_districts": "*Контролируемые районы:*",
         "status_no_districts": "*Контролируемые районы:* Отсутствуют",
-        
+
         # Map and districts
         "map_title": "Текущая карта контроля Белграда",
         "map_legend": "Обозначения:\n🔒 Сильный контроль (80+ очков)\n✅ Контролируется (60-79 очков)\n⚠️ Оспаривается (20-59 очков)\n❌ Слабое присутствие (<20 очков)",
@@ -201,7 +202,7 @@ TRANSLATIONS = {
         "map_too_large": "Карта генерируется. Проверьте веб-интерфейс для подробностей.",
         "district_not_found": "Район '{district_name}' не найден. Используйте /view_district без аргументов для просмотра списка.",
         "select_district": "Выберите район для просмотра:",
-        
+
         # Time information
         "time_info": "*Информация об игровом времени*",
         "time_current": "Текущий цикл: *{cycle}*",
@@ -210,11 +211,11 @@ TRANSLATIONS = {
         "time_refresh": "Напоминание: Действия обновляются каждые 3 часа!",
         "deadline_passed": "Срок подачи истёк",
         "minutes": "минут",
-        
+
         # News
         "news_title": "Последние новости",
         "no_news": "На данный момент новостей нет.",
-        
+
         # Actions
         "no_main_actions": "У вас не осталось основных заявок. Заявки обновляются каждые 3 часа или в начале нового цикла.",
         "no_quick_actions": "У вас не осталось быстрых заявок. Заявки обновляются каждые 3 часа или в начале нового цикла.",
@@ -224,7 +225,7 @@ TRANSLATIONS = {
         "no_pending_actions": "У вас нет ожидающих заявок для отмены.",
         "actions_refreshed": "Ваши заявки обновлены!\n\nОсновные заявки: {main}\nБыстрые заявки: {quick}",
         "current_actions": "Текущие оставшиеся заявки:\n\nОсновные заявки: {main}\nБыстрые заявки: {quick}",
-        
+
         # Resource management
         "resources_title": "Ваши текущие ресурсы",
         "resources_guide": "*Руководство по использованию ресурсов:*\n• *Влияние* - Используется для политических манёвров, получения дополнительных заявок\n• *Ресурсы* - Экономика, финансы, связи. Можно конвертировать в другие ресурсы\n• *Информация* - Разведданные, слухи. Используется для разведки\n• *Сила* - Военные, полиция, криминальные структуры. Эффективны для атак и защиты",
@@ -239,7 +240,7 @@ TRANSLATIONS = {
         "income_total": "*Всего за цикл:*\n🔵 Влияние: +{influence}\n💰 Ресурсы: +{resources}\n🔍 Информация: +{information}\n👊 Сила: +{force}",
         "income_note": "*Примечание:* Ресурсы распределяются в конце каждого цикла.",
         "income_no_full_control": "У вас есть районы с некоторым присутствием, но ни один не контролируется полностью.\n\nДля получения ресурсов из района нужно 60+ очков контроля.",
-        
+
         # Politicians
         "politicians_title": "Ключевые политики Белграда",
         "no_politicians": "В базе данных не найдено политиков.",
@@ -248,19 +249,19 @@ TRANSLATIONS = {
         "international_title": "Международные политики",
         "no_international": "В базе данных не найдены международные политики.",
         "international_note": "*Примечание:* Международные политики могут активироваться случайным образом в каждом цикле. Их действия могут существенно повлиять на политический ландшафт Белграда. Используйте /news для получения актуальной информации об их деятельности.",
-        
+
         # Ideology descriptions
         "ideology_strongly_conservative": "Крайне консервативный",
         "ideology_conservative": "Консервативный",
         "ideology_neutral": "Нейтральный",
         "ideology_reformist": "Реформистский",
         "ideology_strongly_reformist": "Крайне реформистский",
-        
+
         # Relationship descriptions
         "compatibility_good": "Хорошая идеологическая совместимость",
         "compatibility_moderate": "Умеренные идеологические различия",
         "compatibility_poor": "Существенные идеологические различия",
-        
+
         # Actions on politicians
         "politician_influence_no_resources": "Вам нужно минимум 2 единицы Влияния для воздействия на политика. Действие отменено.",
         "politician_influence_no_action": "Вам нужна основная заявка для воздействия на политика. Действие отменено.",
@@ -271,7 +272,7 @@ TRANSLATIONS = {
         "politician_undermine_no_resources": "Вам нужно минимум 2 единицы Информации для подрыва влияния политика. Действие отменено.",
         "politician_undermine_no_action": "Вам нужна основная заявка для подрыва влияния политика. Действие отменено.",
         "politician_undermine_success": "Вы начали подрывать влияние {name}. Это может ослабить его позиции в его районе. Результаты будут обработаны в конце цикла.",
-        
+
         # Cycle results
         "cycle_results_title": "📊 *Результаты {cycle} цикла*",
         "your_actions": "*Ваши действия:*",
@@ -279,21 +280,21 @@ TRANSLATIONS = {
         "your_districts": "*Ваши районы:*",
         "recent_news": "*Недавние новости:*",
         "current_resources": "*Текущие ресурсы:*",
-        
+
         # Control status
         "control_strong": "🔒 Сильный контроль",
         "control_full": "✅ Контролируется",
         "control_contested": "⚠️ Оспаривается",
         "control_weak": "❌ Слабое присутствие",
         "control_points": "очков",
-        
+
         # Language settings
         "language_current": "Ваш текущий язык: {language}",
         "language_select": "Пожалуйста, выберите предпочитаемый язык:",
         "language_changed": "Язык изменён на русский",
         "language_button_en": "English",
         "language_button_ru": "Русский",
-        
+
         # Action types
         "action_influence": "Влияние",
         "action_attack": "Атака",
@@ -302,7 +303,7 @@ TRANSLATIONS = {
         "action_info": "Распространение информации",
         "action_support": "Поддержка",
         "action_cancel": "Отмена",
-        
+
         # Resources used in actions
         "select_resources": "Выберите ресурсы для {action_type} действия в районе {district_name}:",
         "insufficient_resources": "У вас недостаточно ресурсов типа {resource_type}. Действие отменено.",
@@ -312,13 +313,13 @@ TRANSLATIONS = {
         "invalid_info_content": "Пожалуйста, предоставьте корректное содержание информации.",
         "action_error": "Что-то пошло не так. Пожалуйста, попробуйте снова с /quick_action.",
         "info_from_user": "Информация от {user}",
-        
+
         # Status indicators for results
         "status_success": "✅",
         "status_partial": "⚠️",
         "status_failure": "❌",
         "status_info": "ℹ️",
-        
+
         # Admin commands
         "admin_only": "Эта команда только для администраторов.",
         "admin_news_usage": "Использование: /admin_add_news [заголовок] [содержание]",
@@ -332,7 +333,7 @@ TRANSLATIONS = {
         "admin_control_usage": "Использование: /admin_set_control [ID игрока] [ID района] [очки контроля]",
         "admin_district_not_found": "Район {district_id} не найден.",
         "admin_control_updated": "Обновлён контроль для игрока {player_id} в районе {district_id} до {control_points} очков.",
-        
+
         # Notifications
         "actions_refreshed_notification": "Ваши заявки обновлены! Теперь у вас есть 1 основная заявка и 2 быстрые заявки."
     }
@@ -366,6 +367,7 @@ RESOURCE_NAMES = {
     }
 }
 
+
 # Helper function to get text in the correct language
 def get_text(key, lang="en", default=None, **kwargs):
     """
@@ -383,24 +385,24 @@ def get_text(key, lang="en", default=None, **kwargs):
     # Default to English if the language is not supported
     if lang not in TRANSLATIONS:
         lang = "en"
-    
+
     # Get the text for the key
     text = TRANSLATIONS[lang].get(key)
-    
+
     # If not found in the requested language, try English as fallback
     if text is None:
         text = TRANSLATIONS["en"].get(key)
         # Log missing translation
         import logging
         logging.warning(f"Missing translation for key '{key}' in language '{lang}'")
-    
+
     # If still not found, use the provided default or return an error message
     if text is None:
         if default is not None:
             text = default
         else:
             return f"[Missing translation: {key}]"
-    
+
     # Format the text with the provided variables
     if kwargs:
         try:
@@ -410,22 +412,83 @@ def get_text(key, lang="en", default=None, **kwargs):
             import logging
             logging.error(f"Translation format error: {e} in '{text}' for key '{key}'")
             return f"[Format error in translation: {key}]"
-    
+
     return text
+
 
 def get_cycle_name(cycle, lang="en"):
     """Get the translated name of a cycle"""
     if lang not in CYCLE_NAMES:
         lang = "en"
-    
+
     return CYCLE_NAMES[lang].get(cycle, cycle)
+
+
+def get_action_name(action_type, lang="en"):
+    """Get the translated name of an action type"""
+    action_translations = {
+        "en": {
+            "influence": "Influence",
+            "attack": "Attack",
+            "defense": "Defense",
+            "recon": "Reconnaissance",
+            "info": "Information Spreading",
+            "support": "Support"
+        },
+        "ru": {
+            "influence": "Влияние",
+            "attack": "Атака",
+            "defense": "Защита",
+            "recon": "Разведка",
+            "info": "Распространение информации",
+            "support": "Поддержка"
+        }
+    }
+
+    if lang not in action_translations:
+        lang = "en"
+
+    return action_translations[lang].get(action_type, action_type)
+
+
+# Player language retrieval function for main.py
+
+def get_player_language(player_id):
+    """Get player's preferred language"""
+    conn = sqlite3.connect('belgrade_game.db')
+    cursor = conn.cursor()
+
+    cursor.execute("SELECT language FROM players WHERE player_id = ?", (player_id,))
+    result = cursor.fetchone()
+    conn.close()
+
+    if result:
+        return result[0]
+    else:
+        return "en"  # Default to English
+
+
+def set_player_language(player_id, language):
+    """Set player's preferred language"""
+    conn = sqlite3.connect('belgrade_game.db')
+    cursor = conn.cursor()
+
+    cursor.execute(
+        "UPDATE players SET language = ? WHERE player_id = ?",
+        (language, player_id)
+    )
+
+    conn.commit()
+    conn.close()
+
 
 def get_resource_name(resource, lang="en"):
     """Get the translated name of a resource"""
     if lang not in RESOURCE_NAMES:
         lang = "en"
-    
+
     return RESOURCE_NAMES[lang].get(resource, resource)
+
 
 def format_ideology(ideology_score, lang="en"):
     """Get formatted ideology description based on score"""
