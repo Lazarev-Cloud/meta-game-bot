@@ -171,6 +171,7 @@ def setup_database():
             districts
         )
 
+    # Create table for politician relationships if it doesn't exist yet
     cursor.execute('''
     CREATE TABLE IF NOT EXISTS politician_relationships (
         politician_id INTEGER,
@@ -522,7 +523,6 @@ def update_politician_friendliness(politician_id, player_id, change):
         return None
     finally:
         conn.close()
-
 
 def add_action(player_id, action_type, target_type, target_id, resources_used):
     conn = sqlite3.connect('belgrade_game.db')
