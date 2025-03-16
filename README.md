@@ -35,8 +35,8 @@ The Belgrade Game is set in September 1998, where players act as political actor
 1. **Clone the repository**
 
 ```bash
-git clone https://github.com/YourUsername/belgrade-game-bot.git
-cd belgrade-game-bot
+git clone https://github.com/Lazarev-Cloud/meta-game-bot.git
+cd meta-game-bot
 ```
 
 2. **Install dependencies**
@@ -108,7 +108,7 @@ python main.py
 ### Project Structure
 
 ```
-belgrade-game-bot/
+meta-game-bot/
 ├── bot/                  # Bot functionality
 │   ├── __init__.py
 │   ├── callbacks.py      # Callback handlers
