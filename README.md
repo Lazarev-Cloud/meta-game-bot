@@ -26,7 +26,7 @@ This Telegram bot implements a political strategy game set in 1998 Belgrade, Yug
 
 4. Run the bot:
    ```
-   python belgrade_game_bot.py
+   python main.py
    ```
 
 ## Game Mechanics
