@@ -1,6 +1,9 @@
 # Language support for Belgrade Game Bot
 # This file contains translations for all bot messages
+import logging
 import sqlite3
+
+from languages_update import update_translations, logger
 
 # Dictionary of translations
 TRANSLATIONS = {
@@ -370,17 +373,17 @@ RESOURCE_NAMES = {
 }
 
 
-# Helper function to get text in the correct language
+# Make sure any other missing translations are properly handled
 def get_text(key, lang="en", default=None, **kwargs):
     """
     Get text in the specified language with optional formatting
-    
+
     Parameters:
     key (str): The translation key
     lang (str): Language code (en/ru)
     default (str): Default text if translation is missing
     **kwargs: Variables to format the text with
-    
+
     Returns:
     str: Translated and formatted text
     """
@@ -395,7 +398,6 @@ def get_text(key, lang="en", default=None, **kwargs):
     if text is None:
         text = TRANSLATIONS["en"].get(key)
         # Log missing translation
-        import logging
         logging.warning(f"Missing translation for key '{key}' in language '{lang}'")
 
     # If still not found, use the provided default or return an error message
@@ -411,12 +413,10 @@ def get_text(key, lang="en", default=None, **kwargs):
             return text.format(**kwargs)
         except KeyError as e:
             # Log formatting error
-            import logging
             logging.error(f"Translation format error: {e} in '{text}' for key '{key}'")
             return f"[Format error in translation: {key}]"
 
     return text
-
 
 def get_cycle_name(cycle, lang="en"):
     """Get the translated name of a cycle"""
@@ -482,6 +482,41 @@ def set_player_language(player_id, language):
 
     conn.commit()
     conn.close()
+
+
+# Finally, add a utility function to check for missing translations
+def check_missing_translations():
+    """Check for missing translations and log warnings."""
+    logging.info("Checking for missing translations...")
+    missing_count = 0
+
+    # Get all keys in English
+    english_keys = set(TRANSLATIONS["en"].keys())
+
+    # Check each language
+    for lang in TRANSLATIONS:
+        if lang == "en":
+            continue
+
+        lang_keys = set(TRANSLATIONS[lang].keys())
+        missing_keys = english_keys - lang_keys
+
+        if missing_keys:
+            missing_count += len(missing_keys)
+            logging.warning(f"Found {len(missing_keys)} missing translations in {lang}:")
+            for key in missing_keys:
+                TRANSLATIONS[lang][key] = TRANSLATIONS["en"][key]  # Use English as fallback
+                logging.warning(f"  - '{key}' (using English fallback)")
+
+    logging.info(f"Translation check complete. Fixed {missing_count} missing translations.")
+
+
+# Call this during initialization
+def init_language_support():
+    """Initialize language support"""
+    update_translations()
+    check_missing_translations()
+    logger.info("Language support initialized")
 
 
 def get_resource_name(resource, lang="en"):

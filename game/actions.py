@@ -50,46 +50,28 @@ async def process_game_cycle(context):
     logger.info(f"Processing {cycle} cycle")
 
     try:
-        # Process all pending actions for this cycle
-        conn = sqlite3.connect('belgrade_game.db')
-        cursor = conn.cursor()
+        # Process each action separately with its own connection to avoid long transactions
+        actions = get_pending_actions(cycle)
 
-        cursor.execute(
-            "SELECT * FROM actions WHERE status = 'pending' AND cycle = ?",
-            (cycle,)
-        )
-        actions = cursor.fetchall()
-
-        # Process each action
         for action in actions:
-            action_id = action[0]
-            player_id = action[1]
-            action_type = action[2]
-            target_type = action[3]
-            target_id = action[4]
-
-            # Process different action types
-            result = process_action(action_id, player_id, action_type, target_type, target_id)
-
-            # Update action status
-            cursor.execute(
-                "UPDATE actions SET status = 'completed', result = ? WHERE action_id = ?",
-                (json.dumps(result), action_id)
-            )
+            try:
+                # Process action with its own connection
+                process_single_action(action[0], action[1], action[2], action[3], action[4])
+            except Exception as e:
+                logger.error(f"Error processing action {action[0]}: {e}")
 
         # Apply decay to district control
-        cursor.execute(
-            "UPDATE district_control SET control_points = MAX(0, control_points - 5) WHERE control_points > 0"
-        )
+        apply_district_decay()
 
-        # Distribute resources from controlled districts - FIX: Don't pass conn
+        # Distribute resources - use existing function with its own connection
         distribute_district_resources()
 
-        # Process international politicians' actions
-        process_international_politicians()
-
-        conn.commit()
-        conn.close()
+        # Process international politicians one by one
+        for politician_id in get_random_international_politicians(1, 3):
+            try:
+                process_international_politician_action(politician_id)
+            except Exception as e:
+                logger.error(f"Error processing international politician {politician_id}: {e}")
 
         # Notify all players of results
         await notify_players_of_results(context, cycle)
@@ -97,12 +79,81 @@ async def process_game_cycle(context):
         logger.info(f"Completed processing {cycle} cycle")
     except Exception as e:
         logger.error(f"Error processing game cycle: {e}")
-        # Log the full stack trace
         import traceback
         tb_list = traceback.format_exception(None, e, e.__traceback__)
         tb_string = ''.join(tb_list)
         logger.error(f"Exception traceback:\n{tb_string}")
 
+# Helper functions to break down the process
+def get_pending_actions(cycle):
+    """Get all pending actions for a cycle with a dedicated connection."""
+    try:
+        conn = sqlite3.connect('belgrade_game.db')
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT action_id, player_id, action_type, target_type, target_id FROM actions WHERE status = 'pending' AND cycle = ?",
+            (cycle,)
+        )
+        actions = cursor.fetchall()
+        conn.close()
+        return actions
+    except Exception as e:
+        logger.error(f"Error getting pending actions: {e}")
+        return []
+
+
+def process_single_action(action_id, player_id, action_type, target_type, target_id):
+    """Process a single action with its own connection."""
+    try:
+        # Process the action
+        result = process_action(action_id, player_id, action_type, target_type, target_id)
+
+        # Update status
+        conn = sqlite3.connect('belgrade_game.db')
+        cursor = conn.cursor()
+        cursor.execute(
+            "UPDATE actions SET status = 'completed', result = ? WHERE action_id = ?",
+            (json.dumps(result), action_id)
+        )
+        conn.commit()
+        conn.close()
+        return True
+    except Exception as e:
+        logger.error(f"Error processing single action {action_id}: {e}")
+        return False
+
+
+def apply_district_decay():
+    """Apply decay to district control with a dedicated connection."""
+    try:
+        conn = sqlite3.connect('belgrade_game.db')
+        cursor = conn.cursor()
+        cursor.execute(
+            "UPDATE district_control SET control_points = MAX(0, control_points - 5) WHERE control_points > 0"
+        )
+        conn.commit()
+        conn.close()
+        return True
+    except Exception as e:
+        logger.error(f"Error applying district decay: {e}")
+        return False
+
+
+def get_random_international_politicians(min_count, max_count):
+    """Get random international politician IDs."""
+    try:
+        conn = sqlite3.connect('belgrade_game.db')
+        cursor = conn.cursor()
+        cursor.execute("SELECT politician_id FROM politicians WHERE is_international = 1")
+        politicians = cursor.fetchall()
+        conn.close()
+
+        import random
+        count = min(max_count, max(min_count, len(politicians)))
+        return [p[0] for p in random.sample(politicians, count)]
+    except Exception as e:
+        logger.error(f"Error getting international politicians: {e}")
+        return []
 
 def process_action(action_id, player_id, action_type, target_type, target_id):
     """Process a single action and return the result"""

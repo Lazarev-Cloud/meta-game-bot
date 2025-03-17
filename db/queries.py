@@ -8,23 +8,35 @@ logger = logging.getLogger(__name__)
 
 
 # Database connection decorator for safe handling
+# Improved database connection decorator with retry mechanism
 def db_transaction(func):
     @wraps(func)
     def wrapper(*args, **kwargs):
         conn = None
-        try:
-            conn = sqlite3.connect('belgrade_game.db')
-            result = func(conn, *args, **kwargs)
-            conn.commit()
-            return result
-        except sqlite3.Error as e:
-            if conn:
-                conn.rollback()
-            logger.error(f"Database error in {func.__name__}: {e}")
-            raise
-        finally:
-            if conn:
-                conn.close()
+        max_retries = 3
+        retry_delay = 0.5  # seconds
+
+        for attempt in range(max_retries):
+            try:
+                conn = sqlite3.connect('belgrade_game.db', timeout=10.0)  # Increased timeout
+                result = func(conn, *args, **kwargs)
+                conn.commit()
+                return result
+            except sqlite3.Error as e:
+                if conn:
+                    conn.rollback()
+
+                if "database is locked" in str(e) and attempt < max_retries - 1:
+                    logger.warning(f"Database locked, retrying in {retry_delay}s (attempt {attempt + 1}/{max_retries})")
+                    time.sleep(retry_delay)
+                    retry_delay *= 2  # Exponential backoff
+                    continue
+
+                logger.error(f"Database error in {func.__name__}: {e}")
+                raise
+            finally:
+                if conn:
+                    conn.close()
 
     return wrapper
 

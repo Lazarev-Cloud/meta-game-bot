@@ -37,41 +37,99 @@ def main() -> None:
     # Display startup message
     logger.info("Starting Belgrade Game Bot...")
 
-    # Initialize language support
-    init_language_support()
+    try:
+        # Set up the database
+        logger.info("Setting up database...")
+        setup_database()
 
-    # Initialize admin language support
-    from languages_update import init_admin_language_support
-    init_admin_language_support()
-    logger.info("Admin language support initialized")
+        # Initialize language support
+        logger.info("Initializing language support...")
+        init_language_support()
 
-    # Set up the database
-    logger.info("Setting up database...")
-    setup_database()
+        # Initialize admin language support
+        logger.info("Initializing admin language support...")
+        from languages_update import init_admin_language_support
+        init_admin_language_support()
 
-    # Create the Application
-    logger.info("Initializing Telegram bot...")
-    application = Application.builder().token(TOKEN).build()
+        # Create the Application
+        logger.info("Initializing Telegram bot...")
+        application = Application.builder().token(TOKEN).build()
 
-    # Register command handlers
-    logger.info("Registering command handlers...")
-    register_commands(application)
+        # Register command handlers
+        logger.info("Registering command handlers...")
+        register_commands(application)
 
-    # Register callback handlers
-    logger.info("Registering callback handlers...")
-    register_callbacks(application)
+        # Register callback handlers
+        logger.info("Registering callback handlers...")
+        register_callbacks(application)
 
-    # Set up scheduled jobs
-    logger.info("Setting up scheduled jobs...")
-    application.job_queue.run_once(schedule_jobs, 1)
+        # Set up scheduled jobs
+        logger.info("Setting up scheduled jobs...")
+        application.job_queue.run_once(schedule_jobs, 1)
 
-    # Add error handler
-    logger.info("Setting up error handler...")
-    application.add_error_handler(error_handler)
+        # Add error handler
+        logger.info("Setting up error handler...")
+        application.add_error_handler(error_handler)
 
-    # Start the Bot
-    logger.info("Bot starting up - Press Ctrl+C to stop")
-    application.run_polling(allowed_updates=Update.ALL_TYPES)
+        # Perform validation checks
+        logger.info("Performing validation checks...")
+        validate_system()
+
+        # Start the Bot
+        logger.info("Bot starting up - Press Ctrl+C to stop")
+        application.run_polling(allowed_updates=Update.ALL_TYPES)
+    except Exception as e:
+        logger.critical(f"Failed to initialize bot: {e}")
+        import traceback
+        tb_list = traceback.format_exception(None, e, e.__traceback__)
+        tb_string = ''.join(tb_list)
+        logger.critical(f"Initialization error traceback:\n{tb_string}")
+        sys.exit(1)
+
+
+def validate_system():
+    """Perform validation checks to ensure the system is properly configured."""
+    try:
+        # Check database connection
+        conn = sqlite3.connect('belgrade_game.db')
+        cursor = conn.cursor()
+
+        # Check essential tables
+        essential_tables = ['players', 'resources', 'districts', 'politicians', 'actions']
+        for table in essential_tables:
+            cursor.execute(f"SELECT name FROM sqlite_master WHERE type='table' AND name='{table}'")
+            if not cursor.fetchone():
+                logger.error(f"Essential table {table} is missing from the database!")
+
+        # Check if districts and politicians are populated
+        cursor.execute("SELECT COUNT(*) FROM districts")
+        district_count = cursor.fetchone()[0]
+        if district_count == 0:
+            logger.warning("Districts table is empty. Initial data may be missing.")
+
+        cursor.execute("SELECT COUNT(*) FROM politicians")
+        politician_count = cursor.fetchone()[0]
+        if politician_count == 0:
+            logger.warning("Politicians table is empty. Initial data may be missing.")
+
+        conn.close()
+
+        # Check if all required translations are present
+        from languages import TRANSLATIONS
+        essential_keys = ['welcome', 'help_title', 'status_title', 'action_influence', 'resources_title']
+        for lang in TRANSLATIONS:
+            for key in essential_keys:
+                if key not in TRANSLATIONS[lang]:
+                    logger.warning(f"Essential translation key '{key}' is missing for language '{lang}'")
+
+        # Check if admin IDs are configured
+        from config import ADMIN_IDS
+        if not ADMIN_IDS:
+            logger.warning("No admin IDs configured - admin commands will not be available")
+
+        logger.info("System validation complete")
+    except Exception as e:
+        logger.error(f"System validation error: {e}")
 
 
 def error_handler(update, context):
