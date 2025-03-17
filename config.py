@@ -1,4 +1,8 @@
 import os
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 # Load the Telegram Bot API Token from environment variables
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
