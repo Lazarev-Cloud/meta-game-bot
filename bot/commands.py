@@ -1,3 +1,4 @@
+import sqlite3
 import logging
 import datetime
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
@@ -343,7 +344,7 @@ async def admin_reset_actions(update: Update, context: ContextTypes.DEFAULT_TYPE
     args = context.args
 
     if not args:
-        await update.message.reply_text("Usage: /admin_reset_actions [player_id]")
+        await update.message.reply_text(get_text("admin_reset_actions_usage", lang))
         return
 
     try:
@@ -356,7 +357,7 @@ async def admin_reset_actions(update: Update, context: ContextTypes.DEFAULT_TYPE
         cursor.execute("SELECT player_id FROM players WHERE player_id = ?", (player_id,))
         if not cursor.fetchone():
             conn.close()
-            await update.message.reply_text(f"Player {player_id} not found.")
+            await update.message.reply_text(get_text("admin_player_not_found", lang, player_id=player_id))
             return
 
         # Reset actions
@@ -369,13 +370,13 @@ async def admin_reset_actions(update: Update, context: ContextTypes.DEFAULT_TYPE
         conn.commit()
         conn.close()
 
-        await update.message.reply_text(f"Actions reset for player {player_id}.")
+        await update.message.reply_text(get_text("admin_reset_actions_success", lang, player_id=player_id))
 
     except ValueError:
-        await update.message.reply_text("Invalid player ID. Please provide a numeric ID.")
+        await update.message.reply_text(get_text("admin_invalid_args", lang))
     except Exception as e:
         logger.error(f"Error in admin_reset_actions: {e}")
-        await update.message.reply_text(f"Error resetting actions: {e}")
+        await update.message.reply_text(get_text("admin_error", lang, error=str(e)))
 
 
 async def admin_reset_all_actions(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -402,11 +403,11 @@ async def admin_reset_all_actions(update: Update, context: ContextTypes.DEFAULT_
         conn.commit()
         conn.close()
 
-        await update.message.reply_text(f"Actions reset for {affected_rows} players.")
+        await update.message.reply_text(get_text("admin_reset_all_actions_success", lang, count=affected_rows))
 
     except Exception as e:
         logger.error(f"Error in admin_reset_all_actions: {e}")
-        await update.message.reply_text(f"Error resetting actions: {e}")
+        await update.message.reply_text(get_text("admin_error", lang, error=str(e)))
 
 
 async def admin_set_ideology(update: Update, context: ContextTypes.DEFAULT_TYPE):

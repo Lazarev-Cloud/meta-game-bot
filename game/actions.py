@@ -82,8 +82,8 @@ async def process_game_cycle(context):
             "UPDATE district_control SET control_points = MAX(0, control_points - 5) WHERE control_points > 0"
         )
 
-        # Distribute resources from controlled districts
-        distribute_district_resources(conn)
+        # Distribute resources from controlled districts - FIX: Don't pass conn
+        distribute_district_resources()
 
         # Process international politicians' actions
         process_international_politicians()
@@ -97,6 +97,11 @@ async def process_game_cycle(context):
         logger.info(f"Completed processing {cycle} cycle")
     except Exception as e:
         logger.error(f"Error processing game cycle: {e}")
+        # Log the full stack trace
+        import traceback
+        tb_list = traceback.format_exception(None, e, e.__traceback__)
+        tb_string = ''.join(tb_list)
+        logger.error(f"Exception traceback:\n{tb_string}")
 
 
 def process_action(action_id, player_id, action_type, target_type, target_id):
