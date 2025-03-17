@@ -10,7 +10,7 @@ import logging
 import sqlite3
 import random
 from typing import Dict, List, Tuple, Optional, Any
-
+from languages import format_ideology
 logger = logging.getLogger(__name__)
 
 
@@ -195,6 +195,7 @@ def get_politician_relationship(politician_id: int, player_id: int) -> Dict[str,
     Returns:
         Dict: Relationship data
     """
+    conn = None
     try:
         conn = sqlite3.connect('belgrade_game.db')
         cursor = conn.cursor()
@@ -632,7 +633,6 @@ def generate_politician_influence_report(lang="en"):
     Returns:
         str: Formatted politician influence report
     """
-    from languages import get_text, format_ideology
 
     try:
         conn = sqlite3.connect('belgrade_game.db')

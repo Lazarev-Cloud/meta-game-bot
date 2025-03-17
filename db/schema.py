@@ -10,6 +10,13 @@ def setup_database():
         conn = sqlite3.connect('belgrade_game.db')
         cursor = conn.cursor()
 
+        # Check if database is already set up
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='districts'")
+        if cursor.fetchone():
+            logger.info("Database already exists, skipping setup")
+            conn.close()
+            return
+
         # Create Players table
         cursor.execute('''
         CREATE TABLE IF NOT EXISTS players (

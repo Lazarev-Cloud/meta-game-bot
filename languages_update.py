@@ -213,7 +213,10 @@ ADMIN_TRANSLATIONS = {
         "admin_set_ideology_invalid": "Ideology score must be between -5 and +5.",
         "admin_player_not_found": "Player {player_id} not found.",
         "admin_list_players_none": "No players registered.",
-        "admin_list_players_title": "Registered Players"
+        "admin_list_players_title": "Registered Players",
+        "admin_help_desc": "Show this admin help message",
+        "admin_news_desc": "Add a news item",
+        "admin_cycle_desc": "Manually process a game cycle"
     },
     "ru": {
         "admin_error": "Ошибка администратора: {error}",
@@ -227,7 +230,10 @@ ADMIN_TRANSLATIONS = {
         "admin_set_ideology_invalid": "Оценка идеологии должна быть от -5 до +5.",
         "admin_player_not_found": "Игрок {player_id} не найден.",
         "admin_list_players_none": "Нет зарегистрированных игроков.",
-        "admin_list_players_title": "Зарегистрированные игроки"
+        "admin_list_players_title": "Зарегистрированные игроки",
+        "admin_help_desc": "Показать это сообщение помощи администратора",
+        "admin_news_desc": "Добавить новость",
+        "admin_cycle_desc": "Вручную обработать игровой цикл",
     }
 }
 

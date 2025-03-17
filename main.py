@@ -12,7 +12,7 @@ from telegram import Update
 from telegram.ext import Application
 from languages import get_text, get_player_language
 from languages_update import init_language_support
-
+import sqlite3
 from bot.callbacks import register_callbacks
 from bot.commands import register_commands
 from config import TOKEN, ADMIN_IDS
