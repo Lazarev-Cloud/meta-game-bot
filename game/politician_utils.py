@@ -9,6 +9,7 @@ Extends the base politicians.py functionality with additional utilities
 import logging
 import sqlite3
 import random
+import json
 from typing import Dict, List, Tuple, Optional, Any
 from languages import format_ideology
 logger = logging.getLogger(__name__)
@@ -243,77 +244,36 @@ def get_politician_relationship(politician_id: int, player_id: int) -> Dict[str,
             conn.close()
 
 
-def process_international_politician_activation(cycle_name: str) -> List[Dict[str, Any]]:
-    """
-    Process the activation of random international politicians based on the game cycle
-
-    Args:
-        cycle_name: Current game cycle name ('morning' or 'evening')
-
-    Returns:
-        List[Dict]: List of activated politicians and their actions
-    """
+def process_international_politicians(cycle_name: str = None):
+    """Unified function for processing international politician actions"""
     try:
         conn = sqlite3.connect('belgrade_game.db')
         cursor = conn.cursor()
-
-        # Get all international politicians
-        cursor.execute(
-            """
-            SELECT politician_id, name, role, ideology_score, influence, description
-            FROM politicians
-            WHERE is_international = 1
-            """
-        )
-        international_politicians = cursor.fetchall()
-
-        # Choose number of politicians to activate (1-3)
-        num_to_activate = random.randint(1, min(3, len(international_politicians)))
-
-        # Select random politicians to activate
-        politicians_to_activate = random.sample(international_politicians, num_to_activate)
-
-        activated_politicians = []
-
-        for politician in politicians_to_activate:
-            pol_id, name, role, ideology, influence, description = politician
-
-            # Determine action type based on politician's ideology
-            if ideology < -3:  # Strongly pro-reform
-                action_types = ['sanctions', 'support_opposition', 'diplomatic_pressure']
-                weights = [0.4, 0.4, 0.2]
-            elif ideology > 3:  # Strongly conservative
-                action_types = ['support_regime', 'destabilize', 'diplomatic_support']
-                weights = [0.4, 0.4, 0.2]
-            else:  # Moderate
-                action_types = ['economic', 'diplomatic', 'humanitarian']
-                weights = [0.33, 0.33, 0.34]
-
-            # Choose action type
-            action_type = random.choices(action_types, weights=weights, k=1)[0]
-
-            # Process the action based on type
-            action_result = process_international_action(pol_id, name, role, ideology, action_type)
-
-            # Add to activated list
-            activated_politicians.append({
-                "politician_id": pol_id,
-                "name": name,
-                "role": role,
-                "ideology": ideology,
-                "action_type": action_type,
-                "effect": action_result
-            })
-
+        
+        # Get active politicians
+        cursor.execute("""
+            SELECT p.politician_id, p.name, p.role, p.ideology_score, p.influence, 
+                   p.description, p.is_international
+            FROM politicians p
+            WHERE p.is_international = 1
+        """)
+        politicians = cursor.fetchall()
+        
+        activated_events = []
+        for pol_id, name, role, ideology_score, influence, description, is_international in politicians:
+            event = process_international_action(pol_id, name, role, ideology_score, influence, description, is_international)
+            if event:
+                activated_events.append(event)
+                
         conn.close()
-        return activated_politicians
-
+        return activated_events
+        
     except Exception as e:
-        logger.error(f"Error activating international politicians: {e}")
+        logger.error(f"Error processing international politicians: {e}")
         return []
 
 
-def process_international_action(pol_id: int, name: str, role: str, ideology: int, action_type: str) -> Dict[str, Any]:
+def process_international_action(pol_id: int, name: str, role: str, ideology: int, influence: int, description: str, is_international: bool) -> Dict[str, Any]:
     """
     Process an action by an international politician
 
@@ -322,7 +282,9 @@ def process_international_action(pol_id: int, name: str, role: str, ideology: in
         name: Politician name
         role: Politician role
         ideology: Politician ideology score
-        action_type: Type of action
+        influence: Politician influence
+        description: Politician description
+        is_international: Whether the politician is international
 
     Returns:
         Dict: Action effect details
@@ -332,160 +294,14 @@ def process_international_action(pol_id: int, name: str, role: str, ideology: in
         cursor = conn.cursor()
 
         result = {
-            "type": action_type,
+            "type": "diplomatic",
             "affected_districts": [],
             "affected_politicians": [],
             "news_title": f"{name} ({role})",
             "news_content": ""
         }
 
-        if action_type == 'sanctions':
-            # Apply sanctions: affect resources in conservative districts
-            result["news_title"] = f"{name} Announces Sanctions"
-            result[
-                "news_content"] = f"{name} ({role}) has announced sanctions against the current regime. Districts supporting conservative policies will receive a penalty to control."
-
-            # Apply penalties to conservative districts
-            cursor.execute(
-                """
-                SELECT d.district_id, d.name 
-                FROM districts d
-                JOIN politicians p ON d.district_id = p.district_id
-                WHERE p.ideology_score > 3 AND p.is_international = 0
-                """
-            )
-            conservative_districts = cursor.fetchall()
-
-            for district_id, district_name in conservative_districts:
-                # Apply penalty to all players in this district
-                cursor.execute(
-                    """
-                    UPDATE district_control 
-                    SET control_points = CASE WHEN control_points > 5 THEN control_points - 5 ELSE control_points END
-                    WHERE district_id = ?
-                    """,
-                    (district_id,)
-                )
-                result["affected_districts"].append({"id": district_id, "name": district_name, "effect": -5})
-
-        elif action_type == 'support_opposition':
-            # Support opposition: boost reformist districts
-            result["news_title"] = f"{name} Supports Democratic Forces"
-            result[
-                "news_content"] = f"{name} ({role}) has expressed support for democratic reform movements in Yugoslavia. Opposition-controlled districts receive a boost."
-
-            # Apply bonuses to reform districts
-            cursor.execute(
-                """
-                SELECT d.district_id, d.name 
-                FROM districts d
-                JOIN politicians p ON d.district_id = p.district_id
-                WHERE p.ideology_score < -3 AND p.is_international = 0
-                """
-            )
-            reform_districts = cursor.fetchall()
-
-            for district_id, district_name in reform_districts:
-                # Find player(s) with reform ideology in this district
-                cursor.execute(
-                    """
-                    SELECT dc.player_id, p.ideology_score
-                    FROM district_control dc
-                    JOIN players p ON dc.player_id = p.player_id
-                    WHERE dc.district_id = ? AND p.ideology_score < 0
-                    """,
-                    (district_id,)
-                )
-                reform_players = cursor.fetchall()
-
-                for player_id, player_ideology in reform_players:
-                    # Boost control based on ideology alignment
-                    boost = 5 + min(5, abs(player_ideology))
-                    cursor.execute(
-                        """
-                        UPDATE district_control 
-                        SET control_points = control_points + ?
-                        WHERE district_id = ? AND player_id = ?
-                        """,
-                        (boost, district_id, player_id)
-                    )
-
-                result["affected_districts"].append({"id": district_id, "name": district_name, "effect": "+5-10"})
-
-        elif action_type == 'support_regime':
-            # Support regime: boost conservative districts
-            result["news_title"] = f"{name} Stands With Government"
-            result[
-                "news_content"] = f"{name} ({role}) has expressed support for the current government of Yugoslavia. Pro-government districts receive a boost."
-
-            # Apply bonuses to conservative districts
-            cursor.execute(
-                """
-                SELECT d.district_id, d.name 
-                FROM districts d
-                JOIN politicians p ON d.district_id = p.district_id
-                WHERE p.ideology_score > 3 AND p.is_international = 0
-                """
-            )
-            conservative_districts = cursor.fetchall()
-
-            for district_id, district_name in conservative_districts:
-                # Find player(s) with conservative ideology
-                cursor.execute(
-                    """
-                    SELECT dc.player_id, p.ideology_score
-                    FROM district_control dc
-                    JOIN players p ON dc.player_id = p.player_id
-                    WHERE dc.district_id = ? AND p.ideology_score > 0
-                    """,
-                    (district_id,)
-                )
-                conservative_players = cursor.fetchall()
-
-                for player_id, player_ideology in conservative_players:
-                    # Boost control based on ideology alignment
-                    boost = 5 + min(5, player_ideology)
-                    cursor.execute(
-                        """
-                        UPDATE district_control 
-                        SET control_points = control_points + ?
-                        WHERE district_id = ? AND player_id = ?
-                        """,
-                        (boost, district_id, player_id)
-                    )
-
-                result["affected_districts"].append({"id": district_id, "name": district_name, "effect": "+5-10"})
-
-        elif action_type == 'economic':
-            # Economic support: provide resources to moderate districts
-            result["news_title"] = f"{name} Announces Economic Initiative"
-            result[
-                "news_content"] = f"{name} ({role}) has announced economic support for moderate districts in Yugoslavia."
-
-            # Apply bonuses to moderate districts
-            cursor.execute(
-                """
-                SELECT d.district_id, d.name 
-                FROM districts d
-                JOIN politicians p ON d.district_id = p.district_id
-                WHERE p.ideology_score BETWEEN -2 AND 2 AND p.is_international = 0
-                """
-            )
-            moderate_districts = cursor.fetchall()
-
-            for district_id, district_name in moderate_districts:
-                # Add 3 control points to all players in this district
-                cursor.execute(
-                    """
-                    UPDATE district_control 
-                    SET control_points = control_points + 3
-                    WHERE district_id = ?
-                    """,
-                    (district_id,)
-                )
-                result["affected_districts"].append({"id": district_id, "name": district_name, "effect": +3})
-
-        elif action_type == 'diplomatic':
+        if is_international:
             # Diplomatic initiative: affect relationships between players and politicians
             result["news_title"] = f"{name} Diplomatic Initiative"
             result[
@@ -572,33 +388,6 @@ def process_international_action(pol_id: int, name: str, role: str, ideology: in
                         "news_content"] += f" {target_name} has become more difficult to work with due to international pressure."
                     result["affected_politicians"].append({"id": target_id, "name": target_name, "effect": -5})
 
-        elif action_type == 'humanitarian':
-            # Humanitarian aid: small boost to all districts
-            result["news_title"] = f"{name} Provides Humanitarian Aid"
-            result[
-                "news_content"] = f"{name} ({role}) has announced humanitarian aid to affected regions in Yugoslavia."
-
-            # Add 2 control points to all player controls
-            cursor.execute(
-                """
-                UPDATE district_control 
-                SET control_points = control_points + 2
-                """
-            )
-
-            # Get all districts for reporting
-            cursor.execute("SELECT district_id, name FROM districts")
-            all_districts = cursor.fetchall()
-
-            for district_id, district_name in all_districts:
-                result["affected_districts"].append({"id": district_id, "name": district_name, "effect": +2})
-
-        else:
-            # Default action if type not recognized
-            result["news_title"] = f"{name} Makes Statement"
-            result[
-                "news_content"] = f"{name} ({role}) has made a diplomatic statement regarding the situation in Yugoslavia."
-
         # Commit changes and close connection
         conn.commit()
         conn.close()
@@ -615,7 +404,7 @@ def process_international_action(pol_id: int, name: str, role: str, ideology: in
             pass
 
         return {
-            "type": action_type,
+            "type": "diplomatic",
             "affected_districts": [],
             "affected_politicians": [],
             "news_title": f"{name} ({role})",
@@ -677,17 +466,16 @@ def generate_politician_influence_report(lang="en"):
 
         cursor.execute(
             """
-            SELECT politician_id, name, role, ideology_score
-            FROM politicians
-            WHERE is_international = 1
-            ORDER BY name
+            SELECT p.politician_id, p.name, p.role, p.ideology_score, p.influence, 
+                   p.description, p.is_international
+            FROM politicians p
+            WHERE p.is_international = 1
+            ORDER BY p.name
             """
         )
         international_politicians = cursor.fetchall()
 
-        for politician in international_politicians:
-            pol_id, name, role, ideology_score = politician
-
+        for pol_id, name, role, ideology_score, influence, description, is_international in international_politicians:
             # Format ideology description
             ideology = format_ideology(ideology_score, lang)
 
@@ -700,3 +488,79 @@ def generate_politician_influence_report(lang="en"):
     except Exception as e:
         logger.error(f"Error generating politician influence report: {e}")
         return get_text('error_generating_report', lang, default="Error generating politician influence report.")
+
+
+def generate_international_initiative():
+    """Generate random initiative from international politicians"""
+    initiatives = [
+        {
+            'type': 'diplomatic_mission',
+            'title': 'Дипломатическая миссия',
+            'description': 'Международный политик предлагает посредничество в переговорах',
+            'cost': {'influence': 1},
+            'reward': {'information': 2}
+        },
+        {
+            'type': 'economic_support',
+            'title': 'Экономическая поддержка',
+            'description': 'Предложение экономической помощи в обмен на политическое влияние',
+            'cost': {'influence': 2},
+            'reward': {'resources': 3}
+        },
+        {
+            'type': 'international_pressure',
+            'title': 'Международное давление',
+            'description': 'Возможность использовать международное влияние против оппонентов',
+            'cost': {'information': 2},
+            'reward': {'force': 2}
+        }
+    ]
+    
+    return random.choice(initiatives)
+
+def process_daily_international_events():
+    """Process daily random events from international politicians"""
+    try:
+        conn = sqlite3.connect('belgrade_game.db')
+        cursor = conn.cursor()
+        
+        # Get international politicians
+        cursor.execute("""
+            SELECT politician_id, name, role 
+            FROM politicians 
+            WHERE is_international = 1
+        """)
+        international_pols = cursor.fetchall()
+        
+        # Generate random initiatives
+        for pol_id, name, role in international_pols:
+            if random.random() < 0.3:  # 30% шанс на инициативу
+                initiative = generate_international_initiative()
+                
+                # Add to available initiatives
+                cursor.execute("""
+                    INSERT INTO international_initiatives 
+                    (politician_id, type, title, description, cost, reward, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
+                """, (
+                    pol_id,
+                    initiative['type'],
+                    initiative['title'],
+                    initiative['description'],
+                    json.dumps(initiative['cost']),
+                    json.dumps(initiative['reward'])
+                ))
+                
+                # Add news about initiative
+                add_news(
+                    title=f"Инициатива от {name}",
+                    content=f"{name} ({role}) предлагает: {initiative['description']}",
+                    type="international",
+                    importance=1
+                )
+                
+        conn.commit()
+        conn.close()
+        
+    except Exception as e:
+        logger.error(f"Error processing international events: {e}")

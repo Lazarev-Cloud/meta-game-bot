@@ -11,6 +11,7 @@ from db.queries import (
     get_player_districts, refresh_player_actions
 )
 from languages import get_text, get_cycle_name
+from typing import Dict, Any
 
 logger = logging.getLogger(__name__)
 
@@ -23,39 +24,33 @@ QUICK_ACTION_INFO = "info"
 QUICK_ACTION_SUPPORT = "support"
 
 # Game cycle times
-MORNING_CYCLE_START = datetime.time(6, 0)  # 6:00 AM
-MORNING_CYCLE_DEADLINE = datetime.time(12, 0)  # 12:00 PM
-MORNING_CYCLE_RESULTS = datetime.time(13, 0)  # 1:00 PM
-EVENING_CYCLE_START = datetime.time(13, 1)  # 1:01 PM
-EVENING_CYCLE_DEADLINE = datetime.time(18, 0)  # 6:00 PM
-EVENING_CYCLE_RESULTS = datetime.time(19, 0)  # 7:00 PM
+CYCLE_DURATION = datetime.timedelta(hours=3)
+CYCLE_STARTS = [
+    datetime.time(0, 0),  # 00:00
+    datetime.time(3, 0),  # 03:00
+    datetime.time(6, 0),  # 06:00
+    datetime.time(9, 0),  # 09:00
+    datetime.time(12, 0), # 12:00
+    datetime.time(15, 0), # 15:00
+    datetime.time(18, 0), # 18:00
+    datetime.time(21, 0)  # 21:00
+]
 
 
 async def process_game_cycle(context):
     """Process actions and update game state at the end of a cycle."""
-    now = datetime.datetime.now().time()
-
-    # Determine which cycle just ended
-    if now.hour == MORNING_CYCLE_RESULTS.hour and now.minute == MORNING_CYCLE_RESULTS.minute:
-        cycle = "morning"
-    elif now.hour == EVENING_CYCLE_RESULTS.hour and now.minute == EVENING_CYCLE_RESULTS.minute:
-        cycle = "evening"
-    else:
-        # If called at an unexpected time (e.g., manual admin trigger), use current cycle
-        if MORNING_CYCLE_START <= now < EVENING_CYCLE_START:
-            cycle = "morning"
-        else:
-            cycle = "evening"
-
-    logger.info(f"Processing {cycle} cycle")
+    now = datetime.datetime.now()
+    current_hour = now.hour
+    cycle_number = current_hour // 3  # 0-7 for each 3-hour period
+    
+    logger.info(f"Processing cycle {cycle_number} ({current_hour}:00)")
 
     try:
-        # Process each action separately with its own connection to avoid long transactions
-        actions = get_pending_actions(cycle)
-
+        # Process each action separately with its own connection
+        actions = get_pending_actions()
+        
         for action in actions:
             try:
-                # Process action with its own connection
                 process_single_action(action[0], action[1], action[2], action[3], action[4])
             except Exception as e:
                 logger.error(f"Error processing action {action[0]}: {e}")
@@ -63,20 +58,27 @@ async def process_game_cycle(context):
         # Apply decay to district control
         apply_district_decay()
 
-        # Distribute resources - use existing function with its own connection
+        # Distribute resources
         distribute_district_resources()
 
-        # Process international politicians one by one
+        # Process international politicians
         for politician_id in get_random_international_politicians(1, 3):
             try:
                 process_international_politician_action(politician_id)
             except Exception as e:
                 logger.error(f"Error processing international politician {politician_id}: {e}")
 
-        # Notify all players of results
-        await notify_players_of_results(context, cycle)
+        # Create cycle summary
+        create_cycle_summary(cycle_number)
+        
+        # Notify players of results
+        await notify_players_of_results(context, cycle_number)
+        
+        # Refresh actions for all players
+        await refresh_actions(context)
 
-        logger.info(f"Completed processing {cycle} cycle")
+        logger.info(f"Completed processing cycle {cycle_number}")
+
     except Exception as e:
         logger.error(f"Error processing game cycle: {e}")
         import traceback
@@ -155,111 +157,157 @@ def get_random_international_politicians(min_count, max_count):
         logger.error(f"Error getting international politicians: {e}")
         return []
 
-def process_action(action_id, player_id, action_type, target_type, target_id):
-    """Process a single action and return the result"""
-    result = {}
-
-    if target_type == "district":
-        if action_type == ACTION_INFLUENCE:
-            # Process influence action on district
-            success_roll = random.randint(1, 100)
-
-            if success_roll > 70:  # Success
-                update_district_control(player_id, target_id, 10)
-                result = {"status": "success", "message": f"Successfully increased influence in {target_id}",
-                          "control_change": 10}
-            elif success_roll > 30:  # Partial success
-                update_district_control(player_id, target_id, 5)
-                result = {"status": "partial", "message": f"Partially increased influence in {target_id}",
-                          "control_change": 5}
-            else:  # Failure
-                result = {"status": "failure", "message": f"Failed to increase influence in {target_id}",
-                          "control_change": 0}
-
-        elif action_type == ACTION_ATTACK:
-            # Process attack action on district
-            # Get current controlling player(s)
-            control_data = get_district_control(target_id)
-
-            if control_data:
-                # Attack the player with the most control
-                target_player_id = control_data[0][0]
-                success_roll = random.randint(1, 100)
-
-                if success_roll > 70:  # Success
-                    # Reduce target player's control
-                    update_district_control(target_player_id, target_id, -10)
-                    # Increase attacking player's control
-                    update_district_control(player_id, target_id, 10)
-                    result = {
-                        "status": "success",
-                        "message": f"Successfully attacked {target_id}",
-                        "target_player": target_player_id,
-                        "target_control_change": -10,
-                        "attacker_control_change": 10
-                    }
-                elif success_roll > 30:  # Partial success
-                    update_district_control(target_player_id, target_id, -5)
-                    update_district_control(player_id, target_id, 5)
-                    result = {
-                        "status": "partial",
-                        "message": f"Partially successful attack on {target_id}",
-                        "target_player": target_player_id,
-                        "target_control_change": -5,
-                        "attacker_control_change": 5
-                    }
-                else:  # Failure
-                    result = {
-                        "status": "failure",
-                        "message": f"Failed to attack {target_id}",
-                        "target_player": target_player_id,
-                        "target_control_change": 0,
-                        "attacker_control_change": 0
-                    }
+def calculate_action_success(action_type: str, player_id: int, target_id: str, power_multiplier: float = 1.0) -> dict:
+    """Calculate success chance and result of an action."""
+    try:
+        conn = sqlite3.connect('belgrade_game.db')
+        cursor = conn.cursor()
+        
+        base_success = {
+            'influence': 70,  # 70% базовый шанс для влияния
+            'attack': 60,     # 60% базовый шанс для атаки
+            'defense': 80     # 80% базовый шанс для обороны
+        }
+        
+        # Получаем базовый шанс успеха
+        success_chance = base_success.get(action_type, 50)
+        
+        # Получаем контроль игрока в районе
+        cursor.execute("""
+            SELECT control_points 
+            FROM district_control 
+            WHERE district_id = ? AND player_id = ?
+        """, (target_id, player_id))
+        
+        player_control = cursor.fetchone()
+        player_control = player_control[0] if player_control else 0
+        
+        # Модификаторы от контроля района
+        if player_control >= 75:
+            success_chance += 20  # +20% за абсолютный контроль
+        elif player_control >= 50:
+            success_chance += 15  # +15% за полный контроль
+        elif player_control >= 35:
+            success_chance += 10  # +10% за уверенный контроль
+        elif player_control >= 20:
+            success_chance += 5   # +5% за частичный контроль
+            
+        # Применяем множитель силы (для совместных действий)
+        success_chance = min(95, int(success_chance * power_multiplier))
+        
+        # Генерируем результат
+        roll = random.randint(1, 100)
+        
+        result = {
+            'roll': roll,
+            'chance': success_chance,
+            'power_multiplier': power_multiplier,
+            'control_bonus': success_chance - base_success[action_type],
+            'base_chance': base_success[action_type]
+        }
+        
+        if roll <= success_chance:
+            if roll <= success_chance - 20:
+                result['status'] = 'critical'  # Критический успех
+                result['effect_multiplier'] = 1.5
             else:
-                # No one controls the district, so just add control points
-                update_district_control(player_id, target_id, 10)
-                result = {
-                    "status": "success",
-                    "message": f"Claimed uncontrolled district {target_id}",
-                    "attacker_control_change": 10
-                }
+                result['status'] = 'success'  # Обычный успех
+                result['effect_multiplier'] = 1.0
+        else:
+            if roll >= success_chance + 20:
+                result['status'] = 'failure'  # Полный провал
+                result['effect_multiplier'] = 0
+            else:
+                result['status'] = 'partial'  # Частичный успех
+                result['effect_multiplier'] = 0.5
+        
+        conn.close()
+        return result
+        
+    except Exception as e:
+        logger.error(f"Error calculating action success: {e}")
+        return {'status': 'failure', 'effect_multiplier': 0}
 
-        elif action_type == ACTION_DEFENSE:
-            # Process defense action - will be used to reduce impact of attacks
-            result = {"status": "active", "message": f"Defensive measures in place for {target_id}"}
 
-        elif action_type == QUICK_ACTION_RECON:
-            # Process reconnaissance action
-            control_data = get_district_control(target_id)
-            district_info = get_district_info(target_id)
-
-            result = {
-                "status": "success",
-                "message": f"Reconnaissance of {target_id} complete",
-                "control_data": control_data,
-                "district_info": district_info
+def process_action(action_id: int, player_id: int, action_type: str, target_type: str, target_id: str, power_multiplier: float = 1.0) -> Dict[str, Any]:
+    """Process an action with optional power multiplier for joint actions"""
+    try:
+        conn = sqlite3.connect('belgrade_game.db')
+        cursor = conn.cursor()
+        
+        # Получаем язык игрока
+        lang = get_player_language(player_id)
+        
+        # Рассчитываем успешность действия
+        success_result = calculate_action_success(action_type, player_id, target_id, power_multiplier)
+        
+        # Базовые эффекты действий
+        base_effects = {
+            'influence': {
+                'control_points': 10,
+                'resource_cost': {'influence': 2}
+            },
+            'attack': {
+                'control_points': -15,
+                'resource_cost': {'force': 2}
+            },
+            'defense': {
+                'control_points': 5,
+                'resource_cost': {'force': 1, 'influence': 1}
             }
-
-        elif action_type == QUICK_ACTION_SUPPORT:
-            # Process support action (small influence gain)
-            update_district_control(player_id, target_id, 5)
-            result = {"status": "success", "message": f"Support action in {target_id} complete", "control_change": 5}
-
-    elif target_type == "politician":
-        if action_type == ACTION_INFLUENCE:
-            # Process influence on politician
-            politician = get_politician_info(politician_id=target_id)
-            if politician:
-                # Update friendliness
-                # This is simplified - in a real game you'd track per-player relationships
-                result = {
-                    "status": "success",
-                    "message": f"Improved relationship with {politician[1]}",
-                    "politician": politician[1]
-                }
-
-    return result
+        }
+        
+        result = {
+            'status': success_result['status'],
+            'effects': {},
+            'messages': []
+        }
+        
+        if action_type in base_effects:
+            effect = base_effects[action_type]
+            # Применяем множители к очкам контроля
+            control_points = int(effect['control_points'] * power_multiplier * success_result['effect_multiplier'])
+            
+            if target_type == 'district':
+                # Обновляем контроль района
+                cursor.execute("""
+                    UPDATE district_control 
+                    SET control_points = control_points + ?
+                    WHERE district_id = ? AND player_id = ?
+                """, (control_points, target_id, player_id))
+                
+                # Если строк не затронуто, создаем новую запись
+                if cursor.rowcount == 0:
+                    cursor.execute("""
+                        INSERT INTO district_control (district_id, player_id, control_points)
+                        VALUES (?, ?, ?)
+                    """, (target_id, player_id, control_points))
+                
+                result['effects']['control_points'] = control_points
+                
+                # Добавляем сообщение о результате
+                result['messages'].append(
+                    get_text(f"action_result_{success_result['status']}", lang,
+                            action=get_text(f"action_type_{action_type}", lang),
+                            target=target_id,
+                            roll=success_result['roll'],
+                            chance=success_result['chance'])
+                )
+                
+                # Если был множитель силы, добавляем сообщение
+                if power_multiplier != 1.0:
+                    result['messages'].append(
+                        get_text("joint_action_power_increase", lang, 
+                                percent=f"{(power_multiplier - 1) * 100:.0f}")
+                    )
+        
+        conn.commit()
+        conn.close()
+        return result
+        
+    except Exception as e:
+        logger.error(f"Error processing action: {e}")
+        return {'status': 'failed', 'error': str(e)}
 
 
 def process_international_politicians():
@@ -291,11 +339,11 @@ async def schedule_jobs(application):
     job_queue = application.job_queue
 
     # Schedule morning cycle results
-    morning_time = datetime.time(hour=MORNING_CYCLE_RESULTS.hour, minute=MORNING_CYCLE_RESULTS.minute)
+    morning_time = datetime.time(hour=CYCLE_STARTS[4].hour, minute=CYCLE_STARTS[4].minute)
     job_queue.run_daily(process_game_cycle, time=morning_time)
 
     # Schedule evening cycle results
-    evening_time = datetime.time(hour=EVENING_CYCLE_RESULTS.hour, minute=EVENING_CYCLE_RESULTS.minute)
+    evening_time = datetime.time(hour=CYCLE_STARTS[6].hour, minute=CYCLE_STARTS[6].minute)
     job_queue.run_daily(process_game_cycle, time=evening_time)
 
     # Schedule periodic action refreshes every 3 hours
@@ -629,7 +677,7 @@ async def refresh_actions_job(context):
 def get_current_cycle():
     """Return the current game cycle (morning or evening)."""
     now = datetime.datetime.now().time()
-    if MORNING_CYCLE_START <= now < EVENING_CYCLE_START:
+    if CYCLE_STARTS[0] <= now < CYCLE_STARTS[4]:
         return "morning"
     else:
         return "evening"
@@ -638,16 +686,124 @@ def get_current_cycle():
 def get_cycle_deadline():
     """Return the submission deadline for the current cycle."""
     now = datetime.datetime.now().time()
-    if MORNING_CYCLE_START <= now < EVENING_CYCLE_START:
-        return MORNING_CYCLE_DEADLINE
+    if CYCLE_STARTS[0] <= now < CYCLE_STARTS[4]:
+        return CYCLE_STARTS[4]
     else:
-        return EVENING_CYCLE_DEADLINE
+        return CYCLE_STARTS[6]
 
 
 def get_cycle_results_time():
     """Return the results time for the current cycle."""
     now = datetime.datetime.now().time()
-    if MORNING_CYCLE_START <= now < EVENING_CYCLE_START:
-        return MORNING_CYCLE_RESULTS
+    if CYCLE_STARTS[0] <= now < CYCLE_STARTS[4]:
+        return CYCLE_STARTS[4]
     else:
-        return EVENING_CYCLE_RESULTS
+        return CYCLE_STARTS[6]
+
+
+def calculate_quick_action_success(action_type: str, player_id: int, target_id: str) -> dict:
+    """Calculate success chance and result of a quick action."""
+    try:
+        conn = sqlite3.connect('belgrade_game.db')
+        cursor = conn.cursor()
+        
+        # Базовые шансы для быстрых действий
+        base_success = {
+            'scout': 85,     # Разведка - высокий шанс успеха
+            'info': 75,      # Сбор информации
+            'support': 70    # Поддержка
+        }
+        
+        # Получаем базовый шанс успеха
+        success_chance = base_success.get(action_type, 50)
+        
+        # Получаем контроль игрока в районе
+        cursor.execute("""
+            SELECT control_points 
+            FROM district_control 
+            WHERE district_id = ? AND player_id = ?
+        """, (target_id, player_id))
+        
+        player_control = cursor.fetchone()
+        player_control = player_control[0] if player_control else 0
+        
+        # Модификаторы от контроля района (меньше влияют на быстрые действия)
+        if player_control >= 75:
+            success_chance += 10  # +10% за абсолютный контроль
+        elif player_control >= 50:
+            success_chance += 7   # +7% за полный контроль
+        elif player_control >= 35:
+            success_chance += 5   # +5% за уверенный контроль
+        elif player_control >= 20:
+            success_chance += 3   # +3% за частичный контроль
+            
+        # Максимальный шанс 95%
+        success_chance = min(95, success_chance)
+        
+        # Генерируем результат
+        roll = random.randint(1, 100)
+        
+        result = {
+            'roll': roll,
+            'chance': success_chance,
+            'control_bonus': success_chance - base_success[action_type],
+            'base_chance': base_success[action_type]
+        }
+        
+        # Для быстрых действий - упрощённая система успеха
+        if roll <= success_chance:
+            result['status'] = 'success'
+            result['effect_multiplier'] = 1.0
+        else:
+            result['status'] = 'failure'
+            result['effect_multiplier'] = 0
+        
+        conn.close()
+        return result
+        
+    except Exception as e:
+        logger.error(f"Error calculating quick action success: {e}")
+        return {'status': 'failure', 'effect_multiplier': 0}
+
+
+def calculate_action_power(action_type: str, resources: dict) -> dict:
+    """Calculate action power based on resources used."""
+    power = {
+        'base_power': 10,  # Базовая сила действия
+        'bonus_power': 0,  # Бонусная сила от комбинаций
+        'special_effects': []  # Специальные эффекты
+    }
+    
+    # Бонусы за основной ресурс
+    primary_resources = {
+        'influence': 'influence',
+        'attack': 'force',
+        'defense': 'force'
+    }
+    
+    primary = primary_resources.get(action_type)
+    if primary and resources.get(primary, 0) >= 2:
+        power['bonus_power'] += 5  # +5 за использование двух основных ресурсов
+        power['special_effects'].append('primary_boost')
+    
+    # Бонусы за комбинации
+    if 'influence' in resources and 'information' in resources:
+        power['bonus_power'] += 3  # +3 за комбинацию влияние + информация
+        power['special_effects'].append('precision')
+        
+    if 'force' in resources and 'influence' in resources:
+        power['bonus_power'] += 3  # +3 за комбинацию сила + влияние
+        power['special_effects'].append('coordinated')
+        
+    if 'force' in resources and 'information' in resources:
+        power['bonus_power'] += 3  # +3 за комбинацию сила + информация
+        power['special_effects'].append('tactical')
+    
+    # Специальные эффекты от ресурсов
+    if 'information' in resources:
+        power['special_effects'].append('reveal')  # Раскрывает информацию о цели
+        
+    if 'resources' in resources:
+        power['special_effects'].append('sustain')  # Продлевает эффект
+    
+    return power

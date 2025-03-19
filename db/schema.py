@@ -131,14 +131,14 @@ def setup_database():
 
         # Initialize districts data
         districts = [
-            ('stari_grad', 'Stari Grad', 'Center of political power', 2, 0, 2, 0),
-            ('novi_beograd', 'Novi Beograd', 'Economic and business center', 1, 3, 0, 0),
-            ('zemun', 'Zemun', 'Criminal networks, smuggling', 0, 0, 1, 3),
-            ('savski_venac', 'Savski Venac', 'Diplomatic ties and embassies', 2, 0, 2, 0),
-            ('vozdovac', 'Vožovac', 'Military power and security', 1, 0, 0, 3),
-            ('cukarica', 'Čukarica', 'Industrial and working-class district', 0, 3, 0, 1),
-            ('palilula', 'Palilula', 'Youth and protest movements', 2, 0, 2, 0),
-            ('vracar', 'Vračar', 'Cultural and religious elite', 2, 1, 0, 0)
+            ('stari_grad', 'Stari grad', 'Center of political power', 2, 0, 2, 0),
+            ('liman', 'Liman', 'Economic and business center', 1, 3, 0, 0),
+            ('petrovaradin', 'Petrovaradin', 'Criminal networks, smuggling', 0, 0, 1, 3),
+            ('grbavica', 'Grbavica', 'Diplomatic ties and embassies', 2, 0, 2, 0),
+            ('adamoviceva', 'Adamoviceva naselje', 'Military power and security', 1, 0, 0, 3),
+            ('sajmiste', 'Sajmište', 'Industrial and working-class district', 0, 3, 0, 1),
+            ('podbara', 'Podbara', 'Youth and protest movements', 2, 0, 2, 0),
+            ('salajka', 'Salajka', 'Cultural and religious elite', 2, 1, 0, 0)
         ]
 
         cursor.execute("SELECT COUNT(*) FROM districts")
@@ -173,18 +173,7 @@ def setup_database():
         ]
 
         # International politicians
-        international_politicians = [
-            (10, 'Bill Clinton', 'USA', -5, None, 0, 50, 1, 'Sanctions against conservatives, support for opposition'),
-            (11, 'Tony Blair', 'UK', -4, None, 0, 50, 1, 'Influence on economic reforms, criticizes dictatorship'),
-            (12, 'Jacques Chirac', 'France', -3, None, 0, 50, 1, 'Supports diplomacy but does not intervene radically'),
-            (13, 'Joschka Fischer', 'Germany', -2, None, 0, 50, 1, 'Support for democratic activists'),
-            (14, 'Javier Solana', 'NATO', -3, None, 0, 50, 1, 'Political pressure, threat of military intervention'),
-            (15, 'Vladimir Zhirinovsky', 'Russia', 4, None, 0, 50, 1, 'Support for chaos and destabilization'),
-            (16, 'Yevgeny Primakov', 'Russia', 2, None, 0, 50, 1,
-             'Diplomatic support for the regime, help in bypassing sanctions'),
-            (17, 'Václav Havel', 'Czech Republic', -5, None, 0, 50, 1, 'Strengthens opposition, support through NGOs'),
-            (18, 'Madeleine Albright', 'USA', -4, None, 0, 50, 1, 'Advocates for tough sanctions against Milošević')
-        ]
+        international_politicians = get_international_politicians_data()
 
         cursor.execute("SELECT COUNT(*) FROM politicians")
         if cursor.fetchone()[0] == 0:
@@ -204,3 +193,49 @@ def setup_database():
     finally:
         if conn:
             conn.close()
+
+def use_action(player_id: int, is_main: bool = True) -> bool:
+    """
+    Use up one action for the player
+    
+    Args:
+        player_id: Player ID
+        is_main: If True, uses main action. If False, uses quick action.
+        
+    Returns:
+        bool: True if action was used, False if no actions left
+    """
+    try:
+        conn = sqlite3.connect('belgrade_game.db')
+        cursor = conn.cursor()
+        
+        # Check remaining actions
+        action_type = 'main_actions_left' if is_main else 'quick_actions_left'
+        cursor.execute(f"SELECT {action_type} FROM players WHERE player_id = ?", (player_id,))
+        result = cursor.fetchone()
+        
+        if not result or result[0] <= 0:
+            conn.close()
+            return False
+            
+        # Decrease action count
+        cursor.execute(
+            f"UPDATE players SET {action_type} = {action_type} - 1 WHERE player_id = ?",
+            (player_id,)
+        )
+        conn.commit()
+        conn.close()
+        return True
+        
+    except Exception as e:
+        logger.error(f"Error using action: {e}")
+        return False
+
+def get_international_politicians_data():
+    """Get initial international politicians data"""
+    from game.data.international_politicians import INTERNATIONAL_POLITICIANS
+    
+    # Convert to database format
+    return [(i+10, p["name"], p["role"], p["ideology_score"], 
+             None, p["influence"], 50, 1, p["description"]) 
+            for i, p in enumerate(INTERNATIONAL_POLITICIANS)]
