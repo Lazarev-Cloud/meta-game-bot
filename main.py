@@ -58,10 +58,9 @@ async def async_main() -> None:
         logger.info("Registering callback handlers...")
         register_callbacks(application)
 
-        # Set up scheduled jobs
+        # Set up scheduled jobs - Fixed: Don't use await with run_once
         logger.info("Setting up scheduled jobs...")
-        # Properly await the async function
-        await application.job_queue.run_once(schedule_jobs, 1)
+        application.job_queue.run_once(schedule_jobs, 1)  # Removed await
 
         # Add error handler
         logger.info("Setting up error handler...")

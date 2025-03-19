@@ -465,7 +465,7 @@ async def schedule_jobs(context):
     job_queue.run_daily(process_game_cycle, time=evening_time)
 
     # Schedule periodic action refreshes every 3 hours
-    job_queue.run_repeating(refresh_actions, interval=3 * 60 * 60)
+    job_queue.run_repeating(refresh_actions_job, interval=3 * 60 * 60)
 
     logger.info("Scheduled jobs set up")
 
