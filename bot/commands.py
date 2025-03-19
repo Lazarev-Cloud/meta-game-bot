@@ -1137,6 +1137,54 @@ async def admin_add_news(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(get_text("admin_news_added", lang, news_id=news_id))
 
 
+async def accept_trade(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Accept a trade offer."""
+    user = update.effective_user
+    lang = get_player_language(user.id)
+    args = context.args
+
+    if not args:
+        await update.message.reply_text(get_text("accept_trade_usage", lang))
+        return
+
+    try:
+        offer_id = int(args[0])
+
+        # Accept the trade offer using the existing function in db/queries.py
+        from db.queries import accept_trade_offer
+
+        success = accept_trade_offer(offer_id, user.id)
+
+        if success:
+            # Get sender ID to notify them
+            conn = sqlite3.connect('belgrade_game.db')
+            cursor = conn.cursor()
+            cursor.execute("SELECT sender_id FROM trade_offers WHERE offer_id = ?", (offer_id,))
+            result = cursor.fetchone()
+            conn.close()
+
+            if result:
+                sender_id = result[0]
+                # Notify sender
+                try:
+                    await context.bot.send_message(
+                        chat_id=sender_id,
+                        text=get_text("trade_accepted_notification", lang, player_id=user.id, offer_id=offer_id)
+                    )
+                except Exception as e:
+                    logger.error(f"Failed to notify sender {sender_id} about accepted trade: {e}")
+
+            await update.message.reply_text(get_text("trade_accepted", lang))
+        else:
+            await update.message.reply_text(get_text("trade_accept_failed", lang))
+
+    except ValueError:
+        await update.message.reply_text(get_text("invalid_offer_id", lang))
+    except Exception as e:
+        logger.error(f"Error in accept_trade: {e}")
+        await update.message.reply_text(get_text("error_accepting_trade", lang))
+
+
 async def admin_process_cycle(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Admin command to manually process a game cycle."""
     user = update.effective_user

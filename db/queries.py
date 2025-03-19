@@ -167,19 +167,6 @@ def get_district_info(conn, district_id):
     return cursor.fetchone()
 
 
-def get_remaining_actions(conn, player_id):
-    """Get remaining actions for player."""
-    cursor = conn.cursor()
-    cursor.execute(
-        "SELECT main_actions_left, quick_actions_left FROM players WHERE player_id = ?",
-        (player_id,)
-    )
-    actions = cursor.fetchone()
-    if actions:
-        return {"main": actions[0], "quick": actions[1]}
-    return {"main": 0, "quick": 0}
-
-
 @db_transaction
 def create_trade_offer(conn, sender_id, receiver_id, offer, request):
     """
@@ -251,17 +238,6 @@ def create_trade_offer(conn, sender_id, receiver_id, offer, request):
         return 0
 
 
-def get_remaining_actions(conn, player_id):
-    """Get remaining actions for player."""
-    cursor = conn.cursor()
-    cursor.execute(
-        "SELECT main_actions_left, quick_actions_left FROM players WHERE player_id = ?",
-        (player_id,)
-    )
-    actions = cursor.fetchone()
-    if actions:
-        return {"main": actions[0], "quick": actions[1]}
-    return {"main": 0, "quick": 0}
 
 
 @db_transaction
@@ -417,17 +393,6 @@ def accept_trade_offer(conn, offer_id, receiver_id):
         return False
 
 
-def get_remaining_actions(conn, player_id):
-    """Get remaining actions for player."""
-    cursor = conn.cursor()
-    cursor.execute(
-        "SELECT main_actions_left, quick_actions_left FROM players WHERE player_id = ?",
-        (player_id,)
-    )
-    actions = cursor.fetchone()
-    if actions:
-        return {"main": actions[0], "quick": actions[1]}
-    return {"main": 0, "quick": 0}
 
 
 @db_transaction

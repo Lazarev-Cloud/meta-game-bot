@@ -115,7 +115,7 @@ def setup_database():
         )
         ''')
 
-        # Create table for politician relationships
+        # Create table for politician relationships (removed duplicate)
         cursor.execute('''
         CREATE TABLE IF NOT EXISTS politician_relationships (
             politician_id INTEGER,
@@ -129,63 +129,88 @@ def setup_database():
         )
         ''')
 
-        # Create table for politician relationships
-        cursor.execute('''
-                CREATE TABLE IF NOT EXISTS politician_relationships (
-                    politician_id INTEGER,
-                    player_id INTEGER,
-                    friendliness INTEGER DEFAULT 50,
-                    last_interaction TEXT,
-                    interaction_count INTEGER DEFAULT 0,
-                    PRIMARY KEY (politician_id, player_id),
-                    FOREIGN KEY (politician_id) REFERENCES politicians (politician_id),
-                    FOREIGN KEY (player_id) REFERENCES players (player_id)
-                )
-                ''')
-
         # Create tables for trading system
         cursor.execute('''
-                CREATE TABLE IF NOT EXISTS trade_offers (
-                    offer_id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    sender_id INTEGER,
-                    receiver_id INTEGER,
-                    status TEXT DEFAULT 'pending',
-                    created_at TEXT,
-                    completed_at TEXT,
-                    FOREIGN KEY (sender_id) REFERENCES players (player_id),
-                    FOREIGN KEY (receiver_id) REFERENCES players (player_id)
-                )
-                ''')
+        CREATE TABLE IF NOT EXISTS trade_offers (
+            offer_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            sender_id INTEGER,
+            receiver_id INTEGER,
+            status TEXT DEFAULT 'pending',
+            created_at TEXT,
+            completed_at TEXT,
+            FOREIGN KEY (sender_id) REFERENCES players (player_id),
+            FOREIGN KEY (receiver_id) REFERENCES players (player_id)
+        )
+        ''')
 
         cursor.execute('''
-                CREATE TABLE IF NOT EXISTS trade_resources (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    offer_id INTEGER,
-                    resource_type TEXT,
-                    amount INTEGER,
-                    is_offer BOOLEAN,
-                    FOREIGN KEY (offer_id) REFERENCES trade_offers (offer_id)
-                )
-                ''')
+        CREATE TABLE IF NOT EXISTS trade_resources (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            offer_id INTEGER,
+            resource_type TEXT,
+            amount INTEGER,
+            is_offer BOOLEAN,
+            FOREIGN KEY (offer_id) REFERENCES trade_offers (offer_id)
+        )
+        ''')
+
+        # Create table for joint actions
+        cursor.execute('''
+        CREATE TABLE IF NOT EXISTS joint_actions (
+            action_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            initiator_id INTEGER,
+            district_id TEXT,
+            action_type TEXT,
+            created_at TEXT,
+            expires_at TEXT,
+            status TEXT DEFAULT 'pending',
+            FOREIGN KEY (initiator_id) REFERENCES players (player_id),
+            FOREIGN KEY (district_id) REFERENCES districts (district_id)
+        )
+        ''')
+
+        cursor.execute('''
+        CREATE TABLE IF NOT EXISTS joint_action_participants (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            action_id INTEGER,
+            player_id INTEGER,
+            join_time TEXT,
+            resources TEXT,
+            FOREIGN KEY (action_id) REFERENCES joint_actions (action_id),
+            FOREIGN KEY (player_id) REFERENCES players (player_id)
+        )
+        ''')
+
+        # Create table for district control history
+        cursor.execute('''
+        CREATE TABLE IF NOT EXISTS district_control_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            district_id TEXT,
+            player_id INTEGER,
+            cycle INTEGER,
+            control_points_change INTEGER,
+            timestamp TEXT,
+            FOREIGN KEY (district_id) REFERENCES districts (district_id),
+            FOREIGN KEY (player_id) REFERENCES players (player_id)
+        )
+        ''')
 
         # Initialize districts data
         districts = [
             ('stari_grad', 'Stari grad', 'Center of political power', 2, 0, 2, 0),
-            ('liman', 'Liman', 'Economic and business center', 1, 3, 0, 0),
-            ('petrovaradin', 'Petrovaradin', 'Criminal networks, smuggling', 0, 0, 1, 3),
-            ('grbavica', 'Grbavica', 'Diplomatic ties and embassies', 2, 0, 2, 0),
-            ('adamoviceva', 'Adamoviceva naselje', 'Military power and security', 1, 0, 0, 3),
-            ('sajmiste', 'Sajmište', 'Industrial and working-class district', 0, 3, 0, 1),
-            ('podbara', 'Podbara', 'Youth and protest movements', 2, 0, 2, 0),
-            ('salajka', 'Salajka', 'Cultural and religious elite', 2, 1, 0, 0)
+            ('novi_beograd', 'Novi Beograd', 'Economic and business center', 1, 3, 0, 0),
+            ('zemun', 'Zemun', 'Criminal networks, smuggling', 0, 0, 1, 3),
+            ('savski_venac', 'Savski Venac', 'Diplomatic ties and embassies', 2, 0, 2, 0),
+            ('vozdovac', 'Voždovac', 'Military power and security', 1, 0, 0, 3),
+            ('cukarica', 'Čukarica', 'Industrial and working-class district', 0, 3, 0, 1),
+            ('palilula', 'Palilula', 'Youth and protest movements', 2, 0, 2, 0),
+            ('vracar', 'Vračar', 'Cultural and religious elite', 2, 1, 0, 0)
         ]
 
-        cursor.execute("SELECT COUNT(*) FROM districts")
-        if cursor.fetchone()[0] == 0:
-            cursor.executemany(
-                "INSERT INTO districts VALUES (?, ?, ?, ?, ?, ?, ?)",
-                districts
-            )
+        cursor.executemany(
+            "INSERT INTO districts VALUES (?, ?, ?, ?, ?, ?, ?)",
+            districts
+        )
 
         # Initialize politicians data
         politicians = [
@@ -214,16 +239,14 @@ def setup_database():
         # International politicians
         international_politicians = get_international_politicians_data()
 
-        cursor.execute("SELECT COUNT(*) FROM politicians")
-        if cursor.fetchone()[0] == 0:
-            cursor.executemany(
-                "INSERT INTO politicians VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                politicians
-            )
-            cursor.executemany(
-                "INSERT INTO politicians VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                international_politicians
-            )
+        cursor.executemany(
+            "INSERT INTO politicians VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            politicians
+        )
+        cursor.executemany(
+            "INSERT INTO politicians VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            international_politicians
+        )
 
         conn.commit()
         logger.info("Database setup completed successfully")
@@ -232,6 +255,7 @@ def setup_database():
     finally:
         if conn:
             conn.close()
+
 
 def use_action(player_id: int, is_main: bool = True) -> bool:
     """
