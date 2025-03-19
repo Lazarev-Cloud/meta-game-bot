@@ -1,6 +1,8 @@
 import sqlite3
 import datetime
-from log import logger
+import logging
+
+logger = logging.getLogger(__name__)
 
 def create_cycle_summary(cycle_number: int):
     """Create a summary news entry for the cycle"""
@@ -38,7 +40,7 @@ def create_cycle_summary(cycle_number: int):
         """, (cycle_number,))
         
         control_changes = cursor.fetchall()
-        
+
         # Create summary content
         summary = f"Итоги цикла {cycle_start}:00-{cycle_end}:00\n\n"
         

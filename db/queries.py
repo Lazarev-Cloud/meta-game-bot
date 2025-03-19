@@ -167,6 +167,421 @@ def get_district_info(conn, district_id):
     return cursor.fetchone()
 
 
+def get_remaining_actions(conn, player_id):
+    """Get remaining actions for player."""
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT main_actions_left, quick_actions_left FROM players WHERE player_id = ?",
+        (player_id,)
+    )
+    actions = cursor.fetchone()
+    if actions:
+        return {"main": actions[0], "quick": actions[1]}
+    return {"main": 0, "quick": 0}
+
+
+@db_transaction
+def create_trade_offer(conn, sender_id, receiver_id, offer, request):
+    """
+    Create a new trade offer.
+
+    Args:
+        sender_id: ID of player making the offer
+        receiver_id: ID of player receiving the offer
+        offer: Dict of resources being offered {resource_type: amount}
+        request: Dict of resources being requested {resource_type: amount}
+
+    Returns:
+        offer_id of created offer, or 0 if failed
+    """
+    try:
+        cursor = conn.cursor()
+
+        # Verify sender has sufficient resources
+        sender_resources = get_player_resources(sender_id)
+        if not sender_resources:
+            logger.error(f"Sender {sender_id} not found or has no resources")
+            return 0
+
+        for resource, amount in offer.items():
+            if sender_resources.get(resource, 0) < amount:
+                logger.error(
+                    f"Sender {sender_id} lacks {resource}: needs {amount}, has {sender_resources.get(resource, 0)}")
+                return 0
+
+        # Check if receiver exists
+        cursor.execute("SELECT player_id FROM players WHERE player_id = ?", (receiver_id,))
+        if not cursor.fetchone():
+            logger.error(f"Receiver {receiver_id} not found")
+            return 0
+
+        # Create the offer
+        cursor.execute("""
+            INSERT INTO trade_offers 
+            (sender_id, receiver_id, status, created_at)
+            VALUES (?, ?, 'pending', ?)
+        """, (sender_id, receiver_id, datetime.datetime.now().isoformat()))
+
+        offer_id = cursor.lastrowid
+
+        # Add offered resources
+        for resource, amount in offer.items():
+            cursor.execute("""
+                INSERT INTO trade_resources
+                (offer_id, resource_type, amount, is_offer)
+                VALUES (?, ?, ?, 1)
+            """, (offer_id, resource, amount))
+
+        # Add requested resources
+        for resource, amount in request.items():
+            cursor.execute("""
+                INSERT INTO trade_resources
+                (offer_id, resource_type, amount, is_offer) 
+                VALUES (?, ?, ?, 0)
+            """, (offer_id, resource, amount))
+
+        # Deduct resources from sender
+        for resource, amount in offer.items():
+            update_player_resources_internal(conn, sender_id, resource, -amount)
+
+        return offer_id
+
+    except Exception as e:
+        logger.error(f"Error creating trade offer: {e}")
+        return 0
+
+
+def get_remaining_actions(conn, player_id):
+    """Get remaining actions for player."""
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT main_actions_left, quick_actions_left FROM players WHERE player_id = ?",
+        (player_id,)
+    )
+    actions = cursor.fetchone()
+    if actions:
+        return {"main": actions[0], "quick": actions[1]}
+    return {"main": 0, "quick": 0}
+
+
+@db_transaction
+def create_trade_offer(conn, sender_id, receiver_id, offer, request):
+    """
+    Create a new trade offer.
+
+    Args:
+        sender_id: ID of player making the offer
+        receiver_id: ID of player receiving the offer
+        offer: Dict of resources being offered {resource_type: amount}
+        request: Dict of resources being requested {resource_type: amount}
+
+    Returns:
+        offer_id of created offer, or 0 if failed
+    """
+    try:
+        cursor = conn.cursor()
+
+        # Verify sender has sufficient resources
+        sender_resources = get_player_resources(sender_id)
+        if not sender_resources:
+            logger.error(f"Sender {sender_id} not found or has no resources")
+            return 0
+
+        for resource, amount in offer.items():
+            if sender_resources.get(resource, 0) < amount:
+                logger.error(
+                    f"Sender {sender_id} lacks {resource}: needs {amount}, has {sender_resources.get(resource, 0)}")
+                return 0
+
+        # Check if receiver exists
+        cursor.execute("SELECT player_id FROM players WHERE player_id = ?", (receiver_id,))
+        if not cursor.fetchone():
+            logger.error(f"Receiver {receiver_id} not found")
+            return 0
+
+        # Create the offer
+        cursor.execute("""
+            INSERT INTO trade_offers 
+            (sender_id, receiver_id, status, created_at)
+            VALUES (?, ?, 'pending', ?)
+        """, (sender_id, receiver_id, datetime.datetime.now().isoformat()))
+
+        offer_id = cursor.lastrowid
+
+        # Add offered resources
+        for resource, amount in offer.items():
+            cursor.execute("""
+                INSERT INTO trade_resources
+                (offer_id, resource_type, amount, is_offer)
+                VALUES (?, ?, ?, 1)
+            """, (offer_id, resource, amount))
+
+        # Add requested resources
+        for resource, amount in request.items():
+            cursor.execute("""
+                INSERT INTO trade_resources
+                (offer_id, resource_type, amount, is_offer) 
+                VALUES (?, ?, ?, 0)
+            """, (offer_id, resource, amount))
+
+        # Deduct resources from sender
+        for resource, amount in offer.items():
+            update_player_resources_internal(conn, sender_id, resource, -amount)
+
+        return offer_id
+
+    except Exception as e:
+        logger.error(f"Error creating trade offer: {e}")
+        return 0
+
+
+@db_transaction
+def accept_trade_offer(conn, offer_id, receiver_id):
+    """
+    Accept and execute a trade offer.
+
+    Args:
+        offer_id: ID of the trade offer
+        receiver_id: ID of player accepting the offer
+
+    Returns:
+        bool: True if trade completed successfully
+    """
+    try:
+        cursor = conn.cursor()
+
+        # Verify offer exists and is pending
+        cursor.execute("""
+            SELECT sender_id, status 
+            FROM trade_offers 
+            WHERE offer_id = ? AND receiver_id = ? AND status = 'pending'
+        """, (offer_id, receiver_id))
+
+        offer = cursor.fetchone()
+        if not offer:
+            logger.error(f"Trade offer {offer_id} not found, not pending, or not for receiver {receiver_id}")
+            return False
+
+        sender_id = offer[0]
+
+        # Get trade details
+        cursor.execute("""
+            SELECT resource_type, amount, is_offer 
+            FROM trade_resources 
+            WHERE offer_id = ?
+        """, (offer_id,))
+
+        resources = cursor.fetchall()
+        offered = {}
+        requested = {}
+
+        for resource_type, amount, is_offer in resources:
+            if is_offer:
+                offered[resource_type] = amount
+            else:
+                requested[resource_type] = amount
+
+        # Verify receiver has sufficient resources for the requested items
+        receiver_resources = get_player_resources(receiver_id)
+        if not receiver_resources:
+            logger.error(f"Receiver {receiver_id} not found or has no resources")
+            return False
+
+        for resource, amount in requested.items():
+            if receiver_resources.get(resource, 0) < amount:
+                logger.error(
+                    f"Receiver {receiver_id} lacks {resource}: needs {amount}, has {receiver_resources.get(resource, 0)}")
+                return False
+
+        # Execute trade
+        # Transfer offered resources to receiver (already deducted from sender when offer was created)
+        for resource, amount in offered.items():
+            update_player_resources_internal(conn, receiver_id, resource, amount)
+
+        # Transfer requested resources from receiver to sender
+        for resource, amount in requested.items():
+            update_player_resources_internal(conn, receiver_id, resource, -amount)
+            update_player_resources_internal(conn, sender_id, resource, amount)
+
+        # Update offer status
+        cursor.execute("""
+            UPDATE trade_offers 
+            SET status = 'completed', completed_at = ?
+            WHERE offer_id = ?
+        """, (datetime.datetime.now().isoformat(), offer_id))
+
+        return True
+
+    except Exception as e:
+        logger.error(f"Error accepting trade offer: {e}")
+        return False
+
+
+def get_remaining_actions(conn, player_id):
+    """Get remaining actions for player."""
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT main_actions_left, quick_actions_left FROM players WHERE player_id = ?",
+        (player_id,)
+    )
+    actions = cursor.fetchone()
+    if actions:
+        return {"main": actions[0], "quick": actions[1]}
+    return {"main": 0, "quick": 0}
+
+
+@db_transaction
+def create_trade_offer(conn, sender_id, receiver_id, offer, request):
+    """
+    Create a new trade offer.
+
+    Args:
+        sender_id: ID of player making the offer
+        receiver_id: ID of player receiving the offer
+        offer: Dict of resources being offered {resource_type: amount}
+        request: Dict of resources being requested {resource_type: amount}
+
+    Returns:
+        offer_id of created offer, or 0 if failed
+    """
+    try:
+        cursor = conn.cursor()
+
+        # Verify sender has sufficient resources
+        sender_resources = get_player_resources(sender_id)
+        if not sender_resources:
+            logger.error(f"Sender {sender_id} not found or has no resources")
+            return 0
+
+        for resource, amount in offer.items():
+            if sender_resources.get(resource, 0) < amount:
+                logger.error(
+                    f"Sender {sender_id} lacks {resource}: needs {amount}, has {sender_resources.get(resource, 0)}")
+                return 0
+
+        # Check if receiver exists
+        cursor.execute("SELECT player_id FROM players WHERE player_id = ?", (receiver_id,))
+        if not cursor.fetchone():
+            logger.error(f"Receiver {receiver_id} not found")
+            return 0
+
+        # Create the offer
+        cursor.execute("""
+            INSERT INTO trade_offers 
+            (sender_id, receiver_id, status, created_at)
+            VALUES (?, ?, 'pending', ?)
+        """, (sender_id, receiver_id, datetime.datetime.now().isoformat()))
+
+        offer_id = cursor.lastrowid
+
+        # Add offered resources
+        for resource, amount in offer.items():
+            cursor.execute("""
+                INSERT INTO trade_resources
+                (offer_id, resource_type, amount, is_offer)
+                VALUES (?, ?, ?, 1)
+            """, (offer_id, resource, amount))
+
+        # Add requested resources
+        for resource, amount in request.items():
+            cursor.execute("""
+                INSERT INTO trade_resources
+                (offer_id, resource_type, amount, is_offer) 
+                VALUES (?, ?, ?, 0)
+            """, (offer_id, resource, amount))
+
+        # Deduct resources from sender
+        for resource, amount in offer.items():
+            update_player_resources_internal(conn, sender_id, resource, -amount)
+
+        return offer_id
+
+    except Exception as e:
+        logger.error(f"Error creating trade offer: {e}")
+        return 0
+
+
+@db_transaction
+def accept_trade_offer(conn, offer_id, receiver_id):
+    """
+    Accept and execute a trade offer.
+
+    Args:
+        offer_id: ID of the trade offer
+        receiver_id: ID of player accepting the offer
+
+    Returns:
+        bool: True if trade completed successfully
+    """
+    try:
+        cursor = conn.cursor()
+
+        # Verify offer exists and is pending
+        cursor.execute("""
+            SELECT sender_id, status 
+            FROM trade_offers 
+            WHERE offer_id = ? AND receiver_id = ? AND status = 'pending'
+        """, (offer_id, receiver_id))
+
+        offer = cursor.fetchone()
+        if not offer:
+            logger.error(f"Trade offer {offer_id} not found, not pending, or not for receiver {receiver_id}")
+            return False
+
+        sender_id = offer[0]
+
+        # Get trade details
+        cursor.execute("""
+            SELECT resource_type, amount, is_offer 
+            FROM trade_resources 
+            WHERE offer_id = ?
+        """, (offer_id,))
+
+        resources = cursor.fetchall()
+        offered = {}
+        requested = {}
+
+        for resource_type, amount, is_offer in resources:
+            if is_offer:
+                offered[resource_type] = amount
+            else:
+                requested[resource_type] = amount
+
+        # Verify receiver has sufficient resources for the requested items
+        receiver_resources = get_player_resources(receiver_id)
+        if not receiver_resources:
+            logger.error(f"Receiver {receiver_id} not found or has no resources")
+            return False
+
+        for resource, amount in requested.items():
+            if receiver_resources.get(resource, 0) < amount:
+                logger.error(
+                    f"Receiver {receiver_id} lacks {resource}: needs {amount}, has {receiver_resources.get(resource, 0)}")
+                return False
+
+        # Execute trade
+        # Transfer offered resources to receiver (already deducted from sender when offer was created)
+        for resource, amount in offered.items():
+            update_player_resources_internal(conn, receiver_id, resource, amount)
+
+        # Transfer requested resources from receiver to sender
+        for resource, amount in requested.items():
+            update_player_resources_internal(conn, receiver_id, resource, -amount)
+            update_player_resources_internal(conn, sender_id, resource, amount)
+
+        # Update offer status
+        cursor.execute("""
+            UPDATE trade_offers 
+            SET status = 'completed', completed_at = ?
+            WHERE offer_id = ?
+        """, (datetime.datetime.now().isoformat(), offer_id))
+
+        return True
+
+    except Exception as e:
+        logger.error(f"Error accepting trade offer: {e}")
+        return False
+
 @db_transaction
 def get_all_districts(conn):
     """Get all districts."""

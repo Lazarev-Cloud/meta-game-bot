@@ -504,6 +504,12 @@ TRANSLATIONS = {
         "trade_offer_failed": "❌ Не удалось создать предложение обмена",
         "invalid_player_id": "❌ Неверный ID игрока",
         "error_creating_trade": "❌ Ошибка при создании предложения обмена",
+        "accept_trade_usage": "Использование: /accept_trade [ID предложения]",
+        "trade_accepted": "✅ Вы приняли предложение обмена. Обмен завершен!",
+        "trade_accepted_notification": "✅ Игрок {player_id} принял ваше предложение обмена #{offer_id}. Обмен завершен!",
+        "trade_accept_failed": "❌ Не удалось принять предложение обмена. Предложение может быть недействительным, или у вас недостаточно ресурсов.",
+        "invalid_offer_id": "❌ Неверный ID предложения. Пожалуйста, укажите корректный номер.",
+        "error_accepting_trade": "❌ Произошла ошибка при принятии предложения обмена.",
 
         # Politician abilities
         "ability_administrative_desc": "Блокирует одну заявку противника в своём районе",

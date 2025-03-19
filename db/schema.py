@@ -129,6 +129,45 @@ def setup_database():
         )
         ''')
 
+        # Create table for politician relationships
+        cursor.execute('''
+                CREATE TABLE IF NOT EXISTS politician_relationships (
+                    politician_id INTEGER,
+                    player_id INTEGER,
+                    friendliness INTEGER DEFAULT 50,
+                    last_interaction TEXT,
+                    interaction_count INTEGER DEFAULT 0,
+                    PRIMARY KEY (politician_id, player_id),
+                    FOREIGN KEY (politician_id) REFERENCES politicians (politician_id),
+                    FOREIGN KEY (player_id) REFERENCES players (player_id)
+                )
+                ''')
+
+        # Create tables for trading system
+        cursor.execute('''
+                CREATE TABLE IF NOT EXISTS trade_offers (
+                    offer_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    sender_id INTEGER,
+                    receiver_id INTEGER,
+                    status TEXT DEFAULT 'pending',
+                    created_at TEXT,
+                    completed_at TEXT,
+                    FOREIGN KEY (sender_id) REFERENCES players (player_id),
+                    FOREIGN KEY (receiver_id) REFERENCES players (player_id)
+                )
+                ''')
+
+        cursor.execute('''
+                CREATE TABLE IF NOT EXISTS trade_resources (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    offer_id INTEGER,
+                    resource_type TEXT,
+                    amount INTEGER,
+                    is_offer BOOLEAN,
+                    FOREIGN KEY (offer_id) REFERENCES trade_offers (offer_id)
+                )
+                ''')
+
         # Initialize districts data
         districts = [
             ('stari_grad', 'Stari grad', 'Center of political power', 2, 0, 2, 0),

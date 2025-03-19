@@ -1,5 +1,7 @@
 import sqlite3
-from log import logger
+import logging
+
+logger = logging.getLogger(__name__)
 
 def calculate_resource_amount(control_points: int, base_amount: int) -> int:
     """Calculate resource amount based on control points."""

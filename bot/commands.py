@@ -1289,4 +1289,10 @@ def register_commands(application):
     application.add_handler(CommandHandler("admin_reset_all_actions", admin_reset_all_actions))
     application.add_handler(CommandHandler("admin_set_ideology", admin_set_ideology))
 
+    # Trading handlers
+    application.add_handler(CommandHandler("trade", trade_offer))
+    application.add_handler(CommandHandler("accept_trade", accept_trade))
+
+    logger.info("Command handlers registered")
+
     logger.info("Command handlers registered")
