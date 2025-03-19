@@ -113,14 +113,14 @@ def get_district_adjacency(district_id: str) -> List[str]:
     """
     # Define district adjacency (based on Belgrade geography)
     district_adjacency = {
-        'stari_grad': ['savski_venac', 'vracar', 'palilula'],
-        'novi_beograd': ['zemun', 'cukarica', 'savski_venac'],
-        'zemun': ['novi_beograd'],
-        'savski_venac': ['stari_grad', 'novi_beograd', 'vracar', 'cukarica', 'vozdovac'],
-        'vozdovac': ['savski_venac', 'vracar'],
-        'cukarica': ['novi_beograd', 'savski_venac'],
-        'palilula': ['stari_grad', 'vracar'],
-        'vracar': ['stari_grad', 'savski_venac', 'vozdovac', 'palilula']
+        'stari_grad': ['grbavica', 'salajka', 'podbara'],
+        'liman': ['petrovaradin', 'sajmiste', 'grbavica'],
+        'petrovaradin': ['liman'],
+        'grbavica': ['stari_grad', 'liman', 'salajka', 'sajmiste', 'adamoviceva'],
+        'adamoviceva': ['grbavica', 'salajka'],
+        'sajmiste': ['liman', 'grbavica'],
+        'podbara': ['stari_grad', 'salajka'],
+        'salajka': ['stari_grad', 'grbavica', 'adamoviceva', 'podbara']
     }
 
     return district_adjacency.get(district_id, [])
@@ -152,7 +152,7 @@ def get_district_special_events(district_id: str) -> List[Dict[str, Any]]:
                 'weight': 0.3
             }
         ],
-        'novi_beograd': [
+        'liman': [
             {
                 'name': 'foreign_investment',
                 'title_key': 'event_investment',
@@ -166,7 +166,7 @@ def get_district_special_events(district_id: str) -> List[Dict[str, Any]]:
                 'weight': 0.3
             }
         ],
-        'zemun': [
+        'petrovaradin': [
             {
                 'name': 'police_raid',
                 'title_key': 'event_police_raid',
@@ -180,7 +180,7 @@ def get_district_special_events(district_id: str) -> List[Dict[str, Any]]:
                 'weight': 0.3
             }
         ],
-        'savski_venac': [
+        'grbavica': [
             {
                 'name': 'diplomatic_reception',
                 'title_key': 'event_diplomatic',
@@ -188,7 +188,7 @@ def get_district_special_events(district_id: str) -> List[Dict[str, Any]]:
                 'weight': 0.2
             }
         ],
-        'vozdovac': [
+        'adamoviceva': [
             {
                 'name': 'military_exercise',
                 'title_key': 'event_military',
@@ -196,7 +196,7 @@ def get_district_special_events(district_id: str) -> List[Dict[str, Any]]:
                 'weight': 0.2
             }
         ],
-        'cukarica': [
+        'sajmiste': [
             {
                 'name': 'worker_strike',
                 'title_key': 'event_strike',
@@ -204,7 +204,7 @@ def get_district_special_events(district_id: str) -> List[Dict[str, Any]]:
                 'weight': 0.3
             }
         ],
-        'palilula': [
+        'podbara': [
             {
                 'name': 'student_protest',
                 'title_key': 'event_student',
@@ -212,7 +212,7 @@ def get_district_special_events(district_id: str) -> List[Dict[str, Any]]:
                 'weight': 0.3
             }
         ],
-        'vracar': [
+        'salajka': [
             {
                 'name': 'cultural_festival',
                 'title_key': 'event_festival',

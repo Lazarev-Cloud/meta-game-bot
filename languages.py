@@ -111,7 +111,7 @@ TRANSLATIONS = {
         "politician_undermine_success": "You have started undermining {name}'s influence. This may weaken their position in their district. Results will be processed at the end of the cycle.",
 
         # Cycle results
-        "cycle_results_title": "📊 *{cycle} Cycle Results*",
+        "cycle_results_title": "Результаты цикла {cycle}:00-{cycle_end}:00",
         "your_actions": "*Your Actions:*",
         "no_details": "No details available",
         "your_districts": "*Your Districts:*",
@@ -172,7 +172,104 @@ TRANSLATIONS = {
         "admin_control_updated": "Updated control for player {player_id} in district {district_id} to {control_points} points.",
 
         # Notifications
-        "actions_refreshed_notification": "Your actions have been refreshed! You now have 1 main action and 2 quick actions available."
+        "actions_refreshed_notification": "Your actions have been refreshed! You now have 1 main action and 2 quick actions available.",
+
+        # Time units
+        "hours": "ч",
+        "minutes": "мин",
+
+        # Joint actions
+        "joint_action_title": "Совместное действие в {district}",
+        "joint_action_description": "Выполнено координированное действие {action_type} с {count} участниками. Множитель силы: {multiplier}x",
+        "joint_action_power_increase": "Сила действия увеличена на {percent}% благодаря совместному действию",
+        
+        # Action types for joint actions
+        "action_type_influence": "влияние",
+        "action_type_attack": "атака",
+        "action_type_defense": "оборона",
+
+        # Cycle summary
+        "cycle_summary_title": "Итоги цикла {start}:00-{end}:00",
+        "cycle_summary_actions": "🎯 Основные действия:",
+        "cycle_summary_action_count": "- {action} в {target}: {count} раз",
+        "cycle_summary_control": "🏛 Значимые изменения контроля:",
+        "cycle_summary_control_change": "- Район {district}: {points:+d} очков",
+        
+        # Action results
+        "action_result_critical": "🌟 Критический успех! ({roll}/{chance}) Действие {action} в {target} выполнено с превосходным результатом!",
+        "action_result_success": "✅ Успех! ({roll}/{chance}) Действие {action} в {target} выполнено успешно.",
+        "action_result_partial": "⚠️ Частичный успех. ({roll}/{chance}) Действие {action} в {target} выполнено частично.",
+        "action_result_failure": "❌ Провал. ({roll}/{chance}) Действие {action} в {target} не удалось выполнить.",
+        
+        # Action success details
+        "success_control_bonus": "Бонус от контроля района: +{bonus}%",
+        "success_power_bonus": "Бонус от совместного действия: +{bonus}%",
+
+        # District control status
+        "control_strong": "🔒 Сильный контроль",
+        "control_full": "✅ Полный контроль",
+        "control_contested": "⚠️ Оспариваемый",
+        "control_weak": "❌ Слабое влияние",
+
+        # Resource distribution
+        "resource_distribution_title": "📦 Получение ресурсов",
+        "resource_from_district": "{district}: {amount}/{base} {resource} ({control_points} очков контроля - {control})",
+        
+        # Control types for resources
+        "control_absolute": "🌟 Абсолютный контроль (120%)",
+        "control_strong": "💪 Полный контроль (100%)",
+        "control_firm": "✅ Уверенный контроль (80%)",
+        "control_contested": "⚠️ Частичный контроль (60%)",
+        "control_weak": "⚡ Слабый контроль (40%)",
+
+        # Quick action types
+        "action_type_scout": "разведка",
+        "action_type_info": "сбор информации",
+        "action_type_support": "поддержка",
+        
+        # Quick action results
+        "quick_action_success": "✅ Успех! ({roll}/{chance}) Быстрое действие {action} в {target} выполнено.",
+        "quick_action_failure": "❌ Провал. ({roll}/{chance}) Быстрое действие {action} в {target} не удалось.",
+
+        # Action power effects
+        "effect_primary_boost": "🎯 Усиленное действие",
+        "effect_precision": "🔍 Точное действие",
+        "effect_coordinated": "🤝 Координированное действие",
+        "effect_tactical": "📋 Тактическое действие",
+        "effect_reveal": "👁 Раскрывает информацию",
+        "effect_sustain": "⏳ Продлённый эффект",
+        
+        # Resource combinations
+        "combo_double_primary": "+5 к силе действия за использование двух основных ресурсов",
+        "combo_influence_info": "+3 к силе действия за комбинацию влияния и информации",
+        "combo_force_influence": "+3 к силе действия за комбинацию силы и влияния",
+        "combo_force_info": "+3 к силе действия за комбинацию силы и информации",
+
+        # Trade notifications
+        "trade_completed_title": "🤝 Обмен выполнен",
+        "trade_completed_sender": "Ваше предложение обмена принято игроком {receiver_id}",
+        "trade_completed_receiver": "Вы приняли предложение обмена от игрока {sender_id}",
+
+        # Trade commands
+        "trade_offer_usage": "Использование: /trade <id игрока> offer <ресурс> <количество> request <ресурс> <количество>",
+        "trade_offer_invalid_format": "❌ Неверный формат команды",
+        "trade_offer_received": "📦 Новое предложение обмена от игрока {sender_id}\nПредлагает: {offered}\nЗапрашивает: {requested}\n\nID предложения: {offer_id}\nДля принятия используйте: /accept_trade {offer_id}",
+        "trade_offer_sent": "✅ Предложение обмена отправлено игроку {receiver_id}",
+        "trade_offer_sent_no_notify": "✅ Предложение обмена создано, но не удалось уведомить получателя",
+        "trade_offer_failed": "❌ Не удалось создать предложение обмена",
+        "invalid_player_id": "❌ Неверный ID игрока",
+        "error_creating_trade": "❌ Ошибка при создании предложения обмена",
+
+        # Politician abilities
+        "ability_administrative_desc": "Блокирует одну заявку противника в своём районе",
+        "ability_student_protest_desc": "Организует студенческий протест (+15 к атаке в выбранном районе)",
+        "ability_shadow_conversion_desc": "Конвертирует 2 любых ресурса в 3 единицы Силы",
+        "ability_diplomatic_immunity_desc": "Защищает от одной враждебной акции в течение дня",
+        "ability_media_pressure_desc": "Снижает эффективность действий противника в районе на 50%",
+        
+        "ability_not_available": "Способность недоступна (требуется уровень отношений {required}%)",
+        "ability_on_cooldown": "Способность на перезарядке (осталось {hours} ч)",
+        "ability_success": "Способность {name} успешно использована"
     },
 
     "ru": {
@@ -340,7 +437,84 @@ TRANSLATIONS = {
         "admin_control_updated": "Обновлён контроль для игрока {player_id} в районе {district_id} до {control_points} очков.",
 
         # Notifications
-        "actions_refreshed_notification": "Ваши заявки обновлены! Теперь у вас есть 1 основная заявка и 2 быстрые заявки."
+        "actions_refreshed_notification": "Ваши заявки обновлены! Теперь у вас есть 1 основная заявка и 2 быстрые заявки.",
+
+        # Time units
+        "hours": "ч",
+        "minutes": "мин",
+
+        # Joint actions
+        "joint_action_title": "Совместное действие в {district}",
+        "joint_action_description": "Выполнено координированное действие {action_type} с {count} участниками. Множитель силы: {multiplier}x",
+        "joint_action_power_increase": "Сила действия увеличена на {percent}% благодаря совместному действию",
+        
+        # Action types for joint actions
+        "action_type_influence": "влияние",
+        "action_type_attack": "атака",
+        "action_type_defense": "оборона",
+
+        # Cycle summary
+        "cycle_summary_title": "Итоги цикла {start}:00-{end}:00",
+        "cycle_summary_actions": "🎯 Основные действия:",
+        "cycle_summary_action_count": "- {action} в {target}: {count} раз",
+        "cycle_summary_control": "🏛 Значимые изменения контроля:",
+        "cycle_summary_control_change": "- Район {district}: {points:+d} очков",
+        
+        # Action results
+        "action_result_critical": "🌟 Критический успех! ({roll}/{chance}) Действие {action} в {target} выполнено с превосходным результатом!",
+        "action_result_success": "✅ Успех! ({roll}/{chance}) Действие {action} в {target} выполнено успешно.",
+        "action_result_partial": "⚠️ Частичный успех. ({roll}/{chance}) Действие {action} в {target} выполнено частично.",
+        "action_result_failure": "❌ Провал. ({roll}/{chance}) Действие {action} в {target} не удалось выполнить.",
+        
+        # Action success details
+        "success_control_bonus": "Бонус от контроля района: +{bonus}%",
+        "success_power_bonus": "Бонус от совместного действия: +{bonus}%",
+
+        # District control status
+        "control_strong": "🔒 Сильный контроль",
+        "control_full": "✅ Полный контроль",
+        "control_contested": "⚠️ Оспариваемый",
+        "control_weak": "❌ Слабое влияние",
+
+        # Action power effects
+        "effect_primary_boost": "🎯 Усиленное действие",
+        "effect_precision": "🔍 Точное действие",
+        "effect_coordinated": "🤝 Координированное действие",
+        "effect_tactical": "📋 Тактическое действие",
+        "effect_reveal": "👁 Раскрывает информацию",
+        "effect_sustain": "⏳ Продлённый эффект",
+        
+        # Resource combinations
+        "combo_double_primary": "+5 к силе действия за использование двух основных ресурсов",
+        "combo_influence_info": "+3 к силе действия за комбинацию влияния и информации",
+        "combo_force_influence": "+3 к силе действия за комбинацию силы и влияния",
+        "combo_force_info": "+3 к силе действия за комбинацию силы и информации",
+
+        # Trade notifications
+        "trade_completed_title": "🤝 Обмен выполнен",
+        "trade_completed_sender": "Ваше предложение обмена принято игроком {receiver_id}",
+        "trade_completed_receiver": "Вы приняли предложение обмена от игрока {sender_id}",
+
+        # Trade commands
+        "trade_offer_usage": "Использование: /trade <id игрока> offer <ресурс> <количество> request <ресурс> <количество>",
+        "trade_offer_invalid_format": "❌ Неверный формат команды",
+        "trade_offer_received": "📦 Новое предложение обмена от игрока {sender_id}\nПредлагает: {offered}\nЗапрашивает: {requested}\n\nID предложения: {offer_id}\nДля принятия используйте: /accept_trade {offer_id}",
+        "trade_offer_sent": "✅ Предложение обмена отправлено игроку {receiver_id}",
+        "trade_offer_sent_no_notify": "✅ Предложение обмена создано, но не удалось уведомить получателя",
+        "trade_offer_failed": "❌ Не удалось создать предложение обмена",
+        "invalid_player_id": "❌ Неверный ID игрока",
+        "error_creating_trade": "❌ Ошибка при создании предложения обмена",
+
+        # Politician abilities
+        "ability_administrative_desc": "Блокирует одну заявку противника в своём районе",
+        "ability_student_protest_desc": "Организует студенческий протест (+15 к атаке в выбранном районе)",
+        "ability_shadow_conversion_desc": "Конвертирует 2 любых ресурса в 3 единицы Силы",
+        "ability_diplomatic_immunity_desc": "Защищает от одной враждебной акции в течение дня",
+        "ability_media_pressure_desc": "Снижает эффективность действий противника в районе на 50%",
+        
+        "ability_not_available": "Способность недоступна (требуется уровень отношений {required}%)",
+        "ability_on_cooldown": "Способность на перезарядке (осталось {hours} ч)",
+        "ability_success": "Способность {name} успешно использована"
     }
 }
 
