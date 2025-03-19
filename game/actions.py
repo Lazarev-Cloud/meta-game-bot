@@ -3,12 +3,12 @@ import json
 import logging
 import random
 import sqlite3
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Literal
 
 from db.queries import (
     distribute_district_resources,
     add_news, get_news, get_player_resources, get_player_language,
-    get_player_districts, refresh_player_actions
+    get_player_districts, refresh_player_actions, db_transaction
 )
 from game.news import create_cycle_summary
 from languages import get_text, get_cycle_name
@@ -51,9 +51,10 @@ async def process_game_cycle(context):
     logger.info(f"Processing {cycle} cycle at {now}")
 
     try:
-        # Get all pending actions for this cycle
+        # Get all pending actions for this cycle using connection pool
         actions = get_pending_actions(cycle)
 
+        # Process actions
         for action in actions:
             try:
                 action_id, player_id, action_type, target_type, target_id = action
@@ -76,7 +77,7 @@ async def process_game_cycle(context):
                 logger.error(f"Error processing international politician {politician_id}: {e}")
 
         # Create cycle summary
-        cycle_number = current_hour // 3
+        cycle_number = current_time.hour // 3
         create_cycle_summary(cycle_number)
 
         # Notify players of results
@@ -92,54 +93,88 @@ async def process_game_cycle(context):
         logger.error(f"Exception traceback:\n{tb_string}")
 
 
-def get_pending_actions(cycle: str) -> List[tuple]:
-    """Get all pending actions for a cycle with a dedicated connection."""
+
+@db_transaction
+def process_all_cycle_actions(conn, cycle: str):
+    """Process all actions for a cycle in a single transaction."""
+    cursor = conn.cursor()
+
+    # Get all pending actions for this cycle
+    cursor.execute(
+        "SELECT action_id, player_id, action_type, target_type, target_id FROM actions WHERE status = 'pending' AND cycle = ?",
+        (cycle,)
+    )
+    actions = cursor.fetchall()
+
+    for action in actions:
+        try:
+            action_id, player_id, action_type, target_type, target_id = action
+            process_single_action_in_transaction(conn, action_id, player_id, action_type, target_type, target_id)
+        except Exception as e:
+            logger.error(f"Error processing action {action[0]}: {e}")
+            # Continue to next action
+
+
+def process_single_action_in_transaction(conn, action_id, player_id, action_type, target_type, target_id):
+    """Process a single action within an existing transaction."""
     try:
-        conn = sqlite3.connect('belgrade_game.db')
-        cursor = conn.cursor()
-        cursor.execute(
-            "SELECT action_id, player_id, action_type, target_type, target_id FROM actions WHERE status = 'pending' AND cycle = ?",
-            (cycle,)
-        )
-        actions = cursor.fetchall()
-        conn.close()
-        return actions
-    except Exception as e:
-        logger.error(f"Error getting pending actions: {e}")
-        return []
+        result = process_action_in_transaction(conn, player_id, action_type, target_type, target_id)
 
-
-def process_single_action(action_id: int, player_id: int, action_type: str, target_type: str, target_id: str) -> bool:
-    """Process a single action with its own connection."""
-    try:
-        # Process the action
-        result = process_action(action_id, player_id, action_type, target_type, target_id)
-
-        # Update status
-        conn = sqlite3.connect('belgrade_game.db')
         cursor = conn.cursor()
         cursor.execute(
             "UPDATE actions SET status = 'completed', result = ? WHERE action_id = ?",
             (json.dumps(result), action_id)
         )
-        conn.commit()
-        conn.close()
         return True
     except Exception as e:
         logger.error(f"Error processing single action {action_id}: {e}")
         return False
 
 
-def apply_district_decay() -> bool:
-    """Apply decay to district control with a dedicated connection."""
+# Use database connection pool with the db_transaction decorator
+@db_transaction
+def get_pending_actions(conn, cycle: str) -> List[tuple]:
+    """Get all pending actions for a cycle using the connection pool."""
     try:
-        conn = sqlite3.connect('belgrade_game.db')
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT action_id, player_id, action_type, target_type, target_id FROM actions WHERE status = 'pending' AND cycle = ?",
+            (cycle,)
+        )
+        return cursor.fetchall()
+    except Exception as e:
+        logger.error(f"Error getting pending actions: {e}")
+        return []
+
+
+
+@db_transaction
+def process_single_action(conn, action_id: int, player_id: int, action_type: str, target_type: str, target_id: str) -> bool:
+    """Process a single action using the connection pool."""
+    try:
+        # Process the action
+        result = process_action(conn, player_id, action_type, target_type, target_id)
+
+        # Update status
+        cursor = conn.cursor()
+        cursor.execute(
+            "UPDATE actions SET status = 'completed', result = ? WHERE action_id = ?",
+            (json.dumps(result), action_id)
+        )
+        return True
+    except Exception as e:
+        logger.error(f"Error processing single action {action_id}: {e}")
+        return False
+
+
+@db_transaction
+def apply_district_decay(conn) -> bool:
+    """Apply decay to district control using the connection pool."""
+    try:
         cursor = conn.cursor()
         cursor.execute(
             "UPDATE district_control SET control_points = MAX(0, control_points - 5) WHERE control_points > 0"
         )
-        conn.commit()
-        conn.close()
         return True
     except Exception as e:
         logger.error(f"Error applying district decay: {e}")
@@ -163,8 +198,24 @@ def get_random_international_politicians(min_count: int, max_count: int) -> List
         return []
 
 
-def calculate_action_success(action_type: str, player_id: int, target_id: str, power_multiplier: float = 1.0) -> dict:
-    """Calculate success chance and result of an action."""
+def calculate_action_success(
+        action_type: Literal["influence", "attack", "defense"],
+        player_id: int,
+        target_id: str,
+        power_multiplier: float = 1.0
+) -> Dict[str, Any]:
+    """
+    Calculate success chance and result of an action.
+
+    Args:
+        action_type: Type of action (influence, attack, defense)
+        player_id: ID of the player performing the action
+        target_id: ID of the target district
+        power_multiplier: Optional power multiplier for joint actions
+
+    Returns:
+        Dict containing success result information
+    """
     try:
         conn = sqlite3.connect('belgrade_game.db')
         cursor = conn.cursor()

@@ -392,15 +392,14 @@ def detect_language_from_message(message_text: str) -> str:
     Returns:
         Detected language code ('en' or 'ru')
     """
-    # Count characters in Cyrillic alphabet
+    # Count Cyrillic characters for Russian detection
     cyrillic_count = sum(1 for char in message_text if 0x0400 <= ord(char) <= 0x04FF)
 
-    # If more than 30% of characters are Cyrillic, assume Russian
+    # If more than 30% characters are Cyrillic, assume Russian
     if cyrillic_count / max(1, len(message_text)) > 0.3:
         return "ru"
 
-    return "en"
-
+    return "en"  # Default to English
 
 def format_resource_list(resources: Dict[str, int], lang: str = "en") -> str:
     """

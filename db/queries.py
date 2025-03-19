@@ -1,5 +1,3 @@
-d
-
 import sqlite3
 import logging
 import datetime
@@ -185,17 +183,14 @@ db_connection_pool = DatabaseConnectionPool()
 def db_transaction(func: Callable) -> Callable:
     """
     Decorator for database transactions with advanced error handling.
-
-    :param func: Function to be wrapped with transaction management
-    :return: Wrapped function with transaction support
     """
-
     @wraps(func)
     def wrapper(*args: Any, **kwargs: Any) -> Any:
         conn = None
         retry_delay = 0.5  # seconds
+        max_retries = 3
 
-        for attempt in range(3):  # max retries
+        for attempt in range(max_retries):
             try:
                 # Get connection from the pool
                 conn = db_connection_pool.get_connection()
@@ -212,40 +207,30 @@ def db_transaction(func: Callable) -> Callable:
                 return result
 
             except sqlite3.OperationalError as e:
-                # Handle database locked errors with exponential backoff
                 if conn:
                     try:
                         conn.rollback()
                     except Exception:
                         pass
 
-                if "database is locked" in str(e) and attempt < 2:
-                    logger.warning(f"Database locked, retrying in {retry_delay}s (attempt {attempt + 1}/3)")
+                if "database is locked" in str(e) and attempt < max_retries - 1:
+                    logger.warning(f"Database locked, retrying in {retry_delay}s (attempt {attempt + 1}/{max_retries})")
                     time.sleep(retry_delay)
                     retry_delay *= 2  # Exponential backoff
                     continue
-
                 logger.error(f"Database operational error in {func.__name__}: {e}")
                 raise
 
-            except DatabaseConnectionPoolError as e:
-                # Handle connection pool specific errors
-                logger.error(f"Connection pool error in {func.__name__}: {e}")
-                raise
-
             except Exception as e:
-                # Handle other unexpected errors
                 if conn:
                     try:
                         conn.rollback()
                     except Exception:
                         pass
-
                 logger.error(f"Unexpected error in {func.__name__}: {e}")
                 raise
 
             finally:
-                # Always return the connection to the pool
                 if conn:
                     try:
                         db_connection_pool.return_connection(conn)
@@ -253,7 +238,6 @@ def db_transaction(func: Callable) -> Callable:
                         logger.error(f"Error returning connection: {e}")
 
     return wrapper
-
 
 # Cleanup method to be called when the application exits
 def cleanup_database_pool():
@@ -716,6 +700,7 @@ def refresh_player_actions(conn, player_id):
     return cursor.rowcount > 0
 
 
+
 @db_transaction
 def update_action_counts(conn, player_id):
     """Reset action counts if it's been more than 3 hours since last refresh."""
@@ -740,7 +725,6 @@ def update_action_counts(conn, player_id):
         )
         return True
     return False
-
 
 # News-related queries
 @db_transaction

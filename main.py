@@ -8,11 +8,10 @@ Main entry point for the bot application
 
 import logging
 import sys
-import asyncio
+import sqlite3
 from telegram import Update
 from telegram.ext import Application
-from languages import get_text, get_player_language, init_language_support  # Fixed import
-import sqlite3
+from languages import get_text, get_player_language, init_language_support
 from bot.callbacks import register_callbacks
 from bot.commands import register_commands
 from config import TOKEN, ADMIN_IDS
@@ -32,8 +31,8 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-async def async_main() -> None:
-    """Start the bot asynchronously."""
+def main() -> None:
+    """Start the bot."""
     # Display startup message
     logger.info("Starting Belgrade Game Bot...")
 
@@ -44,7 +43,7 @@ async def async_main() -> None:
 
         # Initialize language support
         logger.info("Initializing language support...")
-        init_language_support()  # Calls init_admin_language_support internally
+        init_language_support()
 
         # Create the Application
         logger.info("Initializing Telegram bot...")
@@ -58,9 +57,9 @@ async def async_main() -> None:
         logger.info("Registering callback handlers...")
         register_callbacks(application)
 
-        # Set up scheduled jobs - Fixed: Don't use await with run_once
+        # Set up scheduled jobs - no await needed
         logger.info("Setting up scheduled jobs...")
-        application.job_queue.run_once(schedule_jobs, 1)  # Removed await
+        application.job_queue.run_once(schedule_jobs, 1)
 
         # Add error handler
         logger.info("Setting up error handler...")
@@ -72,7 +71,7 @@ async def async_main() -> None:
 
         # Start the Bot
         logger.info("Bot starting up - Press Ctrl+C to stop")
-        await application.run_polling(allowed_updates=Update.ALL_TYPES)
+        application.run_polling(allowed_updates=Update.ALL_TYPES)
     except Exception as e:
         logger.critical(f"Failed to initialize bot: {e}")
         import traceback
@@ -80,11 +79,6 @@ async def async_main() -> None:
         tb_string = ''.join(tb_list)
         logger.critical(f"Initialization error traceback:\n{tb_string}")
         sys.exit(1)
-
-
-def main() -> None:
-    """Entry point that runs the async main function."""
-    asyncio.run(async_main())
 
 
 def validate_system():
@@ -145,7 +139,6 @@ async def error_handler(update, context):
     if update and update.effective_chat:
         try:
             # Get user's language
-            user_id = update.effective_chat.id
             lang = "en"  # Default to English
             if hasattr(update, 'effective_user') and update.effective_user:
                 try:

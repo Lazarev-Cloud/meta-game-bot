@@ -257,43 +257,6 @@ def setup_database():
             conn.close()
 
 
-def use_action(player_id: int, is_main: bool = True) -> bool:
-    """
-    Use up one action for the player
-    
-    Args:
-        player_id: Player ID
-        is_main: If True, uses main action. If False, uses quick action.
-        
-    Returns:
-        bool: True if action was used, False if no actions left
-    """
-    try:
-        conn = sqlite3.connect('belgrade_game.db')
-        cursor = conn.cursor()
-        
-        # Check remaining actions
-        action_type = 'main_actions_left' if is_main else 'quick_actions_left'
-        cursor.execute(f"SELECT {action_type} FROM players WHERE player_id = ?", (player_id,))
-        result = cursor.fetchone()
-        
-        if not result or result[0] <= 0:
-            conn.close()
-            return False
-            
-        # Decrease action count
-        cursor.execute(
-            f"UPDATE players SET {action_type} = {action_type} - 1 WHERE player_id = ?",
-            (player_id,)
-        )
-        conn.commit()
-        conn.close()
-        return True
-        
-    except Exception as e:
-        logger.error(f"Error using action: {e}")
-        return False
-
 def get_international_politicians_data():
     """Get initial international politicians data"""
     from game.data.international_politicians import INTERNATIONAL_POLITICIANS

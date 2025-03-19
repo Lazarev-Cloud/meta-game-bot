@@ -184,6 +184,48 @@ def get_districts_for_selection(conn, lang="en"):
     return districts
 
 
+@db_transaction
+def get_player_status(conn, player_id):
+    """Get all player status data in a single transaction."""
+    try:
+        cursor = conn.cursor()
+
+        # Get player info and all related data in efficient queries
+        cursor.execute("SELECT * FROM players WHERE player_id = ?", (player_id,))
+        player = cursor.fetchone()
+
+        if not player:
+            return None
+
+        lang = player[7] if len(player) > 7 and player[7] else "en"
+
+        # Get resources in one query
+        cursor.execute("SELECT influence, resources, information, force FROM resources WHERE player_id = ?",
+                       (player_id,))
+        resources_data = cursor.fetchone()
+        resources = {
+            "influence": resources_data[0] if resources_data else 0,
+            "resources": resources_data[1] if resources_data else 0,
+            "information": resources_data[2] if resources_data else 0,
+            "force": resources_data[3] if resources_data else 0
+        }
+
+        # Get districts in one query with JOIN
+        cursor.execute("""
+            SELECT d.district_id, d.name, dc.control_points 
+            FROM district_control dc
+            JOIN districts d ON dc.district_id = d.district_id
+            WHERE dc.player_id = ?
+            ORDER BY dc.control_points DESC
+        """, (player_id,))
+        districts = cursor.fetchall()
+
+        return player, resources, districts, {"main": player[4], "quick": player[5]}, lang
+
+    except Exception as e:
+        logger.error(f"Error getting player status: {e}")
+        return None
+
 async def admin_set_control(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Admin command to set district control points."""
     user = update.effective_user

@@ -34,27 +34,17 @@ def validate_resource_type(resource_type: str) -> bool:
     return resource_type in VALID_RESOURCE_TYPES
 
 
-def validate_resource_amount(amount: Union[str, int]) -> Tuple[bool, int]:
-    """
-    Validate if the resource amount is valid
-
-    Args:
-        amount: Amount to validate (string or integer)
-
-    Returns:
-        Tuple[bool, int]: (is_valid, parsed_amount)
-    """
+def validate_resource_amount(amount: Union[str, int]) -> Tuple[bool, int, str]:
+    """Enhanced resource amount validation with error message"""
     try:
-        # Convert to integer if it's a string
         amount_int = int(amount)
 
-        # Check if positive
         if amount_int <= 0:
-            return False, 0
+            return False, 0, "Amount must be greater than zero"
 
-        return True, amount_int
+        return True, amount_int, ""
     except (ValueError, TypeError):
-        return False, 0
+        return False, 0, "Amount must be a valid number"
 
 
 def validate_district_id(district_id: str) -> bool:
@@ -108,25 +98,23 @@ def validate_politician_id(politician_id: Union[str, int]) -> bool:
         return False
 
 
-def validate_character_name(name: str) -> bool:
+def validate_character_name(name: str) -> Tuple[bool, str]:
     """
-    Validate a character name (reasonable length, no special characters)
-
-    Args:
-        name: Character name to validate
-
-    Returns:
-        bool: True if valid, False otherwise
+    Validate a character name with detailed error message
     """
-    # Check if name is not empty and within reasonable length
-    if not name or len(name) < 2 or len(name) > 30:
-        return False
+    if not name:
+        return False, "Name cannot be empty"
 
-    # Check for invalid characters (basic validation - can be expanded)
+    if len(name) < 2:
+        return False, "Name is too short (minimum 2 characters)"
+
+    if len(name) > 30:
+        return False, "Name is too long (maximum 30 characters)"
+
     if re.search(r'[<>/\\]', name):
-        return False
+        return False, "Name contains invalid characters"
 
-    return True
+    return True, ""
 
 
 def validate_player_resources(player_id: int, resource_requirements: Dict[str, int]) -> bool:
