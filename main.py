@@ -11,8 +11,7 @@ import sys
 import asyncio
 from telegram import Update
 from telegram.ext import Application
-from languages import get_text, get_player_language
-from languages_update import init_language_support
+from languages import get_text, get_player_language, init_language_support  # Fixed import
 import sqlite3
 from bot.callbacks import register_callbacks
 from bot.commands import register_commands
@@ -45,12 +44,7 @@ async def async_main() -> None:
 
         # Initialize language support
         logger.info("Initializing language support...")
-        init_language_support()
-
-        # Initialize admin language support
-        logger.info("Initializing admin language support...")
-        from languages_update import init_admin_language_support
-        init_admin_language_support()
+        init_language_support()  # Calls init_admin_language_support internally
 
         # Create the Application
         logger.info("Initializing Telegram bot...")
@@ -168,8 +162,7 @@ async def error_handler(update, context):
         except Exception as e:
             logger.error(f"Error in error handler while sending message: {e}")
 
-    # You might want to add code to notify admins about critical errors
-    # For example, sending a message to specified admin chat IDs
+    # Notify admins about critical errors
     try:
         for admin_id in ADMIN_IDS:
             if update:

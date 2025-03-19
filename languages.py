@@ -990,6 +990,6 @@ def init_language_support():
     # Check for missing translations
     check_missing_translations()
 
-    logging.info("Language support initialized")
+    logger.info("Language support initialized")
 
     return True

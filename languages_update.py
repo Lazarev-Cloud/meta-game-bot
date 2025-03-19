@@ -310,34 +310,21 @@ ADMIN_TRANSLATIONS = {
 }
 
 
-# To add these translations to the main translations dictionary
-def update_admin_translations():
-    """Update the main translations dictionary with admin translations"""
-    try:
-        from languages import TRANSLATIONS
-
-        for lang in ADMIN_TRANSLATIONS:
-            if lang in TRANSLATIONS:
-                # Update existing language with admin translations
-                for key, value in ADMIN_TRANSLATIONS[lang].items():
-                    TRANSLATIONS[lang][key] = value
-
-        logger.info("Admin translations added")
-    except ImportError:
-        logger.error("Failed to import TRANSLATIONS from languages.py")
-    except Exception as e:
-        logger.error(f"Error in update_admin_translations: {e}")
-
-
-def update_translations():
+def update_translations(translations_dict=None):
     """
     Update the main translations dictionary with additional translations
 
     This function must be called during initialization to ensure all
     new translations are available in the main dictionary
+
+    Args:
+        translations_dict: Optional dictionary to update directly (for testing)
     """
     try:
-        from languages import TRANSLATIONS
+        if translations_dict is None:
+            from languages import TRANSLATIONS
+        else:
+            TRANSLATIONS = translations_dict
 
         for lang in ADDITIONAL_TRANSLATIONS:
             if lang in TRANSLATIONS:
@@ -350,10 +337,49 @@ def update_translations():
                 TRANSLATIONS[lang] = ADDITIONAL_TRANSLATIONS[lang]
 
         logger.info("Translations updated with additional entries")
-    except ImportError:
-        logger.error("Failed to import TRANSLATIONS from languages.py")
+        return True
+    except ImportError as e:
+        logger.error(f"Failed to import TRANSLATIONS from languages.py: {e}")
+        return False
     except Exception as e:
         logger.error(f"Error in update_translations: {e}")
+        return False
+
+
+def update_admin_translations(translations_dict=None):
+    """
+    Update the main translations dictionary with admin translations
+
+    Args:
+        translations_dict: Optional dictionary to update directly (for testing)
+    """
+    try:
+        if translations_dict is None:
+            from languages import TRANSLATIONS
+        else:
+            TRANSLATIONS = translations_dict
+
+        for lang in ADMIN_TRANSLATIONS:
+            if lang in TRANSLATIONS:
+                # Update existing language with admin translations
+                for key, value in ADMIN_TRANSLATIONS[lang].items():
+                    TRANSLATIONS[lang][key] = value
+
+        logger.info("Admin translations added")
+        return True
+    except ImportError as e:
+        logger.error(f"Failed to import TRANSLATIONS from languages.py: {e}")
+        return False
+    except Exception as e:
+        logger.error(f"Error in update_admin_translations: {e}")
+        return False
+
+
+def init_admin_language_support():
+    """Initialize admin language support by updating admin translations"""
+    update_admin_translations()
+    logger.info("Admin language support initialized")
+    return True
 
 
 def detect_language_from_message(message_text: str) -> str:
@@ -439,21 +465,6 @@ def get_translated_keyboard(keyboard_items: List[Dict[str, str]], lang: str = "e
     except Exception as e:
         logger.error(f"Error in get_translated_keyboard: {e}")
         return keyboard_items
-
-
-# Initialize admin language support
-def init_admin_language_support():
-    """Initialize admin language support by updating admin translations"""
-    update_admin_translations()
-    logger.info("Admin language support initialized")
-
-
-# Initialize all language updates
-def init_language_updates():
-    """Initialize all language updates"""
-    update_translations()
-    init_admin_language_support()
-    logger.info("Language updates initialized")
 
 
 # Pluralization support for different languages
@@ -542,122 +553,5 @@ def check_format_strings(text: str) -> List[str]:
     Returns:
         List of format string parameter names
     """
-    pattern = re.compile(r'\{([^{}]+)\}')
+    pattern = re.compile(r'\{([^{}]+)}')
     return pattern.findall(text)
-
-
-def compare_translations(key: str, base_lang: str = "en") -> Dict[str, Dict[str, Any]]:
-    """
-    Compare translations of a key across all languages
-
-    Args:
-        key: Translation key to compare
-        base_lang: Base language to compare against
-
-    Returns:
-        Dictionary of comparison results by language
-    """
-    try:
-        from languages import TRANSLATIONS
-
-        results = {}
-
-        if base_lang not in TRANSLATIONS or key not in TRANSLATIONS[base_lang]:
-            return results
-
-        base_text = TRANSLATIONS[base_lang][key]
-        base_format_strings = check_format_strings(base_text)
-
-        for lang, translations in TRANSLATIONS.items():
-            if lang == base_lang or key not in translations:
-                continue
-
-            text = translations[key]
-            format_strings = check_format_strings(text)
-
-            missing = set(base_format_strings) - set(format_strings)
-            extra = set(format_strings) - set(base_format_strings)
-
-            results[lang] = {
-                "text": text,
-                "missing_formats": list(missing),
-                "extra_formats": list(extra),
-                "has_issues": bool(missing or extra)
-            }
-
-        return results
-
-    except ImportError:
-        logger.error("Failed to import TRANSLATIONS from languages.py")
-        return {}
-    except Exception as e:
-        logger.error(f"Error comparing translations: {e}")
-        return {}
-
-
-def estimate_translation_quality(lang: str = "ru", base_lang: str = "en") -> Tuple[float, Dict[str, Any]]:
-    """
-    Estimate the quality of translations for a language
-
-    Args:
-        lang: Language to check
-        base_lang: Base language to compare against
-
-    Returns:
-        Tuple of quality score (0.0-1.0) and detailed statistics
-    """
-    try:
-        from languages import TRANSLATIONS
-
-        if lang not in TRANSLATIONS or base_lang not in TRANSLATIONS:
-            return 0.0, {"error": "Language not available"}
-
-        base_keys = set(TRANSLATIONS[base_lang].keys())
-        lang_keys = set(TRANSLATIONS[lang].keys())
-
-        # Count keys
-        total_base_keys = len(base_keys)
-        missing_keys = len(base_keys - lang_keys)
-        extra_keys = len(lang_keys - base_keys)
-        coverage = (total_base_keys - missing_keys) / total_base_keys if total_base_keys > 0 else 0
-
-        # Check format strings
-        format_issues = 0
-        common_keys = base_keys.intersection(lang_keys)
-
-        for key in common_keys:
-            base_text = TRANSLATIONS[base_lang][key]
-            lang_text = TRANSLATIONS[lang][key]
-
-            base_formats = set(check_format_strings(base_text))
-            lang_formats = set(check_format_strings(lang_text))
-
-            if base_formats != lang_formats:
-                format_issues += 1
-
-        format_quality = (len(common_keys) - format_issues) / len(common_keys) if common_keys else 1.0
-
-        # Calculate overall quality score (70% coverage, 30% format correctness)
-        quality_score = (coverage * 0.7) + (format_quality * 0.3)
-
-        return quality_score, {
-            "total_base_keys": total_base_keys,
-            "translated_keys": len(common_keys),
-            "missing_keys": missing_keys,
-            "extra_keys": extra_keys,
-            "coverage": coverage,
-            "format_issues": format_issues,
-            "format_quality": format_quality
-        }
-
-    except ImportError:
-        logger.error("Failed to import TRANSLATIONS from languages.py")
-        return 0.0, {"error": "Import failed"}
-    except Exception as e:
-        logger.error(f"Error estimating translation quality: {e}")
-        return 0.0, {"error": str(e)}
-
-
-# Just for compatibility with the existing code
-if __name__ == "__main__":
-    init_language_updates()
