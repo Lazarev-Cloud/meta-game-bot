@@ -1,45 +1,306 @@
+d
+
 import sqlite3
 import logging
 import datetime
 import json
-from functools import wraps
 import time
+import threading
+from functools import wraps
+from typing import Callable, Any, Optional, Dict, Union
 
 logger = logging.getLogger(__name__)
 
 
-# Database connection decorator for safe handling
-# Improved database connection decorator with retry mechanism
-def db_transaction(func):
-    @wraps(func)
-    def wrapper(*args, **kwargs):
+class DatabaseConnectionPoolError(Exception):
+    """Custom exception for database connection pool errors."""
+    pass
+
+
+class DatabaseConnectionPool:
+    """
+    Thread-safe SQLite connection pool with advanced features.
+
+    Features:
+    - Configurable max connections
+    - Connection timeout handling
+    - Exponential backoff for retries
+    - Foreign key enforcement
+    - Connection validation
+    """
+
+    def __init__(
+            self,
+            db_path: str = 'belgrade_game.db',
+            max_connections: int = 10,
+            timeout: float = 10.0,
+            max_retries: int = 3,
+            initial_pragmas: Optional[Dict[str, str]] = None
+    ):
+        """
+        Initialize the connection pool.
+
+        :param db_path: Path to the SQLite database
+        :param max_connections: Maximum number of connections in the pool
+        :param timeout: Connection timeout in seconds
+        :param max_retries: Maximum number of retry attempts for locked database
+        :param initial_pragmas: Optional dictionary of PRAGMA settings to apply
+        """
+        self._db_path = db_path
+        self._max_connections = max_connections
+        self._timeout = timeout
+        self._max_retries = max_retries
+
+        # Default and custom PRAGMA settings
+        self._pragmas = {
+            "foreign_keys": "ON",
+            "journal_mode": "WAL",
+            "synchronous": "NORMAL",
+            "cache_size": "-2000"  # ~2MB cache
+        }
+        if initial_pragmas:
+            self._pragmas.update(initial_pragmas)
+
+        self._pool: list[sqlite3.Connection] = []
+        self._lock = threading.Lock()
+        self._connection_count = 0
+
+        # Ensure the database exists and is configured
+        self._initialize_database()
+
+    def _initialize_database(self):
+        """
+        Create initial database configuration if needed.
+        Ensures database setup and initial PRAGMA configurations.
+        """
         conn = None
-        max_retries = 3
+        try:
+            conn = sqlite3.connect(self._db_path, timeout=self._timeout)
+
+            # Apply all configured PRAGMA settings
+            for pragma, value in self._pragmas.items():
+                try:
+                    conn.execute(f"PRAGMA {pragma} = {value}")
+                except sqlite3.Error as pragma_error:
+                    logger.warning(f"Could not set PRAGMA {pragma}: {pragma_error}")
+
+            conn.commit()
+        except sqlite3.Error as e:
+            logger.error(f"Database initialization error: {e}")
+            raise DatabaseConnectionPoolError(f"Failed to initialize database: {e}")
+        finally:
+            if conn:
+                conn.close()
+
+    def _create_connection(self) -> sqlite3.Connection:
+        """
+        Create a new database connection with configured PRAGMAs.
+
+        :return: Configured SQLite database connection
+        """
+        try:
+            conn = sqlite3.connect(
+                self._db_path,
+                timeout=self._timeout,
+                isolation_level=None  # Enable autocommit mode
+            )
+
+            # Apply all configured PRAGMA settings
+            for pragma, value in self._pragmas.items():
+                conn.execute(f"PRAGMA {pragma} = {value}")
+
+            return conn
+        except sqlite3.Error as e:
+            logger.error(f"Failed to create database connection: {e}")
+            raise DatabaseConnectionPoolError(f"Connection creation failed: {e}")
+
+    def get_connection(self) -> sqlite3.Connection:
+        """
+        Retrieve a database connection from the pool.
+
+        :return: SQLite database connection
+        :raises DatabaseConnectionPoolError: If connection cannot be obtained
+        """
+        with self._lock:
+            # Check if a connection is available in the pool
+            if self._pool:
+                return self._pool.pop()
+
+            # Check if we can create a new connection
+            if self._connection_count < self._max_connections:
+                self._connection_count += 1
+                return self._create_connection()
+
+            # If no connections available and pool is full, wait and retry
+            logger.warning("Connection pool exhausted, waiting for available connection")
+            raise DatabaseConnectionPoolError("No available database connections")
+
+    def return_connection(self, conn: sqlite3.Connection):
+        """
+        Return a connection to the pool or close it.
+
+        :param conn: SQLite database connection to return
+        """
+        with self._lock:
+            # Validate connection before returning
+            try:
+                conn.execute("SELECT 1")
+            except (sqlite3.ProgrammingError, sqlite3.OperationalError):
+                # Connection is no longer valid, close it
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+                self._connection_count -= 1
+                return
+
+            # Return to pool or close if pool is full
+            if len(self._pool) < self._max_connections:
+                self._pool.append(conn)
+            else:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+                self._connection_count -= 1
+
+    def close_all_connections(self):
+        """
+        Close all connections in the pool.
+        """
+        with self._lock:
+            while self._pool:
+                conn = self._pool.pop()
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+            self._connection_count = 0
+
+
+# Global database pool instance
+db_connection_pool = DatabaseConnectionPool()
+
+
+def db_transaction(func: Callable) -> Callable:
+    """
+    Decorator for database transactions with advanced error handling.
+
+    :param func: Function to be wrapped with transaction management
+    :return: Wrapped function with transaction support
+    """
+
+    @wraps(func)
+    def wrapper(*args: Any, **kwargs: Any) -> Any:
+        conn = None
         retry_delay = 0.5  # seconds
 
-        for attempt in range(max_retries):
+        for attempt in range(3):  # max retries
             try:
-                conn = sqlite3.connect('belgrade_game.db', timeout=10.0)  # Increased timeout
-                result = func(conn, *args, **kwargs)
-                conn.commit()
-                return result
-            except sqlite3.Error as e:
-                if conn:
-                    conn.rollback()
+                # Get connection from the pool
+                conn = db_connection_pool.get_connection()
 
-                if "database is locked" in str(e) and attempt < max_retries - 1:
-                    logger.warning(f"Database locked, retrying in {retry_delay}s (attempt {attempt + 1}/{max_retries})")
+                # Start a transaction
+                conn.execute("BEGIN")
+
+                # Execute the function with the connection
+                result = func(conn, *args, **kwargs)
+
+                # Commit the transaction
+                conn.commit()
+
+                return result
+
+            except sqlite3.OperationalError as e:
+                # Handle database locked errors with exponential backoff
+                if conn:
+                    try:
+                        conn.rollback()
+                    except Exception:
+                        pass
+
+                if "database is locked" in str(e) and attempt < 2:
+                    logger.warning(f"Database locked, retrying in {retry_delay}s (attempt {attempt + 1}/3)")
                     time.sleep(retry_delay)
                     retry_delay *= 2  # Exponential backoff
                     continue
 
-                logger.error(f"Database error in {func.__name__}: {e}")
+                logger.error(f"Database operational error in {func.__name__}: {e}")
                 raise
-            finally:
+
+            except DatabaseConnectionPoolError as e:
+                # Handle connection pool specific errors
+                logger.error(f"Connection pool error in {func.__name__}: {e}")
+                raise
+
+            except Exception as e:
+                # Handle other unexpected errors
                 if conn:
-                    conn.close()
+                    try:
+                        conn.rollback()
+                    except Exception:
+                        pass
+
+                logger.error(f"Unexpected error in {func.__name__}: {e}")
+                raise
+
+            finally:
+                # Always return the connection to the pool
+                if conn:
+                    try:
+                        db_connection_pool.return_connection(conn)
+                    except Exception as e:
+                        logger.error(f"Error returning connection: {e}")
 
     return wrapper
+
+
+# Cleanup method to be called when the application exits
+def cleanup_database_pool():
+    """
+    Close all database connections when application exits.
+    """
+    try:
+        db_connection_pool.close_all_connections()
+    except Exception as e:
+        logger.error(f"Error during database pool cleanup: {e}")
+
+
+# Optional: Context manager for manual connection management
+class DatabaseConnection:
+    """
+    Context manager for database connections.
+
+    Usage:
+    with DatabaseConnection() as conn:
+        # perform database operations
+    """
+
+    def __init__(self):
+        self.conn = None
+
+    def __enter__(self):
+        self.conn = db_connection_pool.get_connection()
+        self.conn.execute("BEGIN")
+        return self.conn
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if exc_type is None:
+            try:
+                self.conn.commit()
+            except Exception as e:
+                logger.error(f"Error committing transaction: {e}")
+                self.conn.rollback()
+        else:
+            try:
+                self.conn.rollback()
+            except Exception as e:
+                logger.error(f"Error rolling back transaction: {e}")
+
+        try:
+            db_connection_pool.return_connection(self.conn)
+        except Exception as e:
+            logger.error(f"Error returning connection to pool: {e}")
 
 
 # Player-related queries

@@ -452,7 +452,7 @@ def process_international_politician_action(politician_id: int) -> Optional[Dict
         return None
 
 
-async def schedule_jobs(context):
+def schedule_jobs(context):
     """Set up scheduled jobs for game cycle processing."""
     job_queue = context.job_queue
 
