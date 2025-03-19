@@ -1,4 +1,6 @@
+#!/usr/bin/env python
 # -*- coding: utf-8 -*-
+
 """
 Enhanced language support for Belgrade Game Bot
 Extends the base languages.py with additional translations and utilities
@@ -6,234 +8,304 @@ Extends the base languages.py with additional translations and utilities
 
 import logging
 import sqlite3
-from typing import Dict, Any, Optional, Union, List
+import re
+from typing import Dict, Any, Optional, Union, List, Tuple
 
 logger = logging.getLogger(__name__)
 
 # Additional translations to add to the existing language dictionary
 ADDITIONAL_TRANSLATIONS = {
     "en": {
-        # District report translations
-        "district_report_title": "District Status Report",
-        "controlled_by": "Controlled by",
-        "contested_by": "Contested by",
-        "not_controlled": "Not controlled",
-        "players": "players",
-        "high_importance": "High importance",
-        "medium_importance": "Medium importance",
-        "low_importance": "Low importance",
-        "error_generating_report": "Error generating report",
+        # Action result translations
+        "action_detail_attack_success": "Your attack was successful! You've weakened enemy control in {district}.",
+        "action_detail_attack_partial": "Your attack was partially successful. Some impact on enemy control in {district}.",
+        "action_detail_attack_failure": "Your attack failed. Enemy defenses in {district} were too strong.",
 
-        # Politician action translations
-        "politician_influence_title": "Politician Influence Report",
-        "high_influence": "High influence",
-        "medium_influence": "Medium influence",
-        "low_influence": "Low influence",
-        "international_politicians": "International Politicians",
+        "action_detail_influence_success": "Your influence efforts in {district} were highly effective!",
+        "action_detail_influence_partial": "Your influence in {district} has grown, but less than expected.",
+        "action_detail_influence_failure": "Your influence attempt in {district} failed to gain traction.",
 
-        # Politician action button labels
-        "action_pol_info": "Gather Information",
-        "action_pol_info_desc": "Learn more about this politician",
-        "action_pol_influence": "Influence",
-        "action_pol_influence_desc": "Try to improve your relationship",
-        "action_pol_collaborate": "Collaborate",
-        "action_pol_collaborate_desc": "Work together on a political initiative",
-        "action_pol_request": "Request Resources",
-        "action_pol_request_desc": "Ask for political support and resources",
-        "action_pol_power": "Use Political Power",
-        "action_pol_power_desc": "Use their political influence to pressure others",
-        "action_pol_undermine": "Undermine",
-        "action_pol_undermine_desc": "Weaken their influence",
-        "action_pol_rumors": "Spread Rumors",
-        "action_pol_rumors_desc": "Damage their public reputation",
-        "action_pol_scandal": "Create Scandal",
-        "action_pol_scandal_desc": "Expose them in a major political scandal",
-        "action_pol_diplomatic": "Diplomatic Channel",
-        "action_pol_diplomatic_desc": "Establish a diplomatic connection",
-        "action_pol_pressure": "International Pressure",
-        "action_pol_pressure_desc": "Use international pressure against your opponents",
+        "action_detail_defense_success": "Your defenses in {district} held strong against all attacks!",
+        "action_detail_defense_partial": "Your defenses in {district} partially mitigated incoming attacks.",
+        "action_detail_defense_failure": "Your defenses in {district} were overwhelmed.",
 
-        # Special event translations
-        "event_govt_reshuffle": "Government Reshuffle",
-        "event_demonstration": "Mass Demonstration",
-        "event_investment": "Foreign Investment",
-        "event_sanctions": "Economic Sanctions",
-        "event_police_raid": "Police Raid",
-        "event_smuggling": "Smuggling Operation",
-        "event_diplomatic": "Diplomatic Reception",
-        "event_military": "Military Exercise",
-        "event_strike": "Worker Strike",
-        "event_student": "Student Protest",
-        "event_festival": "Cultural Festival",
+        # International politics
+        "international_active": "International politician {name} ({role}) has taken action!",
+        "international_sanctions": "Sanctions have been imposed on {district}!",
+        "international_support": "International support has arrived for {district}!",
+        "international_diplomatic": "Diplomatic pressure is affecting relations in {district}.",
 
-        # Response messages for politician actions
-        "politician_info_success": "You have gathered valuable information about {name}.",
-        "politician_info_title": "Intelligence Report: {name}",
-        "politician_info_no_resources": "You need at least 1 Information resource to gather info on a politician. Action cancelled.",
-        "politician_info_no_action": "You need a quick action to gather info on a politician. Action cancelled.",
-        "politician_collaborate_success": "You have successfully collaborated with {name} on a political initiative.",
-        "politician_request_success": "You have received resources from {name}.",
-        "politician_power_success": "You have used {name}'s political influence to pressure your opponents.",
-        "politician_undermine_success": "You have successfully undermined {name}'s influence.",
-        "politician_undermine_no_resources": "You need at least 2 Information resources to undermine a politician. Action cancelled.",
-        "politician_undermine_no_action": "You need a main action to undermine a politician. Action cancelled.",
-        "politician_influence_no_resources": "You need at least 2 Influence resources to influence a politician. Action cancelled.",
-        "politician_influence_no_action": "You need a main action to influence a politician. Action cancelled.",
-        "politician_influence_success": "You have used your influence on {name}. Your relationship with them may improve. Results will be processed at the end of the cycle.",
-        "politician_rumors_success": "You have spread rumors about {name}, damaging their reputation.",
-        "politician_scandal_success": "You have exposed {name} in a political scandal, severely damaging their position.",
-        "politician_diplomatic_success": "You have established a diplomatic channel with {name}.",
-        "politician_pressure_success": "You have used {name}'s international pressure against your opponents.",
+        # Extended resource descriptions
+        "influence_desc": "Political capital and ability to sway others",
+        "resources_desc": "Economic and material assets",
+        "information_desc": "Intelligence, secrets, and knowledge",
+        "force_desc": "Military, police, and armed groups",
 
-        # Enhanced error messages
-        "db_connection_error": "Database connection error. Please try again later.",
-        "invalid_district_error": "Invalid district. Please select a valid district.",
-        "invalid_politician_error": "Invalid politician. Please select a valid politician.",
-        "insufficient_resources_detailed": "Insufficient resources. You need {required} {resource_type}, but you only have {available}.",
-        "invalid_action_error": "Invalid action. Please select a valid action type.",
-        "language_detection_error": "Could not detect your language. Defaulting to English.",
-        "error_message": "Sorry, something went wrong. The error has been reported.",
-        "error_district_selection": "Error showing district selection. Please try again.",
-        "error_resource_selection": "Error showing resource selection. Please try again.",
-        "error_district_info": "Error retrieving district information.",
-        "error_politician_info": "Error retrieving politician information.",
-        "action_error": "Something went wrong with your action. Please try again.",
+        # Detailed district descriptions
+        "district_desc_stari_grad": "The political heart of Belgrade, where government offices are located",
+        "district_desc_novi_beograd": "Modern business district with international connections",
+        "district_desc_zemun": "Historical district with strong criminal elements",
+        "district_desc_savski_venac": "Diplomatic quarter with many foreign embassies",
+        "district_desc_vozdovac": "Military base and security headquarters",
+        "district_desc_cukarica": "Industrial area with factories and working-class population",
+        "district_desc_palilula": "University district with student activism",
+        "district_desc_vracar": "Cultural and religious center",
 
-        # Role text
-        "role": "Role",
-        "district": "District",
-        "key_relationships": "Key Relationships",
+        # Detailed politician descriptions
+        "politician_desc_milosevic": "As President of Yugoslavia, Milošević maintains tight control over state institutions and security forces.",
+        "politician_desc_djindjic": "A progressive reformist pushing for democratic changes and closer ties with the West.",
+        "politician_desc_arkan": "A paramilitary leader with strong connections to organized crime and nationalist groups.",
+        "politician_desc_pavkovic": "The military commander loyal to the regime, controlling army deployments.",
+
+        # Detailed joint action descriptions
+        "joint_action_influence_desc": "A coordinated influence campaign across multiple fronts",
+        "joint_action_attack_desc": "A multi-pronged attack operation",
+        "joint_action_defense_desc": "A unified defensive strategy",
+
+        # Detailed resource distribution messages
+        "resource_distribution_success": "Your controlled districts have generated resources!",
+        "resource_distribution_none": "You didn't receive any resources this cycle. Control more districts to generate income.",
+
+        # Detailed trade system messages
+        "trade_system_info": "The trading system allows you to exchange resources with other players.",
+        "trade_how_to": "To create a trade, use: /trade <player_id> offer <resource> <amount> request <resource> <amount>",
+        "trade_complete_details": "Trade #{trade_id} completed. You received: {received} and gave: {given}",
+
+        # Enhanced help categories
+        "help_category_basic": "Basic Commands",
+        "help_category_action": "Action Commands",
+        "help_category_resource": "Resource Commands",
+        "help_category_political": "Political Commands",
+        "help_category_advanced": "Advanced Features",
+
+        # Advanced feature descriptions
+        "feature_joint_actions": "Joint Actions: Coordinate with other players for stronger effects",
+        "feature_trade": "Trading: Exchange resources with other players",
+        "feature_politician_abilities": "Politician Abilities: Use special actions through allied politicians",
+
+        # New user tips
+        "tip_first_steps": "First steps: Focus on gaining control in one district. Use influence actions to establish presence.",
+        "tip_resources": "Resource tip: Convert general Resources to specialized ones based on your strategy.",
+        "tip_politicians": "Politician tip: Build relationships with politicians who match your ideology.",
+        "tip_defense": "Defense tip: Defend territories you want to keep, not every place you have presence.",
+
+        # More detailed error messages
+        "error_action_timeout": "Action timed out. Please try again.",
+        "error_invalid_resource_combination": "Invalid resource combination for this action type.",
+        "error_politician_unavailable": "This politician is not available for interaction at this time.",
+        "error_district_contested": "This district is heavily contested right now. Your action faces strong opposition.",
+
+        # Welcome back message
+        "welcome_back": "Welcome back, {character_name}! You've been away for {days} days. Here's what's changed:",
+
+        # Detailed game mechanics for help command
+        "mechanics_control": "District Control: Control points represent your influence in a district. 60+ points = full control with resource generation.",
+        "mechanics_actions": "Actions: You have 1 main action and 2 quick actions every 3 hours. Main actions have stronger effects.",
+        "mechanics_resources": "Resources: Generated from controlled districts. Each district produces different resource types.",
+        "mechanics_ideology": "Ideology: Your position on the reform-conservative scale (-5 to +5) affects compatibility with politicians.",
+
+        # Command helpers
+        "command_helper_action": "For best results with /action, target districts where you already have some presence or that match your ideology.",
+        "command_helper_quick_action": "Quick actions are good for reconnaissance before committing main actions.",
+        "command_helper_view_district": "Use /view_district without arguments to see all districts first.",
+
+        # Status messages
+        "player_joined": "New player joined: {username} as {character_name}",
+        "player_left": "Player {character_name} has left the game",
+        "player_active": "Player activity: {active_count} active in the last 24 hours, {total_count} total",
+
+        # Achievement notifications
+        "achievement_first_control": "Achievement: First District Control! You now fully control {district}.",
+        "achievement_international": "Achievement: International Recognition! Your first alliance with international politician {name}.",
+
+        # Pluralization templates
+        "points_count": "{count} point|{count} points",
+        "players_count": "{count} player|{count} players",
+        "resources_count": "{count} resource|{count} resources",
+        "actions_count": "{count} action|{count} actions",
     },
 
     "ru": {
-        # District report translations
-        "district_report_title": "Отчет о состоянии районов",
-        "controlled_by": "Контролируется",
-        "contested_by": "Оспаривается",
-        "not_controlled": "Не контролируется",
-        "players": "игроками",
-        "high_importance": "Высокая важность",
-        "medium_importance": "Средняя важность",
-        "low_importance": "Низкая важность",
-        "error_generating_report": "Ошибка при создании отчета",
+        # Action result translations
+        "action_detail_attack_success": "Ваша атака была успешной! Вы ослабили контроль противника в районе {district}.",
+        "action_detail_attack_partial": "Ваша атака была частично успешной. Некоторое влияние на контроль противника в районе {district}.",
+        "action_detail_attack_failure": "Ваша атака провалилась. Защита противника в районе {district} оказалась слишком сильной.",
 
-        # Politician action translations
-        "politician_influence_title": "Отчет о влиянии политиков",
-        "high_influence": "Высокое влияние",
-        "medium_influence": "Среднее влияние",
-        "low_influence": "Низкое влияние",
-        "international_politicians": "Международные политики",
+        "action_detail_influence_success": "Ваши усилия по влиянию в районе {district} были очень эффективны!",
+        "action_detail_influence_partial": "Ваше влияние в районе {district} выросло, но меньше, чем ожидалось.",
+        "action_detail_influence_failure": "Ваша попытка влияния в районе {district} не получила развития.",
 
-        # Politician action button labels
-        "action_pol_info": "Собрать информацию",
-        "action_pol_info_desc": "Узнать больше об этом политике",
-        "action_pol_influence": "Влияние",
-        "action_pol_influence_desc": "Попытаться улучшить ваши отношения",
-        "action_pol_collaborate": "Сотрудничество",
-        "action_pol_collaborate_desc": "Работать вместе над политической инициативой",
-        "action_pol_request": "Запросить ресурсы",
-        "action_pol_request_desc": "Попросить политическую поддержку и ресурсы",
-        "action_pol_power": "Использовать влияние",
-        "action_pol_power_desc": "Использовать их политическое влияние для давления на оппонентов",
-        "action_pol_undermine": "Подорвать влияние",
-        "action_pol_undermine_desc": "Ослабить их влияние",
-        "action_pol_rumors": "Распространить слухи",
-        "action_pol_rumors_desc": "Нанести урон их репутации",
-        "action_pol_scandal": "Создать скандал",
-        "action_pol_scandal_desc": "Разоблачить их в крупном политическом скандале",
-        "action_pol_diplomatic": "Дипломатический канал",
-        "action_pol_diplomatic_desc": "Установить дипломатическую связь",
-        "action_pol_pressure": "Международное давление",
-        "action_pol_pressure_desc": "Использовать международное давление против ваших оппонентов",
+        "action_detail_defense_success": "Ваша защита в районе {district} выдержала все атаки!",
+        "action_detail_defense_partial": "Ваша защита в районе {district} частично смягчила входящие атаки.",
+        "action_detail_defense_failure": "Ваша защита в районе {district} была подавлена.",
 
-        # Special event translations
-        "event_govt_reshuffle": "Перестановки в правительстве",
-        "event_demonstration": "Массовая демонстрация",
-        "event_investment": "Иностранные инвестиции",
-        "event_sanctions": "Экономические санкции",
-        "event_police_raid": "Полицейский рейд",
-        "event_smuggling": "Контрабандная операция",
-        "event_diplomatic": "Дипломатический прием",
-        "event_military": "Военные учения",
-        "event_strike": "Забастовка рабочих",
-        "event_student": "Студенческий протест",
-        "event_festival": "Культурный фестиваль",
+        # International politics
+        "international_active": "Международный политик {name} ({role}) предпринял действие!",
+        "international_sanctions": "На {district} наложены санкции!",
+        "international_support": "В {district} пришла международная поддержка!",
+        "international_diplomatic": "Дипломатическое давление влияет на отношения в {district}.",
 
-        # Response messages for politician actions
-        "politician_info_success": "Вы собрали ценную информацию о {name}.",
-        "politician_info_title": "Разведывательный отчёт: {name}",
-        "politician_info_no_resources": "Вам нужна минимум 1 единица Информации для сбора данных о политике. Действие отменено.",
-        "politician_info_no_action": "Вам нужна быстрая заявка для сбора данных о политике. Действие отменено.",
-        "politician_collaborate_success": "Вы успешно сотрудничали с {name} по политической инициативе.",
-        "politician_request_success": "Вы получили ресурсы от {name}.",
-        "politician_power_success": "Вы использовали политическое влияние {name} для давления на оппонентов.",
-        "politician_undermine_success": "Вы успешно подорвали влияние {name}.",
-        "politician_undermine_no_resources": "Вам нужно минимум 2 единицы Информации для подрыва влияния политика. Действие отменено.",
-        "politician_undermine_no_action": "Вам нужна основная заявка для подрыва влияния политика. Действие отменено.",
-        "politician_influence_no_resources": "Вам нужно минимум 2 единицы Влияния для воздействия на политика. Действие отменено.",
-        "politician_influence_no_action": "Вам нужна основная заявка для воздействия на политика. Действие отменено.",
-        "politician_influence_success": "Вы использовали своё влияние на {name}. Ваши отношения с ним могут улучшиться. Результаты будут обработаны в конце цикла.",
-        "politician_rumors_success": "Вы распространили слухи о {name}, нанеся урон их репутации.",
-        "politician_scandal_success": "Вы разоблачили {name} в политическом скандале, серьезно подорвав их позицию.",
-        "politician_diplomatic_success": "Вы установили дипломатический канал с {name}.",
-        "politician_pressure_success": "Вы использовали международное давление {name} против ваших оппонентов.",
+        # Extended resource descriptions
+        "influence_desc": "Политический капитал и способность влиять на других",
+        "resources_desc": "Экономические и материальные активы",
+        "information_desc": "Разведданные, секреты и знания",
+        "force_desc": "Военные, полиция и вооруженные группы",
 
-        # Enhanced error messages
-        "db_connection_error": "Ошибка подключения к базе данных. Пожалуйста, попробуйте позже.",
-        "invalid_district_error": "Недействительный район. Пожалуйста, выберите правильный район.",
-        "invalid_politician_error": "Недействительный политик. Пожалуйста, выберите правильного политика.",
-        "insufficient_resources_detailed": "Недостаточно ресурсов. Вам нужно {required} {resource_type}, но у вас есть только {available}.",
-        "invalid_action_error": "Недействительное действие. Пожалуйста, выберите правильный тип действия.",
-        "language_detection_error": "Не удалось определить ваш язык. Используется английский по умолчанию.",
-        "error_message": "Извините, что-то пошло не так. Об ошибке сообщено.",
-        "error_district_selection": "Ошибка при показе списка районов. Пожалуйста, попробуйте снова.",
-        "error_resource_selection": "Ошибка при показе выбора ресурсов. Пожалуйста, попробуйте снова.",
-        "error_district_info": "Ошибка при получении информации о районе.",
-        "error_politician_info": "Ошибка при получении информации о политике.",
-        "action_error": "Что-то пошло не так с вашим действием. Пожалуйста, попробуйте снова.",
+        # Detailed district descriptions
+        "district_desc_stari_grad": "Политическое сердце Белграда, где расположены правительственные учреждения",
+        "district_desc_novi_beograd": "Современный деловой район с международными связями",
+        "district_desc_zemun": "Исторический район с сильными криминальными элементами",
+        "district_desc_savski_venac": "Дипломатический квартал со многими иностранными посольствами",
+        "district_desc_vozdovac": "Военная база и штаб-квартиры безопасности",
+        "district_desc_cukarica": "Промышленная зона с фабриками и рабочим населением",
+        "district_desc_palilula": "Университетский район со студенческим активизмом",
+        "district_desc_vracar": "Культурный и религиозный центр",
 
-        # Role text
-        "role": "Роль",
-        "district": "Район",
-        "key_relationships": "Ключевые отношения",
+        # Detailed politician descriptions
+        "politician_desc_milosevic": "Как президент Югославии, Милошевич поддерживает жесткий контроль над государственными институтами и силами безопасности.",
+        "politician_desc_djindjic": "Прогрессивный реформатор, выступающий за демократические изменения и более тесные связи с Западом.",
+        "politician_desc_arkan": "Лидер военизированных формирований с сильными связями с организованной преступностью и националистическими группами.",
+        "politician_desc_pavkovic": "Военный командир, верный режиму, контролирующий развертывание армии.",
+
+        # Detailed joint action descriptions
+        "joint_action_influence_desc": "Скоординированная кампания влияния по нескольким направлениям",
+        "joint_action_attack_desc": "Многосторонняя наступательная операция",
+        "joint_action_defense_desc": "Единая оборонительная стратегия",
+
+        # Detailed resource distribution messages
+        "resource_distribution_success": "Ваши контролируемые районы сгенерировали ресурсы!",
+        "resource_distribution_none": "Вы не получили ресурсов в этом цикле. Контролируйте больше районов для получения дохода.",
+
+        # Detailed trade system messages
+        "trade_system_info": "Система торговли позволяет обмениваться ресурсами с другими игроками.",
+        "trade_how_to": "Чтобы создать обмен, используйте: /trade <id_игрока> offer <ресурс> <количество> request <ресурс> <количество>",
+        "trade_complete_details": "Обмен #{trade_id} завершен. Вы получили: {received} и отдали: {given}",
+
+        # Enhanced help categories
+        "help_category_basic": "Основные команды",
+        "help_category_action": "Команды действий",
+        "help_category_resource": "Команды ресурсов",
+        "help_category_political": "Политические команды",
+        "help_category_advanced": "Продвинутые функции",
+
+        # Advanced feature descriptions
+        "feature_joint_actions": "Совместные действия: Координируйтесь с другими игроками для более сильных эффектов",
+        "feature_trade": "Торговля: Обменивайтесь ресурсами с другими игроками",
+        "feature_politician_abilities": "Способности политиков: Используйте специальные действия через союзных политиков",
+
+        # New user tips
+        "tip_first_steps": "Первые шаги: Сосредоточьтесь на получении контроля в одном районе. Используйте действия влияния для установления присутствия.",
+        "tip_resources": "Совет по ресурсам: Конвертируйте общие Ресурсы в специализированные в зависимости от вашей стратегии.",
+        "tip_politicians": "Совет по политикам: Стройте отношения с политиками, которые соответствуют вашей идеологии.",
+        "tip_defense": "Совет по защите: Защищайте территории, которые вы хотите сохранить, а не каждое место, где у вас есть присутствие.",
+
+        # More detailed error messages
+        "error_action_timeout": "Время действия истекло. Пожалуйста, попробуйте снова.",
+        "error_invalid_resource_combination": "Недопустимая комбинация ресурсов для этого типа действия.",
+        "error_politician_unavailable": "Этот политик недоступен для взаимодействия в данный момент.",
+        "error_district_contested": "Этот район сейчас сильно оспаривается. Ваше действие сталкивается с сильной оппозицией.",
+
+        # Welcome back message
+        "welcome_back": "С возвращением, {character_name}! Вы отсутствовали {days} дней. Вот что изменилось:",
+
+        # Detailed game mechanics for help command
+        "mechanics_control": "Контроль района: Очки контроля представляют ваше влияние в районе. 60+ очков = полный контроль с генерацией ресурсов.",
+        "mechanics_actions": "Действия: У вас есть 1 основное действие и 2 быстрых действия каждые 3 часа. Основные действия имеют более сильные эффекты.",
+        "mechanics_resources": "Ресурсы: Генерируются из контролируемых районов. Каждый район производит разные типы ресурсов.",
+        "mechanics_ideology": "Идеология: Ваша позиция по шкале реформы-консерватизма (от -5 до +5) влияет на совместимость с политиками.",
+
+        # Command helpers
+        "command_helper_action": "Для лучших результатов с /action, выбирайте районы, где у вас уже есть присутствие или которые соответствуют вашей идеологии.",
+        "command_helper_quick_action": "Быстрые действия хороши для разведки перед совершением основных действий.",
+        "command_helper_view_district": "Используйте /view_district без аргументов, чтобы сначала увидеть все районы.",
+
+        # Status messages
+        "player_joined": "Новый игрок присоединился: {username} как {character_name}",
+        "player_left": "Игрок {character_name} покинул игру",
+        "player_active": "Активность игроков: {active_count} активны за последние 24 часа, {total_count} всего",
+
+        # Achievement notifications
+        "achievement_first_control": "Достижение: Первый контроль района! Теперь вы полностью контролируете {district}.",
+        "achievement_international": "Достижение: Международное признание! Ваш первый союз с международным политиком {name}.",
+
+        # Pluralization templates
+        "points_count": "{count} очко|{count} очка|{count} очков",
+        "players_count": "{count} игрок|{count} игрока|{count} игроков",
+        "resources_count": "{count} ресурс|{count} ресурса|{count} ресурсов",
+        "actions_count": "{count} действие|{count} действия|{count} действий",
     }
 }
 
-# Additional translations for admin commands
+# Admin-specific translations
 ADMIN_TRANSLATIONS = {
     "en": {
-        "admin_error": "Admin error: {error}",
-        "admin_player_resources_not_found": "Player {player_id} exists but has no resources record.",
-        "admin_help_title": "Admin Commands",
-        "admin_reset_actions_usage": "Usage: /admin_reset_actions [player_id]",
-        "admin_reset_actions_success": "Actions reset for player {player_id}.",
-        "admin_reset_all_actions_success": "Actions reset for {count} players.",
-        "admin_set_ideology_usage": "Usage: /admin_set_ideology [player_id] [ideology_score]",
-        "admin_set_ideology_success": "Ideology score for player {player_id} set to {score}.",
-        "admin_set_ideology_invalid": "Ideology score must be between -5 and +5.",
-        "admin_player_not_found": "Player {player_id} not found.",
-        "admin_list_players_none": "No players registered.",
-        "admin_list_players_title": "Registered Players",
-        "admin_help_desc": "Show this admin help message",
-        "admin_news_desc": "Add a news item",
-        "admin_cycle_desc": "Manually process a game cycle"
+        # Extended admin command descriptions
+        "admin_resource_detailed": "Add resources to a player's inventory",
+        "admin_set_control_detailed": "Set a player's control points in a district",
+        "admin_reset_actions_detailed": "Reset a player's available actions to full",
+        "admin_process_cycle_detailed": "Manually trigger cycle processing (results calculation)",
+        "admin_add_news_detailed": "Add a custom news item visible to all or specific players",
+        "admin_set_ideology_detailed": "Set a player's ideology score (affects politician compatibility)",
+
+        # Admin resource management
+        "admin_resources_added_detailed": "Added {amount} {resource_type} to player {player_id}. Previous: {previous}, New: {new_amount}",
+        "admin_resources_removed": "Removed {amount} {resource_type} from player {player_id}. Previous: {previous}, New: {new_amount}",
+        "admin_resources_view": "Resources for player {player_id}: Influence: {influence}, Resources: {resources}, Information: {information}, Force: {force}",
+
+        # Admin district control management
+        "admin_control_added": "Added {points} control points to player {player_id} in district {district_id}. New total: {new_total}",
+        "admin_control_removed": "Removed {points} control points from player {player_id} in district {district_id}. New total: {new_total}",
+        "admin_control_view": "Control status for district {district_id}:",
+
+        # Admin player management
+        "admin_player_rename": "Renamed player {player_id} from '{old_name}' to '{new_name}'",
+        "admin_player_list_detailed": "Detailed player list (including activity and resources)",
+        "admin_player_reset": "Reset player {player_id} data (control points and resources)",
+
+        # Admin international politics
+        "admin_intl_activate": "Manually activated international politician {name}",
+        "admin_intl_deactivate": "Deactivated international politician {name}",
+        "admin_intl_view": "Active international politicians this cycle:",
+
+        # Advanced admin actions
+        "admin_force_action": "Force an action for player {player_id} in district {district_id}",
+        "admin_block_action": "Blocked pending action {action_id} from player {player_id}",
+        "admin_modify_action": "Modified action {action_id} parameters",
     },
+
     "ru": {
-        "admin_error": "Ошибка администратора: {error}",
-        "admin_player_resources_not_found": "Игрок {player_id} существует, но не имеет записи ресурсов.",
-        "admin_help_title": "Команды администратора",
-        "admin_reset_actions_usage": "Использование: /admin_reset_actions [ID игрока]",
-        "admin_reset_actions_success": "Действия сброшены для игрока {player_id}.",
-        "admin_reset_all_actions_success": "Действия сброшены для {count} игроков.",
-        "admin_set_ideology_usage": "Использование: /admin_set_ideology [ID игрока] [оценка идеологии]",
-        "admin_set_ideology_success": "Оценка идеологии для игрока {player_id} установлена на {score}.",
-        "admin_set_ideology_invalid": "Оценка идеологии должна быть от -5 до +5.",
-        "admin_player_not_found": "Игрок {player_id} не найден.",
-        "admin_list_players_none": "Нет зарегистрированных игроков.",
-        "admin_list_players_title": "Зарегистрированные игроки",
-        "admin_help_desc": "Показать это сообщение помощи администратора",
-        "admin_news_desc": "Добавить новость",
-        "admin_cycle_desc": "Вручную обработать игровой цикл",
+        # Extended admin command descriptions
+        "admin_resource_detailed": "Добавить ресурсы в инвентарь игрока",
+        "admin_set_control_detailed": "Установить очки контроля игрока в районе",
+        "admin_reset_actions_detailed": "Сбросить доступные действия игрока до полных",
+        "admin_process_cycle_detailed": "Вручную запустить обработку цикла (расчет результатов)",
+        "admin_add_news_detailed": "Добавить пользовательскую новость, видимую всем или конкретным игрокам",
+        "admin_set_ideology_detailed": "Установить идеологический показатель игрока (влияет на совместимость с политиками)",
+
+        # Admin resource management
+        "admin_resources_added_detailed": "Добавлено {amount} {resource_type} игроку {player_id}. Ранее: {previous}, Новое: {new_amount}",
+        "admin_resources_removed": "Удалено {amount} {resource_type} у игрока {player_id}. Ранее: {previous}, Новое: {new_amount}",
+        "admin_resources_view": "Ресурсы игрока {player_id}: Влияние: {influence}, Ресурсы: {resources}, Информация: {information}, Сила: {force}",
+
+        # Admin district control management
+        "admin_control_added": "Добавлено {points} очков контроля игроку {player_id} в районе {district_id}. Новый итог: {new_total}",
+        "admin_control_removed": "Удалено {points} очков контроля у игрока {player_id} в районе {district_id}. Новый итог: {new_total}",
+        "admin_control_view": "Статус контроля для района {district_id}:",
+
+        # Admin player management
+        "admin_player_rename": "Переименован игрок {player_id} с '{old_name}' на '{new_name}'",
+        "admin_player_list_detailed": "Подробный список игроков (включая активность и ресурсы)",
+        "admin_player_reset": "Сброшены данные игрока {player_id} (очки контроля и ресурсы)",
+
+        # Admin international politics
+        "admin_intl_activate": "Вручную активирован международный политик {name}",
+        "admin_intl_deactivate": "Деактивирован международный политик {name}",
+        "admin_intl_view": "Активные международные политики в этом цикле:",
+
+        # Advanced admin actions
+        "admin_force_action": "Принудительное действие для игрока {player_id} в районе {district_id}",
+        "admin_block_action": "Заблокировано ожидающее действие {action_id} от игрока {player_id}",
+        "admin_modify_action": "Изменены параметры действия {action_id}",
     }
 }
 
@@ -241,65 +313,47 @@ ADMIN_TRANSLATIONS = {
 # To add these translations to the main translations dictionary
 def update_admin_translations():
     """Update the main translations dictionary with admin translations"""
-    from languages import TRANSLATIONS
+    try:
+        from languages import TRANSLATIONS
 
-    for lang in ADMIN_TRANSLATIONS:
-        if lang in TRANSLATIONS:
-            # Update existing language with admin translations
-            for key, value in ADMIN_TRANSLATIONS[lang].items():
-                TRANSLATIONS[lang][key] = value
+        for lang in ADMIN_TRANSLATIONS:
+            if lang in TRANSLATIONS:
+                # Update existing language with admin translations
+                for key, value in ADMIN_TRANSLATIONS[lang].items():
+                    TRANSLATIONS[lang][key] = value
 
-    logger.info("Admin translations added")
+        logger.info("Admin translations added")
+    except ImportError:
+        logger.error("Failed to import TRANSLATIONS from languages.py")
+    except Exception as e:
+        logger.error(f"Error in update_admin_translations: {e}")
 
-
-# Call this function when initializing language support
-def init_admin_language_support():
-    """Initialize admin language support"""
-    update_admin_translations()
-    logger.info("Admin language support initialized")
 
 def update_translations():
     """
     Update the main translations dictionary with additional translations
 
-    This function must be called before translations are used to ensure all
-    new translations are available
+    This function must be called during initialization to ensure all
+    new translations are available in the main dictionary
     """
-    from languages import TRANSLATIONS
+    try:
+        from languages import TRANSLATIONS
 
-    for lang in ADDITIONAL_TRANSLATIONS:
-        if lang in TRANSLATIONS:
-            # Update existing language with new translations
-            for key, value in ADDITIONAL_TRANSLATIONS[lang].items():
-                TRANSLATIONS[lang][key] = value
-        else:
-            # Add new language
-            TRANSLATIONS[lang] = ADDITIONAL_TRANSLATIONS[lang]
+        for lang in ADDITIONAL_TRANSLATIONS:
+            if lang in TRANSLATIONS:
+                # Update existing language with new translations
+                for key, value in ADDITIONAL_TRANSLATIONS[lang].items():
+                    TRANSLATIONS[lang][key] = value
+            else:
+                # Add new language (unlikely case)
+                logger.warning(f"Adding new language {lang} to TRANSLATIONS")
+                TRANSLATIONS[lang] = ADDITIONAL_TRANSLATIONS[lang]
 
-    logger.info("Translations updated with additional entries")
-
-
-def get_translated_keyboard(keyboard_items: List[Dict[str, str]], lang: str = "en") -> List[Dict[str, str]]:
-    """
-    Translate a list of keyboard items
-
-    Args:
-        keyboard_items: List of keyboard items with 'text' keys
-        lang: Language code
-
-    Returns:
-        List of translated keyboard items
-    """
-    from languages import get_text
-
-    translated_items = []
-    for item in keyboard_items:
-        translated_item = item.copy()
-        if 'text' in item:
-            translated_item['text'] = get_text(item['text'], lang, item['text'])
-        translated_items.append(translated_item)
-
-    return translated_items
+        logger.info("Translations updated with additional entries")
+    except ImportError:
+        logger.error("Failed to import TRANSLATIONS from languages.py")
+    except Exception as e:
+        logger.error(f"Error in update_translations: {e}")
 
 
 def detect_language_from_message(message_text: str) -> str:
@@ -333,46 +387,277 @@ def format_resource_list(resources: Dict[str, int], lang: str = "en") -> str:
     Returns:
         Formatted string
     """
-    from languages import get_resource_name
+    try:
+        from languages import get_resource_name, get_text
 
-    formatted_parts = []
-    for resource_type, amount in resources.items():
-        if amount != 0:
-            resource_name = get_resource_name(resource_type, lang)
-            formatted_parts.append(f"{amount} {resource_name}")
+        formatted_parts = []
+        for resource_type, amount in resources.items():
+            if amount != 0:
+                resource_name = get_resource_name(resource_type, lang)
+                formatted_parts.append(f"{amount} {resource_name}")
 
-    if not formatted_parts:
-        return get_text("none", lang, default="None")
+        if not formatted_parts:
+            return get_text("none", lang, default="None")
 
-    return ", ".join(formatted_parts)
+        return ", ".join(formatted_parts)
+    except ImportError:
+        logger.error("Failed to import functions from languages.py")
+        # Fallback simple formatting
+        return ", ".join(
+            f"{amount} {resource_type}" for resource_type, amount in resources.items() if amount != 0) or "None"
+    except Exception as e:
+        logger.error(f"Error in format_resource_list: {e}")
+        return "Error formatting resources"
 
 
-def get_ordinal_suffix(num: int, lang: str = "en") -> str:
+def get_translated_keyboard(keyboard_items: List[Dict[str, str]], lang: str = "en") -> List[Dict[str, str]]:
     """
-    Get the ordinal suffix for a number
+    Translate a list of keyboard items
 
     Args:
-        num: Number
+        keyboard_items: List of keyboard items with 'text' keys
         lang: Language code
 
     Returns:
-        String with ordinal suffix
+        List of translated keyboard items
     """
-    if lang == "ru":
-        # Russian doesn't use ordinal suffixes the same way
-        return str(num)
+    try:
+        from languages import get_text
 
-    # English ordinal suffixes
-    if 10 <= num % 100 <= 20:
-        suffix = "th"
-    else:
-        suffixes = {1: "st", 2: "nd", 3: "rd"}
-        suffix = suffixes.get(num % 10, "th")
+        translated_items = []
+        for item in keyboard_items:
+            translated_item = item.copy()
+            if 'text' in item:
+                # If text is a translation key, translate it
+                translated_item['text'] = get_text(item['text'], lang, item['text'])
+            translated_items.append(translated_item)
 
-    return f"{num}{suffix}"
+        return translated_items
+    except ImportError:
+        logger.error("Failed to import get_text from languages.py")
+        return keyboard_items
+    except Exception as e:
+        logger.error(f"Error in get_translated_keyboard: {e}")
+        return keyboard_items
 
 
-def init_language_support():
-    """Initialize language support by updating translations"""
+# Initialize admin language support
+def init_admin_language_support():
+    """Initialize admin language support by updating admin translations"""
+    update_admin_translations()
+    logger.info("Admin language support initialized")
+
+
+# Initialize all language updates
+def init_language_updates():
+    """Initialize all language updates"""
     update_translations()
-    logger.info("Language support initialized")
+    init_admin_language_support()
+    logger.info("Language updates initialized")
+
+
+# Pluralization support for different languages
+def format_plurals(key: str, count: int, lang: str = "en") -> str:
+    """
+    Format pluralized text based on count
+
+    Args:
+        key: Translation key for text with plural forms
+        count: Count number to determine which form to use
+        lang: Language code
+
+    Returns:
+        Formatted text with correct plural form
+    """
+    try:
+        from languages import TRANSLATIONS, get_text
+
+        if lang not in TRANSLATIONS or key not in TRANSLATIONS[lang]:
+            # Fall back to English or default
+            return get_text(key, "en", default=f"{count}").format(count=count)
+
+        # Get the pluralization template
+        template = TRANSLATIONS[lang][key]
+
+        # Split the template into plural forms
+        forms = template.split("|")
+
+        # For English (and most languages with 2 forms)
+        if lang == "en" or len(forms) == 2:
+            form_index = 0 if count == 1 else 1
+            return forms[min(form_index, len(forms) - 1)].format(count=count)
+
+        # For Russian and other languages with complex pluralization
+        elif lang == "ru" and len(forms) >= 3:
+            # Russian pluralization rules
+            if count % 10 == 1 and count % 100 != 11:
+                form_index = 0  # 1, 21, 31, ...
+            elif 2 <= count % 10 <= 4 and (count % 100 < 10 or count % 100 >= 20):
+                form_index = 1  # 2-4, 22-24, ...
+            else:
+                form_index = 2  # 0, 5-20, 25-30, ...
+
+            return forms[min(form_index, len(forms) - 1)].format(count=count)
+
+        # Generic fallback for other languages
+        else:
+            # Just use the first form as fallback
+            return forms[0].format(count=count)
+
+    except Exception as e:
+        logger.error(f"Error formatting plurals: {e}")
+        return f"{count}"
+
+
+def has_translation(key: str, lang: str = "en") -> bool:
+    """
+    Check if a translation key exists for the specified language
+
+    Args:
+        key: Translation key to check
+        lang: Language code
+
+    Returns:
+        bool: True if translation exists, False otherwise
+    """
+    try:
+        from languages import TRANSLATIONS
+
+        return lang in TRANSLATIONS and key in TRANSLATIONS[lang]
+    except ImportError:
+        logger.error("Failed to import TRANSLATIONS from languages.py")
+        return False
+    except Exception as e:
+        logger.error(f"Error checking translation: {e}")
+        return False
+
+
+def check_format_strings(text: str) -> List[str]:
+    """
+    Extract format string parameters from a text
+
+    Args:
+        text: Text to check for format strings
+
+    Returns:
+        List of format string parameter names
+    """
+    pattern = re.compile(r'\{([^{}]+)\}')
+    return pattern.findall(text)
+
+
+def compare_translations(key: str, base_lang: str = "en") -> Dict[str, Dict[str, Any]]:
+    """
+    Compare translations of a key across all languages
+
+    Args:
+        key: Translation key to compare
+        base_lang: Base language to compare against
+
+    Returns:
+        Dictionary of comparison results by language
+    """
+    try:
+        from languages import TRANSLATIONS
+
+        results = {}
+
+        if base_lang not in TRANSLATIONS or key not in TRANSLATIONS[base_lang]:
+            return results
+
+        base_text = TRANSLATIONS[base_lang][key]
+        base_format_strings = check_format_strings(base_text)
+
+        for lang, translations in TRANSLATIONS.items():
+            if lang == base_lang or key not in translations:
+                continue
+
+            text = translations[key]
+            format_strings = check_format_strings(text)
+
+            missing = set(base_format_strings) - set(format_strings)
+            extra = set(format_strings) - set(base_format_strings)
+
+            results[lang] = {
+                "text": text,
+                "missing_formats": list(missing),
+                "extra_formats": list(extra),
+                "has_issues": bool(missing or extra)
+            }
+
+        return results
+
+    except ImportError:
+        logger.error("Failed to import TRANSLATIONS from languages.py")
+        return {}
+    except Exception as e:
+        logger.error(f"Error comparing translations: {e}")
+        return {}
+
+
+def estimate_translation_quality(lang: str = "ru", base_lang: str = "en") -> Tuple[float, Dict[str, Any]]:
+    """
+    Estimate the quality of translations for a language
+
+    Args:
+        lang: Language to check
+        base_lang: Base language to compare against
+
+    Returns:
+        Tuple of quality score (0.0-1.0) and detailed statistics
+    """
+    try:
+        from languages import TRANSLATIONS
+
+        if lang not in TRANSLATIONS or base_lang not in TRANSLATIONS:
+            return 0.0, {"error": "Language not available"}
+
+        base_keys = set(TRANSLATIONS[base_lang].keys())
+        lang_keys = set(TRANSLATIONS[lang].keys())
+
+        # Count keys
+        total_base_keys = len(base_keys)
+        missing_keys = len(base_keys - lang_keys)
+        extra_keys = len(lang_keys - base_keys)
+        coverage = (total_base_keys - missing_keys) / total_base_keys if total_base_keys > 0 else 0
+
+        # Check format strings
+        format_issues = 0
+        common_keys = base_keys.intersection(lang_keys)
+
+        for key in common_keys:
+            base_text = TRANSLATIONS[base_lang][key]
+            lang_text = TRANSLATIONS[lang][key]
+
+            base_formats = set(check_format_strings(base_text))
+            lang_formats = set(check_format_strings(lang_text))
+
+            if base_formats != lang_formats:
+                format_issues += 1
+
+        format_quality = (len(common_keys) - format_issues) / len(common_keys) if common_keys else 1.0
+
+        # Calculate overall quality score (70% coverage, 30% format correctness)
+        quality_score = (coverage * 0.7) + (format_quality * 0.3)
+
+        return quality_score, {
+            "total_base_keys": total_base_keys,
+            "translated_keys": len(common_keys),
+            "missing_keys": missing_keys,
+            "extra_keys": extra_keys,
+            "coverage": coverage,
+            "format_issues": format_issues,
+            "format_quality": format_quality
+        }
+
+    except ImportError:
+        logger.error("Failed to import TRANSLATIONS from languages.py")
+        return 0.0, {"error": "Import failed"}
+    except Exception as e:
+        logger.error(f"Error estimating translation quality: {e}")
+        return 0.0, {"error": str(e)}
+
+
+# Just for compatibility with the existing code
+if __name__ == "__main__":
+    init_language_updates()
