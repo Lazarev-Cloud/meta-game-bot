@@ -3,7 +3,7 @@ import json
 import logging
 import random
 import sqlite3
-from typing import Dict, Any
+from typing import Dict, Any, List, Optional
 
 from db.queries import (
     distribute_district_resources,
@@ -40,7 +40,6 @@ CYCLE_STARTS = [
 async def process_game_cycle(context):
     """Process actions and update game state at the end of a cycle."""
     now = datetime.datetime.now()
-    current_hour = now.hour
     current_time = now.time()
 
     # Determine current cycle
@@ -93,8 +92,7 @@ async def process_game_cycle(context):
         logger.error(f"Exception traceback:\n{tb_string}")
 
 
-# Helper functions to break down the process
-def get_pending_actions(cycle):
+def get_pending_actions(cycle: str) -> List[tuple]:
     """Get all pending actions for a cycle with a dedicated connection."""
     try:
         conn = sqlite3.connect('belgrade_game.db')
@@ -111,7 +109,7 @@ def get_pending_actions(cycle):
         return []
 
 
-def process_single_action(action_id, player_id, action_type, target_type, target_id):
+def process_single_action(action_id: int, player_id: int, action_type: str, target_type: str, target_id: str) -> bool:
     """Process a single action with its own connection."""
     try:
         # Process the action
@@ -132,7 +130,7 @@ def process_single_action(action_id, player_id, action_type, target_type, target
         return False
 
 
-def apply_district_decay():
+def apply_district_decay() -> bool:
     """Apply decay to district control with a dedicated connection."""
     try:
         conn = sqlite3.connect('belgrade_game.db')
@@ -148,7 +146,7 @@ def apply_district_decay():
         return False
 
 
-def get_random_international_politicians(min_count, max_count):
+def get_random_international_politicians(min_count: int, max_count: int) -> List[int]:
     """Get random international politician IDs."""
     try:
         conn = sqlite3.connect('belgrade_game.db')
@@ -319,83 +317,7 @@ def process_action(action_id: int, player_id: int, action_type: str, target_type
         return {'status': 'failed', 'error': str(e)}
 
 
-def process_international_politicians():
-    """Process actions by international politicians"""
-    # Choose 1-3 random international politicians to activate
-    conn = sqlite3.connect('belgrade_game.db')
-    cursor = conn.cursor()
-
-    cursor.execute("SELECT politician_id, name FROM politicians WHERE is_international = 1")
-    international_politicians = cursor.fetchall()
-
-    num_active = random.randint(1, 3)
-    active_politicians = random.sample(international_politicians, min(num_active, len(international_politicians)))
-
-    activated_events = []
-
-    for politician_id, name in active_politicians:
-        # Process this politician's action
-        event = process_international_politician_action(politician_id)
-        if event:
-            activated_events.append(event)
-
-    conn.close()
-    return activated_events
-
-
-async def schedule_jobs(application):
-    """Set up scheduled jobs for game cycle processing."""
-    job_queue = application.job_queue
-
-    # Schedule morning cycle results
-    morning_time = datetime.time(hour=CYCLE_STARTS[4].hour, minute=CYCLE_STARTS[4].minute)
-    job_queue.run_daily(process_game_cycle, time=morning_time)
-
-    # Schedule evening cycle results
-    evening_time = datetime.time(hour=CYCLE_STARTS[6].hour, minute=CYCLE_STARTS[6].minute)
-    job_queue.run_daily(process_game_cycle, time=evening_time)
-
-    # Schedule periodic action refreshes every 3 hours
-    job_queue.run_repeating(refresh_actions, interval=3 * 60 * 60)
-
-    logger.info("Scheduled jobs set up")
-
-
-async def refresh_actions(context):
-    """Refresh actions for all players every 3 hours."""
-    conn = sqlite3.connect('belgrade_game.db')
-    cursor = conn.cursor()
-
-    # Get all active players
-    cursor.execute("SELECT player_id FROM players")
-    players = cursor.fetchall()
-
-    for player_id_tuple in players:
-        player_id = player_id_tuple[0]
-
-        # Refresh their actions
-        cursor.execute(
-            "UPDATE players SET main_actions_left = 1, quick_actions_left = 2, last_action_refresh = ? WHERE player_id = ?",
-            (datetime.datetime.now().isoformat(), player_id)
-        )
-
-        # Notify the player
-        try:
-            lang = get_player_language(player_id)
-            await context.bot.send_message(
-                chat_id=player_id,
-                text=get_text("actions_refreshed_notification", lang)
-            )
-        except Exception as e:
-            logger.error(f"Failed to notify player {player_id} about action refresh: {e}")
-
-    conn.commit()
-    conn.close()
-
-    logger.info("Actions refreshed for all players")
-
-
-def process_international_politician_action(politician_id):
+def process_international_politician_action(politician_id: int) -> Optional[Dict[str, Any]]:
     """
     Process an action by an international politician.
 
@@ -528,6 +450,58 @@ def process_international_politician_action(politician_id):
     except Exception as e:
         logger.error(f"Error processing international politician {politician_id}: {e}")
         return None
+
+
+async def schedule_jobs(context):
+    """Set up scheduled jobs for game cycle processing."""
+    job_queue = context.job_queue
+
+    # Schedule morning cycle results
+    morning_time = datetime.time(hour=CYCLE_STARTS[4].hour, minute=CYCLE_STARTS[4].minute)
+    job_queue.run_daily(process_game_cycle, time=morning_time)
+
+    # Schedule evening cycle results
+    evening_time = datetime.time(hour=CYCLE_STARTS[6].hour, minute=CYCLE_STARTS[6].minute)
+    job_queue.run_daily(process_game_cycle, time=evening_time)
+
+    # Schedule periodic action refreshes every 3 hours
+    job_queue.run_repeating(refresh_actions, interval=3 * 60 * 60)
+
+    logger.info("Scheduled jobs set up")
+
+
+async def refresh_actions(context):
+    """Refresh actions for all players every 3 hours."""
+    conn = sqlite3.connect('belgrade_game.db')
+    cursor = conn.cursor()
+
+    # Get all active players
+    cursor.execute("SELECT player_id FROM players")
+    players = cursor.fetchall()
+
+    for player_id_tuple in players:
+        player_id = player_id_tuple[0]
+
+        # Refresh their actions
+        cursor.execute(
+            "UPDATE players SET main_actions_left = 1, quick_actions_left = 2, last_action_refresh = ? WHERE player_id = ?",
+            (datetime.datetime.now().isoformat(), player_id)
+        )
+
+        # Notify the player
+        try:
+            lang = get_player_language(player_id)
+            await context.bot.send_message(
+                chat_id=player_id,
+                text=get_text("actions_refreshed_notification", lang)
+            )
+        except Exception as e:
+            logger.error(f"Failed to notify player {player_id} about action refresh: {e}")
+
+    conn.commit()
+    conn.close()
+
+    logger.info("Actions refreshed for all players")
 
 
 async def notify_players_of_results(context, cycle):

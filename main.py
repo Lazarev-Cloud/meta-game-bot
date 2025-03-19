@@ -8,6 +8,7 @@ Main entry point for the bot application
 
 import logging
 import sys
+import asyncio
 from telegram import Update
 from telegram.ext import Application
 from languages import get_text, get_player_language
@@ -32,8 +33,8 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-def main() -> None:
-    """Start the bot."""
+async def async_main() -> None:
+    """Start the bot asynchronously."""
     # Display startup message
     logger.info("Starting Belgrade Game Bot...")
 
@@ -65,7 +66,8 @@ def main() -> None:
 
         # Set up scheduled jobs
         logger.info("Setting up scheduled jobs...")
-        application.job_queue.run_once(schedule_jobs, 1)
+        # Properly await the async function
+        await application.job_queue.run_once(schedule_jobs, 1)
 
         # Add error handler
         logger.info("Setting up error handler...")
@@ -77,7 +79,7 @@ def main() -> None:
 
         # Start the Bot
         logger.info("Bot starting up - Press Ctrl+C to stop")
-        application.run_polling(allowed_updates=Update.ALL_TYPES)
+        await application.run_polling(allowed_updates=Update.ALL_TYPES)
     except Exception as e:
         logger.critical(f"Failed to initialize bot: {e}")
         import traceback
@@ -85,6 +87,11 @@ def main() -> None:
         tb_string = ''.join(tb_list)
         logger.critical(f"Initialization error traceback:\n{tb_string}")
         sys.exit(1)
+
+
+def main() -> None:
+    """Entry point that runs the async main function."""
+    asyncio.run(async_main())
 
 
 def validate_system():
@@ -123,7 +130,6 @@ def validate_system():
                     logger.warning(f"Essential translation key '{key}' is missing for language '{lang}'")
 
         # Check if admin IDs are configured
-        from config import ADMIN_IDS
         if not ADMIN_IDS:
             logger.warning("No admin IDs configured - admin commands will not be available")
 
@@ -132,7 +138,7 @@ def validate_system():
         logger.error(f"System validation error: {e}")
 
 
-def error_handler(update, context):
+async def error_handler(update, context):
     """Log the error and send a telegram message to notify the developer."""
     logger.error(f"Exception while handling an update: {context.error}")
 
@@ -154,7 +160,7 @@ def error_handler(update, context):
                 except Exception:
                     pass  # Fall back to default language
 
-            context.bot.send_message(
+            await context.bot.send_message(
                 chat_id=update.effective_chat.id,
                 text=get_text("error_message", lang,
                               default="Sorry, something went wrong. The error has been reported.")
@@ -171,10 +177,9 @@ def error_handler(update, context):
                 # Truncate if too long
                 if len(error_message) > 4000:
                     error_message = error_message[:3997] + "..."
-                context.bot.send_message(chat_id=admin_id, text=error_message)
+                await context.bot.send_message(chat_id=admin_id, text=error_message)
     except Exception as e:
         logger.error(f"Error notifying admins: {e}")
-
 
 
 if __name__ == "__main__":

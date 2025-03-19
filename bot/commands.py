@@ -1,6 +1,9 @@
-import sqlite3
 import logging
 import datetime
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
+from typing import Optional, List, Dict, Any, Tuple
+
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import (
     CommandHandler, MessageHandler, filters,
@@ -9,14 +12,15 @@ from telegram.ext import (
 from config import ADMIN_IDS
 from languages import get_text, get_cycle_name, get_resource_name
 from db.queries import (
+    db_transaction,
     register_player, set_player_name, get_player,
     get_player_language, get_player_resources, update_player_resources,
     get_remaining_actions, update_action_counts, get_news,
     get_player_districts, add_news, use_action, get_district_info,
-    create_trade_offer
+    create_trade_offer, accept_trade_offer, get_all_districts
 )
 from game.districts import (
-    generate_text_map, format_district_info, get_district_by_name
+    format_district_info, get_district_by_name
 )
 from game.politicians import (
     format_politicians_list, format_politician_info, get_politician_by_name
@@ -31,12 +35,22 @@ logger = logging.getLogger(__name__)
 WAITING_NAME = "WAITING_NAME"
 WAITING_INFO_CONTENT = "WAITING_INFO_CONTENT"
 
+# Thread pool for database operations
+executor = ThreadPoolExecutor(max_workers=4)
+
 
 # Command handlers
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Start the conversation and ask for player name."""
     user = update.effective_user
-    register_player(user.id, user.username)
+
+    # Run database operation in thread pool
+    await asyncio.get_event_loop().run_in_executor(
+        executor,
+        register_player,
+        user.id,
+        user.username
+    )
 
     # Default to English for new users
     lang = "en"
@@ -60,11 +74,22 @@ async def set_name_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(get_text("invalid_name", lang))
         return WAITING_NAME
 
-    set_player_name(user.id, character_name)
-
-    await update.message.reply_text(
-        get_text("name_set", lang, character_name=character_name)
+    # Run database operation in thread pool
+    success = await asyncio.get_event_loop().run_in_executor(
+        executor,
+        set_player_name,
+        user.id,
+        character_name
     )
+
+    if success:
+        await update.message.reply_text(
+            get_text("name_set", lang, character_name=character_name)
+        )
+    else:
+        await update.message.reply_text(
+            get_text("error_setting_name", lang, default="Error setting character name. Please try again.")
+        )
 
     return ConversationHandler.END
 
@@ -72,7 +97,13 @@ async def set_name_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def cancel_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Cancel the conversation."""
     user = update.effective_user
-    lang = get_player_language(user.id)
+
+    # Run database operation in thread pool
+    lang = await asyncio.get_event_loop().run_in_executor(
+        executor,
+        get_player_language,
+        user.id
+    )
 
     await update.message.reply_text(get_text("operation_cancelled", lang))
     return ConversationHandler.END
@@ -81,7 +112,13 @@ async def cancel_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def admin_add_resources(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Admin command to add resources to a player."""
     user = update.effective_user
-    lang = get_player_language(user.id)
+
+    # Run database operation in thread pool
+    lang = await asyncio.get_event_loop().run_in_executor(
+        executor,
+        get_player_language,
+        user.id
+    )
 
     if user.id not in ADMIN_IDS:
         await update.message.reply_text(get_text("admin_only", lang))
@@ -105,53 +142,58 @@ async def admin_add_resources(update: Update, context: ContextTypes.DEFAULT_TYPE
         await update.message.reply_text(get_text("admin_invalid_resource", lang))
         return
 
-    player = get_player(player_id)
+    # Check if player exists
+    player = await asyncio.get_event_loop().run_in_executor(
+        executor,
+        get_player,
+        player_id
+    )
+
     if not player:
         await update.message.reply_text(get_text("admin_player_not_found", lang, player_id=player_id))
         return
 
-    # Directly update resources in the database to ensure consistency
+    # Update resources
     try:
-        conn = sqlite3.connect('belgrade_game.db')
-        cursor = conn.cursor()
+        new_amount = await asyncio.get_event_loop().run_in_executor(
+            executor,
+            update_player_resources,
+            player_id,
+            resource_type,
+            amount
+        )
 
-        # Get current amount
-        cursor.execute(f"SELECT {resource_type} FROM resources WHERE player_id = ?", (player_id,))
-        result = cursor.fetchone()
-
-        if result:
-            current_amount = result[0]
-            new_amount = current_amount + amount
-            if new_amount < 0:
-                new_amount = 0
-
-            # Update resource
-            cursor.execute(
-                f"UPDATE resources SET {resource_type} = ? WHERE player_id = ?",
-                (new_amount, player_id)
-            )
-            conn.commit()
-
-            await update.message.reply_text(
-                get_text("admin_resources_added", lang,
-                         amount=amount,
-                         resource_type=get_resource_name(resource_type, lang),
-                         player_id=player_id,
-                         new_amount=new_amount)
-            )
-        else:
-            await update.message.reply_text(get_text("admin_player_resources_not_found", lang, player_id=player_id))
+        await update.message.reply_text(
+            get_text("admin_resources_added", lang,
+                     amount=amount,
+                     resource_type=get_resource_name(resource_type, lang),
+                     player_id=player_id,
+                     new_amount=new_amount)
+        )
     except Exception as e:
         logger.error(f"Error in admin_add_resources: {e}")
         await update.message.reply_text(get_text("admin_error", lang, error=str(e)))
-    finally:
-        conn.close()
+
+
+@db_transaction
+def get_districts_for_selection(conn, lang="en"):
+    """Get list of districts for selection menu."""
+    cursor = conn.cursor()
+    cursor.execute("SELECT district_id, name FROM districts ORDER BY name")
+    districts = cursor.fetchall()
+    return districts
 
 
 async def admin_set_control(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Admin command to set district control points."""
     user = update.effective_user
-    lang = get_player_language(user.id)
+
+    # Run database operation in thread pool
+    lang = await asyncio.get_event_loop().run_in_executor(
+        executor,
+        get_player_language,
+        user.id
+    )
 
     if user.id not in ADMIN_IDS:
         await update.message.reply_text(get_text("admin_only", lang))
@@ -171,58 +213,49 @@ async def admin_set_control(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(get_text("admin_invalid_args", lang))
         return
 
-    player = get_player(player_id)
+    # Check if player exists
+    player = await asyncio.get_event_loop().run_in_executor(
+        executor,
+        get_player,
+        player_id
+    )
+
     if not player:
         await update.message.reply_text(get_text("admin_player_not_found", lang, player_id=player_id))
         return
 
-    # Verify district exists
-    district = None
-    try:
-        conn = sqlite3.connect('belgrade_game.db')
-        cursor = conn.cursor()
-        cursor.execute("SELECT district_id, name FROM districts WHERE district_id = ?", (district_id,))
-        district = cursor.fetchone()
-        conn.close()
-    except Exception as e:
-        logger.error(f"Error checking district: {e}")
+    # Get district info to verify it exists
+    district_info = await asyncio.get_event_loop().run_in_executor(
+        executor,
+        get_district_info,
+        district_id
+    )
 
-    if not district:
+    if not district_info:
         await update.message.reply_text(get_text("admin_district_not_found", lang, district_id=district_id))
         return
 
-    # Update control directly in the database
+    # Update district control
     try:
-        conn = sqlite3.connect('belgrade_game.db')
-        cursor = conn.cursor()
-
-        cursor.execute(
-            "SELECT control_points FROM district_control WHERE player_id = ? AND district_id = ?",
-            (player_id, district_id)
+        from db.queries import update_district_control
+        success = await asyncio.get_event_loop().run_in_executor(
+            executor,
+            update_district_control,
+            player_id,
+            district_id,
+            control_points
         )
-        existing = cursor.fetchone()
 
-        if existing:
-            cursor.execute(
-                "UPDATE district_control SET control_points = ?, last_action = ? WHERE player_id = ? AND district_id = ?",
-                (control_points, datetime.datetime.now().isoformat(), player_id, district_id)
+        if success:
+            district_name = district_info[1] if district_info else district_id
+            await update.message.reply_text(
+                get_text("admin_control_updated", lang,
+                         player_id=player_id,
+                         district_id=district_name,
+                         control_points=control_points)
             )
         else:
-            cursor.execute(
-                "INSERT INTO district_control (district_id, player_id, control_points, last_action) VALUES (?, ?, ?, ?)",
-                (district_id, player_id, control_points, datetime.datetime.now().isoformat())
-            )
-
-        conn.commit()
-        conn.close()
-
-        district_name = district[1] if district else district_id
-        await update.message.reply_text(
-            get_text("admin_control_updated", lang,
-                     player_id=player_id,
-                     district_id=district_name,
-                     control_points=control_points)
-        )
+            await update.message.reply_text(get_text("admin_control_update_failed", lang))
     except Exception as e:
         logger.error(f"Error in admin_set_control: {e}")
         await update.message.reply_text(get_text("admin_error", lang, error=str(e)))
@@ -231,15 +264,21 @@ async def admin_set_control(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def admin_help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Admin-only command to show admin-specific help."""
     user = update.effective_user
-    lang = get_player_language(user.id)
+
+    # Run database operation in thread pool
+    lang = await asyncio.get_event_loop().run_in_executor(
+        executor,
+        get_player_language,
+        user.id
+    )
 
     if user.id not in ADMIN_IDS:
         await update.message.reply_text(get_text("admin_only", lang))
         return
 
     # Define the strings with apostrophes outside the f-string
-    reset_player_actions_text = "Reset a player's available actions"
-    reset_all_actions_text = "Reset all players' available actions"
+    reset_player_actions_text = get_text("admin_reset_desc", lang, default="Reset a player's available actions")
+    reset_all_actions_text = get_text("admin_reset_all_desc", lang, default="Reset all players' available actions")
 
     # Now use these variables in the f-string
     admin_help_text = (
@@ -261,7 +300,13 @@ async def admin_help_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Display help message with available commands."""
     user = update.effective_user
-    lang = get_player_language(user.id)
+
+    # Run database operation in thread pool
+    lang = await asyncio.get_event_loop().run_in_executor(
+        executor,
+        get_player_language,
+        user.id
+    )
 
     # Check if the user is an admin
     is_admin = user.id in ADMIN_IDS
@@ -278,8 +323,8 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Add admin hint for admins
     if is_admin:
         help_text += (
-            f"<b>Admin Commands:</b>\n"
-            f"Use /admin_help to see all admin commands.\n\n"
+            f"<b>{get_text('admin_commands', lang, default='Admin Commands')}:</b>\n"
+            f"{get_text('admin_help_hint', lang, default='Use /admin_help to see all admin commands.')}\n\n"
         )
 
     help_text += get_text('help_footer', lang)
@@ -287,29 +332,41 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(help_text, parse_mode='HTML')
 
 
+@db_transaction
+def list_all_players(conn):
+    """List all registered players from the database."""
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT p.player_id, p.character_name, p.username, p.ideology_score, 
+               r.influence, r.resources, r.information, r.force
+        FROM players p
+        LEFT JOIN resources r ON p.player_id = r.player_id
+        ORDER BY p.player_id
+    """)
+    return cursor.fetchall()
+
+
 async def admin_list_players(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Admin command to list all registered players."""
     user = update.effective_user
-    lang = get_player_language(user.id)
+
+    # Run database operation in thread pool
+    lang = await asyncio.get_event_loop().run_in_executor(
+        executor,
+        get_player_language,
+        user.id
+    )
 
     if user.id not in ADMIN_IDS:
         await update.message.reply_text(get_text("admin_only", lang))
         return
 
     try:
-        conn = sqlite3.connect('belgrade_game.db')
-        cursor = conn.cursor()
-
-        cursor.execute("""
-            SELECT p.player_id, p.character_name, p.username, p.ideology_score, 
-                   r.influence, r.resources, r.information, r.force
-            FROM players p
-            LEFT JOIN resources r ON p.player_id = r.player_id
-            ORDER BY p.player_id
-        """)
-
-        players = cursor.fetchall()
-        conn.close()
+        # Get players using transaction decorator
+        players = await asyncio.get_event_loop().run_in_executor(
+            executor,
+            list_all_players
+        )
 
         if not players:
             await update.message.reply_text(
@@ -339,10 +396,51 @@ async def admin_list_players(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await update.message.reply_text(get_text("admin_error", lang, error=str(e)))
 
 
+@db_transaction
+def reset_player_actions(conn, player_id):
+    """Reset a player's available actions."""
+    cursor = conn.cursor()
+    now = datetime.datetime.now().isoformat()
+
+    # Check if player exists
+    cursor.execute("SELECT player_id FROM players WHERE player_id = ?", (player_id,))
+    if not cursor.fetchone():
+        return False
+
+    # Reset actions
+    cursor.execute(
+        "UPDATE players SET main_actions_left = 1, quick_actions_left = 2, last_action_refresh = ? WHERE player_id = ?",
+        (now, player_id)
+    )
+
+    return cursor.rowcount > 0
+
+
+@db_transaction
+def reset_all_player_actions(conn):
+    """Reset all players' available actions."""
+    cursor = conn.cursor()
+    now = datetime.datetime.now().isoformat()
+
+    # Reset actions for all players
+    cursor.execute(
+        "UPDATE players SET main_actions_left = 1, quick_actions_left = 2, last_action_refresh = ?",
+        (now,)
+    )
+
+    return cursor.rowcount
+
+
 async def admin_reset_actions(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Admin command to reset a player's available actions."""
     user = update.effective_user
-    lang = get_player_language(user.id)
+
+    # Run database operation in thread pool
+    lang = await asyncio.get_event_loop().run_in_executor(
+        executor,
+        get_player_language,
+        user.id
+    )
 
     if user.id not in ADMIN_IDS:
         await update.message.reply_text(get_text("admin_only", lang))
@@ -357,27 +455,17 @@ async def admin_reset_actions(update: Update, context: ContextTypes.DEFAULT_TYPE
     try:
         player_id = int(args[0])
 
-        conn = sqlite3.connect('belgrade_game.db')
-        cursor = conn.cursor()
-
-        # Check if player exists
-        cursor.execute("SELECT player_id FROM players WHERE player_id = ?", (player_id,))
-        if not cursor.fetchone():
-            conn.close()
-            await update.message.reply_text(get_text("admin_player_not_found", lang, player_id=player_id))
-            return
-
-        # Reset actions
-        now = datetime.datetime.now().isoformat()
-        cursor.execute(
-            "UPDATE players SET main_actions_left = 1, quick_actions_left = 2, last_action_refresh = ? WHERE player_id = ?",
-            (now, player_id)
+        # Reset actions using transaction decorator
+        success = await asyncio.get_event_loop().run_in_executor(
+            executor,
+            reset_player_actions,
+            player_id
         )
 
-        conn.commit()
-        conn.close()
-
-        await update.message.reply_text(get_text("admin_reset_actions_success", lang, player_id=player_id))
+        if success:
+            await update.message.reply_text(get_text("admin_reset_actions_success", lang, player_id=player_id))
+        else:
+            await update.message.reply_text(get_text("admin_player_not_found", lang, player_id=player_id))
 
     except ValueError:
         await update.message.reply_text(get_text("admin_invalid_args", lang))
@@ -389,26 +477,24 @@ async def admin_reset_actions(update: Update, context: ContextTypes.DEFAULT_TYPE
 async def admin_reset_all_actions(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Admin command to reset all players' available actions."""
     user = update.effective_user
-    lang = get_player_language(user.id)
+
+    # Run database operation in thread pool
+    lang = await asyncio.get_event_loop().run_in_executor(
+        executor,
+        get_player_language,
+        user.id
+    )
 
     if user.id not in ADMIN_IDS:
         await update.message.reply_text(get_text("admin_only", lang))
         return
 
     try:
-        conn = sqlite3.connect('belgrade_game.db')
-        cursor = conn.cursor()
-
-        # Reset actions for all players
-        now = datetime.datetime.now().isoformat()
-        cursor.execute(
-            "UPDATE players SET main_actions_left = 1, quick_actions_left = 2, last_action_refresh = ?",
-            (now,)
+        # Reset all actions using transaction decorator
+        affected_rows = await asyncio.get_event_loop().run_in_executor(
+            executor,
+            reset_all_player_actions
         )
-
-        affected_rows = cursor.rowcount
-        conn.commit()
-        conn.close()
 
         await update.message.reply_text(get_text("admin_reset_all_actions_success", lang, count=affected_rows))
 
@@ -420,8 +506,19 @@ async def admin_reset_all_actions(update: Update, context: ContextTypes.DEFAULT_
 async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Display player's current status."""
     user = update.effective_user
-    lang = get_player_language(user.id)
-    player = get_player(user.id)
+
+    # Run database operations in thread pool
+    lang = await asyncio.get_event_loop().run_in_executor(
+        executor,
+        get_player_language,
+        user.id
+    )
+
+    player = await asyncio.get_event_loop().run_in_executor(
+        executor,
+        get_player,
+        user.id
+    )
 
     if not player:
         await update.message.reply_text(get_text("not_registered", lang))
@@ -430,9 +527,24 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     character_name = player[2] or get_text("unnamed", lang, default="Unnamed")
     ideology_score = player[3]
 
-    resources = get_player_resources(user.id)
-    districts = get_player_districts(user.id)
-    actions = get_remaining_actions(user.id)
+    # Run more database operations in thread pool
+    resources = await asyncio.get_event_loop().run_in_executor(
+        executor,
+        get_player_resources,
+        user.id
+    )
+
+    districts = await asyncio.get_event_loop().run_in_executor(
+        executor,
+        get_player_districts,
+        user.id
+    )
+
+    actions = await asyncio.get_event_loop().run_in_executor(
+        executor,
+        get_remaining_actions,
+        user.id
+    )
 
     # Format ideology using helper function
     from languages import format_ideology
@@ -463,10 +575,35 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(status_text, parse_mode='Markdown')
 
 
+@db_transaction
+def set_player_ideology(conn, player_id, ideology_score):
+    """Set a player's ideology score."""
+    cursor = conn.cursor()
+
+    # Check if player exists
+    cursor.execute("SELECT player_id FROM players WHERE player_id = ?", (player_id,))
+    if not cursor.fetchone():
+        return False
+
+    # Update ideology score
+    cursor.execute(
+        "UPDATE players SET ideology_score = ? WHERE player_id = ?",
+        (ideology_score, player_id)
+    )
+
+    return cursor.rowcount > 0
+
+
 async def admin_set_ideology(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Admin command to set a player's ideology score."""
     user = update.effective_user
-    lang = get_player_language(user.id)
+
+    # Run database operation in thread pool
+    lang = await asyncio.get_event_loop().run_in_executor(
+        executor,
+        get_player_language,
+        user.id
+    )
 
     if user.id not in ADMIN_IDS:
         await update.message.reply_text(get_text("admin_only", lang))
@@ -489,28 +626,20 @@ async def admin_set_ideology(update: Update, context: ContextTypes.DEFAULT_TYPE)
                                                      default="Ideology score must be between -5 and +5."))
             return
 
-        conn = sqlite3.connect('belgrade_game.db')
-        cursor = conn.cursor()
-
-        # Check if player exists
-        cursor.execute("SELECT player_id FROM players WHERE player_id = ?", (player_id,))
-        if not cursor.fetchone():
-            conn.close()
-            await update.message.reply_text(get_text("admin_player_not_found", lang, player_id=player_id))
-            return
-
-        # Update ideology score
-        cursor.execute(
-            "UPDATE players SET ideology_score = ? WHERE player_id = ?",
-            (ideology_score, player_id)
+        # Set ideology using transaction decorator
+        success = await asyncio.get_event_loop().run_in_executor(
+            executor,
+            set_player_ideology,
+            player_id,
+            ideology_score
         )
 
-        conn.commit()
-        conn.close()
-
-        await update.message.reply_text(get_text("admin_set_ideology_success", lang,
-                                                 player_id=player_id, score=ideology_score,
-                                                 default=f"Ideology score for player {player_id} set to {ideology_score}."))
+        if success:
+            await update.message.reply_text(get_text("admin_set_ideology_success", lang,
+                                                     player_id=player_id, score=ideology_score,
+                                                     default=f"Ideology score for player {player_id} set to {ideology_score}."))
+        else:
+            await update.message.reply_text(get_text("admin_player_not_found", lang, player_id=player_id))
 
     except ValueError:
         await update.message.reply_text(get_text("admin_invalid_args", lang))
@@ -519,10 +648,72 @@ async def admin_set_ideology(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await update.message.reply_text(get_text("admin_error", lang, error=str(e)))
 
 
+async def generate_text_map():
+    """Generate a text representation of the game map."""
+    districts = await asyncio.get_event_loop().run_in_executor(
+        executor,
+        get_all_districts
+    )
+
+    map_text = []
+
+    map_text.append(f"*{get_text('map_title', 'en', default='Current Control Map of Novi Sad')}*\n")
+
+    for district in districts:
+        district_id, name, description, *_ = district
+
+        # Get district control data
+        from db.queries import get_district_control
+        control_data = await asyncio.get_event_loop().run_in_executor(
+            executor,
+            get_district_control,
+            district_id
+        )
+
+        map_text.append(f"*{name}* - {description}")
+
+        if control_data:
+            # Sort by control points (highest first)
+            control_data.sort(key=lambda x: x[1], reverse=True)
+
+            for player_id, control_points, player_name in control_data:
+                if control_points > 0:
+                    # Determine control status
+                    if control_points >= 80:
+                        control_status = "🔒"
+                    elif control_points >= 60:
+                        control_status = "✅"
+                    elif control_points >= 20:
+                        control_status = "⚠️"
+                    else:
+                        control_status = "❌"
+
+                    map_text.append(
+                        f"  {control_status} {player_name}: {control_points} {get_text('points', 'en', default='points')}")
+        else:
+            map_text.append(f"  {get_text('map_no_control', 'en', default='No control established')}")
+
+        map_text.append("")  # Add empty line between districts
+
+    map_text.append(get_text('map_legend', 'en', default="Legend:"))
+    map_text.append(get_text('map_strong_control', 'en', default="🔒 Strong control (80+ points)"))
+    map_text.append(get_text('map_controlled', 'en', default="✅ Controlled (60-79 points)"))
+    map_text.append(get_text('map_contested', 'en', default="⚠️ Contested (20-59 points)"))
+    map_text.append(get_text('map_weak', 'en', default="❌ Weak presence (<20 points)"))
+
+    return "\n".join(map_text)
+
+
 async def map_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Show the current game map."""
     user = update.effective_user
-    lang = get_player_language(user.id)
+
+    # Run database operation in thread pool
+    lang = await asyncio.get_event_loop().run_in_executor(
+        executor,
+        get_player_language,
+        user.id
+    )
 
     try:
         map_text = await generate_text_map()
@@ -540,7 +731,13 @@ async def map_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def time_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Show current game cycle and time until next phase."""
     user = update.effective_user
-    lang = get_player_language(user.id)
+
+    # Run database operation in thread pool
+    lang = await asyncio.get_event_loop().run_in_executor(
+        executor,
+        get_player_language,
+        user.id
+    )
 
     now = datetime.datetime.now()
     current_time = now.time()
@@ -566,9 +763,9 @@ async def time_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             next_results = datetime.datetime.combine(tomorrow, get_cycle_results_time())
         else:
             # Next deadline is evening of today
-            from game.actions import EVENING_CYCLE_DEADLINE, EVENING_CYCLE_RESULTS
-            next_deadline = datetime.datetime.combine(now.date(), EVENING_CYCLE_DEADLINE)
-            next_results = datetime.datetime.combine(now.date(), EVENING_CYCLE_RESULTS)
+            from game.actions import CYCLE_STARTS
+            next_deadline = datetime.datetime.combine(now.date(), CYCLE_STARTS[6])
+            next_results = datetime.datetime.combine(now.date(), CYCLE_STARTS[6])
 
     # Format time remaining
     def format_time_remaining(minutes):
@@ -602,8 +799,20 @@ async def time_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def news_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Show recent news."""
     user = update.effective_user
-    lang = get_player_language(user.id)
-    news_items = get_news(limit=5, player_id=user.id)
+
+    # Run database operations in thread pool
+    lang = await asyncio.get_event_loop().run_in_executor(
+        executor,
+        get_player_language,
+        user.id
+    )
+
+    news_items = await asyncio.get_event_loop().run_in_executor(
+        executor,
+        get_news,
+        5,  # limit
+        user.id  # player_id
+    )
 
     if not news_items:
         await update.message.reply_text(get_text("no_news", lang))
@@ -625,19 +834,38 @@ async def news_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def action_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle main action submission."""
     user = update.effective_user
-    lang = get_player_language(user.id)
 
-    # Check if player is registered
-    player = get_player(user.id)
+    # Run database operations in thread pool
+    lang = await asyncio.get_event_loop().run_in_executor(
+        executor,
+        get_player_language,
+        user.id
+    )
+
+    player = await asyncio.get_event_loop().run_in_executor(
+        executor,
+        get_player,
+        user.id
+    )
+
     if not player:
         await update.message.reply_text(get_text("not_registered", lang))
         return
 
     # Check if actions should refresh
-    update_action_counts(user.id)
+    updated = await asyncio.get_event_loop().run_in_executor(
+        executor,
+        update_action_counts,
+        user.id
+    )
 
     # Check if player has actions left
-    actions = get_remaining_actions(user.id)
+    actions = await asyncio.get_event_loop().run_in_executor(
+        executor,
+        get_remaining_actions,
+        user.id
+    )
+
     if actions['main'] <= 0:
         await update.message.reply_text(get_text("no_main_actions", lang))
         return
@@ -661,19 +889,38 @@ async def action_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def quick_action_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle quick action submission."""
     user = update.effective_user
-    lang = get_player_language(user.id)
 
-    # Check if player is registered
-    player = get_player(user.id)
+    # Run database operations in thread pool
+    lang = await asyncio.get_event_loop().run_in_executor(
+        executor,
+        get_player_language,
+        user.id
+    )
+
+    player = await asyncio.get_event_loop().run_in_executor(
+        executor,
+        get_player,
+        user.id
+    )
+
     if not player:
         await update.message.reply_text(get_text("not_registered", lang))
         return
 
     # Check if actions should refresh
-    update_action_counts(user.id)
+    updated = await asyncio.get_event_loop().run_in_executor(
+        executor,
+        update_action_counts,
+        user.id
+    )
 
     # Check if player has actions left
-    actions = get_remaining_actions(user.id)
+    actions = await asyncio.get_event_loop().run_in_executor(
+        executor,
+        get_remaining_actions,
+        user.id
+    )
+
     if actions['quick'] <= 0:
         await update.message.reply_text(get_text("no_quick_actions", lang))
         return
@@ -697,10 +944,22 @@ async def quick_action_command(update: Update, context: ContextTypes.DEFAULT_TYP
 async def cancel_action_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Cancel the last pending action."""
     user = update.effective_user
-    lang = get_player_language(user.id)
+
+    # Run database operations in thread pool
+    lang = await asyncio.get_event_loop().run_in_executor(
+        executor,
+        get_player_language,
+        user.id
+    )
 
     from db.queries import cancel_last_action
-    if cancel_last_action(user.id):
+    success = await asyncio.get_event_loop().run_in_executor(
+        executor,
+        cancel_last_action,
+        user.id
+    )
+
+    if success:
         await update.message.reply_text(get_text("action_cancelled", lang))
     else:
         await update.message.reply_text(get_text("no_pending_actions", lang))
@@ -709,18 +968,36 @@ async def cancel_action_command(update: Update, context: ContextTypes.DEFAULT_TY
 async def actions_left_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Show remaining actions."""
     user = update.effective_user
-    lang = get_player_language(user.id)
 
-    # Check if player is registered
-    player = get_player(user.id)
+    # Run database operations in thread pool
+    lang = await asyncio.get_event_loop().run_in_executor(
+        executor,
+        get_player_language,
+        user.id
+    )
+
+    player = await asyncio.get_event_loop().run_in_executor(
+        executor,
+        get_player,
+        user.id
+    )
+
     if not player:
         await update.message.reply_text(get_text("not_registered", lang))
         return
 
     # Check if actions should refresh
-    updated = update_action_counts(user.id)
+    updated = await asyncio.get_event_loop().run_in_executor(
+        executor,
+        update_action_counts,
+        user.id
+    )
 
-    actions = get_remaining_actions(user.id)
+    actions = await asyncio.get_event_loop().run_in_executor(
+        executor,
+        get_remaining_actions,
+        user.id
+    )
 
     if updated:
         await update.message.reply_text(
@@ -735,12 +1012,24 @@ async def actions_left_command(update: Update, context: ContextTypes.DEFAULT_TYP
 async def view_district_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """View information about a district."""
     user = update.effective_user
-    lang = get_player_language(user.id)
+
+    # Run database operations in thread pool
+    lang = await asyncio.get_event_loop().run_in_executor(
+        executor,
+        get_player_language,
+        user.id
+    )
+
     args = context.args
 
     if not args:
         # Show list of districts to select from
-        districts = get_districts_for_selection(lang)
+        districts = await asyncio.get_event_loop().run_in_executor(
+            executor,
+            get_districts_for_selection,
+            lang
+        )
+
         keyboard = []
 
         for district_id, name in districts:
@@ -755,11 +1044,20 @@ async def view_district_command(update: Update, context: ContextTypes.DEFAULT_TY
         return
 
     district_name = ' '.join(args)
-    district = get_district_by_name(district_name)
+    district = await asyncio.get_event_loop().run_in_executor(
+        executor,
+        get_district_by_name,
+        district_name
+    )
 
     if district:
         district_id = district[0]
-        district_info = format_district_info(district_id, lang)
+        district_info = await asyncio.get_event_loop().run_in_executor(
+            executor,
+            format_district_info,
+            district_id,
+            lang
+        )
 
         if district_info:
             # Add action buttons
@@ -797,34 +1095,31 @@ async def view_district_command(update: Update, context: ContextTypes.DEFAULT_TY
         )
 
 
-def get_districts_for_selection(lang="en"):
-    """Get list of districts for selection menu."""
-    try:
-        conn = sqlite3.connect('belgrade_game.db')
-        cursor = conn.cursor()
-        cursor.execute("SELECT district_id, name FROM districts ORDER BY name")
-        districts = cursor.fetchall()
-        conn.close()
-        return districts
-    except Exception as e:
-        logger.error(f"Error getting districts: {e}")
-        return []
-
-
 async def politicians_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Show list of local politicians."""
     user = update.effective_user
-    lang = get_player_language(user.id)
 
-    politicians_text = format_politicians_list(is_international=False, lang=lang)
+    # Run database operations in thread pool
+    lang = await asyncio.get_event_loop().run_in_executor(
+        executor,
+        get_player_language,
+        user.id
+    )
+
+    politicians_text = await asyncio.get_event_loop().run_in_executor(
+        executor,
+        format_politicians_list,
+        False,  # is_international
+        lang
+    )
 
     # Get list of politicians for buttons
-    import sqlite3
-    conn = sqlite3.connect('belgrade_game.db')
-    cursor = conn.cursor()
-    cursor.execute("SELECT politician_id, name FROM politicians WHERE is_international = 0 ORDER BY name")
-    politicians = cursor.fetchall()
-    conn.close()
+    from db.queries import get_all_politicians
+    politicians = await asyncio.get_event_loop().run_in_executor(
+        executor,
+        get_all_politicians,
+        False  # is_international
+    )
 
     if not politicians:
         await update.message.reply_text(get_text("no_politicians", lang))
@@ -833,7 +1128,7 @@ async def politicians_command(update: Update, context: ContextTypes.DEFAULT_TYPE
     # Show list of politicians to choose from
     keyboard = []
     for politician in politicians:
-        pol_id, name = politician
+        pol_id, name = politician[0], politician[1]
         keyboard.append([InlineKeyboardButton(name, callback_data=f"view_politician:{pol_id}")])
 
     reply_markup = InlineKeyboardMarkup(keyboard)
@@ -848,7 +1143,14 @@ async def politicians_command(update: Update, context: ContextTypes.DEFAULT_TYPE
 async def politician_status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """View information about a specific politician."""
     user = update.effective_user
-    lang = get_player_language(user.id)
+
+    # Run database operations in thread pool
+    lang = await asyncio.get_event_loop().run_in_executor(
+        executor,
+        get_player_language,
+        user.id
+    )
+
     args = context.args
 
     if not args:
@@ -857,10 +1159,20 @@ async def politician_status_command(update: Update, context: ContextTypes.DEFAUL
         return
 
     politician_name = ' '.join(args)
-    politician = get_politician_by_name(politician_name)
+    politician = await asyncio.get_event_loop().run_in_executor(
+        executor,
+        get_politician_by_name,
+        politician_name
+    )
 
     if politician:
-        politician_info = format_politician_info(politician[0], user.id, lang)
+        politician_info = await asyncio.get_event_loop().run_in_executor(
+            executor,
+            format_politician_info,
+            politician[0],  # politician_id
+            user.id,
+            lang
+        )
 
         if politician_info:
             pol_id = politician[0]
@@ -896,9 +1208,20 @@ async def politician_status_command(update: Update, context: ContextTypes.DEFAUL
 async def international_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Show information about international politicians."""
     user = update.effective_user
-    lang = get_player_language(user.id)
 
-    international_text = format_politicians_list(is_international=True, lang=lang)
+    # Run database operations in thread pool
+    lang = await asyncio.get_event_loop().run_in_executor(
+        executor,
+        get_player_language,
+        user.id
+    )
+
+    international_text = await asyncio.get_event_loop().run_in_executor(
+        executor,
+        format_politicians_list,
+        True,  # is_international
+        lang
+    )
 
     await update.message.reply_text(international_text, parse_mode='Markdown')
 
@@ -906,9 +1229,19 @@ async def international_command(update: Update, context: ContextTypes.DEFAULT_TY
 async def resources_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Show player's resources and information about resource usage."""
     user = update.effective_user
-    lang = get_player_language(user.id)
 
-    resources = get_player_resources(user.id)
+    # Run database operations in thread pool
+    lang = await asyncio.get_event_loop().run_in_executor(
+        executor,
+        get_player_language,
+        user.id
+    )
+
+    resources = await asyncio.get_event_loop().run_in_executor(
+        executor,
+        get_player_resources,
+        user.id
+    )
 
     if not resources:
         await update.message.reply_text(get_text("not_registered", lang))
@@ -929,7 +1262,14 @@ async def resources_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def convert_resource_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Convert resources from one type to another."""
     user = update.effective_user
-    lang = get_player_language(user.id)
+
+    # Run database operations in thread pool
+    lang = await asyncio.get_event_loop().run_in_executor(
+        executor,
+        get_player_language,
+        user.id
+    )
+
     args = context.args
 
     if len(args) != 2:
@@ -960,7 +1300,12 @@ async def convert_resource_command(update: Update, context: ContextTypes.DEFAULT
         return
 
     # Check if player has enough resources
-    resources = get_player_resources(user.id)
+    resources = await asyncio.get_event_loop().run_in_executor(
+        executor,
+        get_player_resources,
+        user.id
+    )
+
     resources_needed = amount * 2  # 2 resources = 1 of any other type
 
     if resources['resources'] < resources_needed:
@@ -970,8 +1315,21 @@ async def convert_resource_command(update: Update, context: ContextTypes.DEFAULT
         return
 
     # Perform the conversion
-    update_player_resources(user.id, 'resources', -resources_needed)
-    update_player_resources(user.id, resource_type, amount)
+    await asyncio.get_event_loop().run_in_executor(
+        executor,
+        update_player_resources,
+        user.id,
+        'resources',
+        -resources_needed
+    )
+
+    await asyncio.get_event_loop().run_in_executor(
+        executor,
+        update_player_resources,
+        user.id,
+        resource_type,
+        amount
+    )
 
     await update.message.reply_text(
         get_text("conversion_success", lang,
@@ -984,10 +1342,21 @@ async def convert_resource_command(update: Update, context: ContextTypes.DEFAULT
 async def check_income_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Check player's expected resource income."""
     user = update.effective_user
-    lang = get_player_language(user.id)
+
+    # Run database operations in thread pool
+    lang = await asyncio.get_event_loop().run_in_executor(
+        executor,
+        get_player_language,
+        user.id
+    )
 
     # Get districts controlled by the player (60+ control points)
-    districts = get_player_districts(user.id)
+    districts = await asyncio.get_event_loop().run_in_executor(
+        executor,
+        get_player_districts,
+        user.id
+    )
+
     controlled_districts = []
 
     total_income = {
@@ -1002,7 +1371,12 @@ async def check_income_command(update: Update, context: ContextTypes.DEFAULT_TYP
             district_id, name, control_points = district_data
 
             if control_points >= 60:
-                district = get_district_info(district_id)
+                district = await asyncio.get_event_loop().run_in_executor(
+                    executor,
+                    get_district_info,
+                    district_id
+                )
+
                 if district:
                     _, district_name, _, influence, resources, information, force = district
 
@@ -1051,7 +1425,13 @@ async def check_income_command(update: Update, context: ContextTypes.DEFAULT_TYP
 async def language_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Change the interface language."""
     user = update.effective_user
-    lang = get_player_language(user.id)
+
+    # Run database operations in thread pool
+    lang = await asyncio.get_event_loop().run_in_executor(
+        executor,
+        get_player_language,
+        user.id
+    )
 
     keyboard = [
         [
@@ -1071,21 +1451,37 @@ async def language_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def receive_info_content(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle receiving information content for quick info action."""
     user = update.effective_user
-    lang = get_player_language(user.id)
     content = update.message.text.strip()
+
+    # Run database operations in thread pool
+    lang = await asyncio.get_event_loop().run_in_executor(
+        executor,
+        get_player_language,
+        user.id
+    )
 
     if not content:
         await update.message.reply_text(get_text("invalid_info_content", lang))
         return ConversationHandler.END
 
     # Check if player has quick actions left
-    actions = get_remaining_actions(user.id)
+    actions = await asyncio.get_event_loop().run_in_executor(
+        executor,
+        get_remaining_actions,
+        user.id
+    )
+
     if actions['quick'] <= 0:
         await update.message.reply_text(get_text("no_quick_actions", lang))
         return ConversationHandler.END
 
     # Spread information requires 1 Information resource
-    resources = get_player_resources(user.id)
+    resources = await asyncio.get_event_loop().run_in_executor(
+        executor,
+        get_player_resources,
+        user.id
+    )
+
     if resources['information'] < 1:
         await update.message.reply_text(
             get_text("insufficient_resources", lang, resource_type=get_resource_name("information", lang))
@@ -1093,21 +1489,52 @@ async def receive_info_content(update: Update, context: ContextTypes.DEFAULT_TYP
         return ConversationHandler.END
 
     # Deduct resource
-    update_player_resources(user.id, 'information', -1)
+    await asyncio.get_event_loop().run_in_executor(
+        executor,
+        update_player_resources,
+        user.id,
+        'information',
+        -1
+    )
 
     # Use action
-    if not use_action(user.id, False):
+    action_used = await asyncio.get_event_loop().run_in_executor(
+        executor,
+        use_action,
+        user.id,
+        False  # is_main_action
+    )
+
+    if not action_used:
         await update.message.reply_text(get_text("no_quick_actions", lang))
         return ConversationHandler.END
 
     # Add news item
     title = get_text("info_from_user", lang, user=user.first_name)
-    add_news(title, content, is_public=True, is_fake=False)
+
+    await asyncio.get_event_loop().run_in_executor(
+        executor,
+        add_news,
+        title,
+        content,
+        True,  # is_public
+        None,  # target_player_id
+        False  # is_fake
+    )
 
     # Add the action to the database
     from db.queries import add_action
     resources_used = {"information": 1}
-    add_action(user.id, "info", "news", "public", resources_used)
+
+    await asyncio.get_event_loop().run_in_executor(
+        executor,
+        add_action,
+        user.id,
+        "info",
+        "news",
+        "public",
+        resources_used
+    )
 
     await update.message.reply_text(get_text("info_spreading", lang))
     return ConversationHandler.END
@@ -1117,7 +1544,13 @@ async def receive_info_content(update: Update, context: ContextTypes.DEFAULT_TYP
 async def admin_add_news(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Admin command to add a news item."""
     user = update.effective_user
-    lang = get_player_language(user.id)
+
+    # Run database operations in thread pool
+    lang = await asyncio.get_event_loop().run_in_executor(
+        executor,
+        get_player_language,
+        user.id
+    )
 
     if user.id not in ADMIN_IDS:
         await update.message.reply_text(get_text("admin_only", lang))
@@ -1132,7 +1565,12 @@ async def admin_add_news(update: Update, context: ContextTypes.DEFAULT_TYPE):
     title = args[0]
     content = ' '.join(args[1:])
 
-    news_id = add_news(title, content)
+    news_id = await asyncio.get_event_loop().run_in_executor(
+        executor,
+        add_news,
+        title,
+        content
+    )
 
     await update.message.reply_text(get_text("admin_news_added", lang, news_id=news_id))
 
@@ -1140,7 +1578,14 @@ async def admin_add_news(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def accept_trade(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Accept a trade offer."""
     user = update.effective_user
-    lang = get_player_language(user.id)
+
+    # Run database operations in thread pool
+    lang = await asyncio.get_event_loop().run_in_executor(
+        executor,
+        get_player_language,
+        user.id
+    )
+
     args = context.args
 
     if not args:
@@ -1150,21 +1595,24 @@ async def accept_trade(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         offer_id = int(args[0])
 
-        # Accept the trade offer using the existing function in db/queries.py
-        from db.queries import accept_trade_offer
-
-        success = accept_trade_offer(offer_id, user.id)
+        # Accept the trade offer
+        success = await asyncio.get_event_loop().run_in_executor(
+            executor,
+            accept_trade_offer,
+            offer_id,
+            user.id
+        )
 
         if success:
             # Get sender ID to notify them
-            conn = sqlite3.connect('belgrade_game.db')
-            cursor = conn.cursor()
-            cursor.execute("SELECT sender_id FROM trade_offers WHERE offer_id = ?", (offer_id,))
-            result = cursor.fetchone()
-            conn.close()
+            from db.queries import get_trade_offer_sender
+            sender_id = await asyncio.get_event_loop().run_in_executor(
+                executor,
+                get_trade_offer_sender,
+                offer_id
+            )
 
-            if result:
-                sender_id = result[0]
+            if sender_id:
                 # Notify sender
                 try:
                     await context.bot.send_message(
@@ -1188,7 +1636,13 @@ async def accept_trade(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def admin_process_cycle(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Admin command to manually process a game cycle."""
     user = update.effective_user
-    lang = get_player_language(user.id)
+
+    # Run database operations in thread pool
+    lang = await asyncio.get_event_loop().run_in_executor(
+        executor,
+        get_player_language,
+        user.id
+    )
 
     if user.id not in ADMIN_IDS:
         await update.message.reply_text(get_text("admin_only", lang))
@@ -1202,7 +1656,14 @@ async def admin_process_cycle(update: Update, context: ContextTypes.DEFAULT_TYPE
 async def trade_offer(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Create a trade offer with another player."""
     user = update.effective_user
-    lang = get_player_language(user.id)
+
+    # Run database operations in thread pool
+    lang = await asyncio.get_event_loop().run_in_executor(
+        executor,
+        get_player_language,
+        user.id
+    )
+
     args = context.args
 
     if len(args) < 4:
@@ -1213,15 +1674,15 @@ async def trade_offer(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         # Parse receiver ID
         receiver_id = int(args[0])
-        
+
         # Parse offered resources
         offer = {}
         request = {}
-        
+
         # Parse format: /trade <player_id> offer <resource> <amount> request <resource> <amount>
         i = 1
         current_dict = None
-        
+
         while i < len(args):
             if args[i].lower() == 'offer':
                 current_dict = offer
@@ -1231,54 +1692,63 @@ async def trade_offer(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 current_dict = request
                 i += 1
                 continue
-                
+
             if current_dict is None or i + 1 >= len(args):
                 await update.message.reply_text(get_text("trade_offer_invalid_format", lang))
                 return
-                
+
             resource_type = args[i].lower()
             try:
                 amount = int(args[i + 1])
             except ValueError:
                 await update.message.reply_text(get_text("amount_not_number", lang))
                 return
-                
+
             if amount <= 0:
                 await update.message.reply_text(get_text("amount_not_positive", lang))
                 return
-                
+
             if resource_type not in ['influence', 'force', 'information', 'resources']:
                 await update.message.reply_text(get_text("invalid_resource_type", lang))
                 return
-                
+
             current_dict[resource_type] = amount
             i += 2
-            
+
         # Create trade offer
-        offer_id = create_trade_offer(user.id, receiver_id, offer, request)
-        
+        offer_id = await asyncio.get_event_loop().run_in_executor(
+            executor,
+            create_trade_offer,
+            user.id,
+            receiver_id,
+            offer,
+            request
+        )
+
         if offer_id > 0:
             # Notify receiver
             try:
-                offered_resources = ", ".join([f"{amount} {get_resource_name(res, lang)}" for res, amount in offer.items()])
-                requested_resources = ", ".join([f"{amount} {get_resource_name(res, lang)}" for res, amount in request.items()])
-                
+                offered_resources = ", ".join(
+                    [f"{amount} {get_resource_name(res, lang)}" for res, amount in offer.items()])
+                requested_resources = ", ".join(
+                    [f"{amount} {get_resource_name(res, lang)}" for res, amount in request.items()])
+
                 await context.bot.send_message(
                     chat_id=receiver_id,
                     text=get_text("trade_offer_received", lang,
-                                 sender_id=user.id,
-                                 offered=offered_resources,
-                                 requested=requested_resources,
-                                 offer_id=offer_id)
+                                  sender_id=user.id,
+                                  offered=offered_resources,
+                                  requested=requested_resources,
+                                  offer_id=offer_id)
                 )
-                
+
                 await update.message.reply_text(get_text("trade_offer_sent", lang, receiver_id=receiver_id))
             except Exception as e:
                 logger.error(f"Failed to notify receiver about trade offer: {e}")
                 await update.message.reply_text(get_text("trade_offer_sent_no_notify", lang))
         else:
             await update.message.reply_text(get_text("trade_offer_failed", lang))
-            
+
     except ValueError:
         await update.message.reply_text(get_text("invalid_player_id", lang))
     except Exception as e:
@@ -1340,7 +1810,5 @@ def register_commands(application):
     # Trading handlers
     application.add_handler(CommandHandler("trade", trade_offer))
     application.add_handler(CommandHandler("accept_trade", accept_trade))
-
-    logger.info("Command handlers registered")
 
     logger.info("Command handlers registered")
