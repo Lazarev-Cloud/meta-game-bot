@@ -409,6 +409,14 @@ TRANSLATIONS = {
             "en": "Error using ability. Please try again later.",
             "ru": "Ошибка при использовании способности. Пожалуйста, попробуйте позже."
         },
+
+        # Location-based features
+        "location_update_success": "✅ Your location has been updated to {district}",
+        "location_update_failed": "❌ Failed to update your location",
+        "location_bonus_applied": "📍 +20 control points bonus applied for physical presence in the district",
+        "location_bonus_info": "Being physically present in a district gives you +20 control points bonus for actions in that district",
+        "current_location": "📍 You are currently in {district}",
+        "no_location_set": "📍 Your location is not set. Use /set_location to update it",
     },
 
     "ru": {
@@ -793,6 +801,14 @@ TRANSLATIONS = {
 
         # New translations
         "district_desc_stari_grad": "Политическое сердце Нови Сада, где расположены правительственные учреждения",
+
+        # Location-based features
+        "location_update_success": "✅ Your location has been updated to {district}",
+        "location_update_failed": "❌ Failed to update your location",
+        "location_bonus_applied": "📍 +20 control points bonus applied for physical presence in the district",
+        "location_bonus_info": "Being physically present in a district gives you +20 control points bonus for actions in that district",
+        "current_location": "📍 You are currently in {district}",
+        "no_location_set": "📍 Your location is not set. Use /set_location to update it",
     }
 }
 

@@ -18,7 +18,8 @@ from db.queries import (
     get_remaining_actions, update_action_counts, get_news,
     get_player_districts, add_news, use_action, get_district_info,
     create_trade_offer, accept_trade_offer, get_all_districts,
-    update_base_resources, process_district_resources, reset_player_actions
+    update_base_resources, process_district_resources, reset_player_actions,
+    update_player_location, get_player_location
 )
 from game.districts import (
     format_district_info, get_district_by_name
@@ -2093,3 +2094,92 @@ async def politician_abilities_command(update: Update, context: ContextTypes.DEF
         parse_mode='Markdown',
         reply_markup=reply_markup
     )
+
+async def set_location_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Command to set player's physical location in a district."""
+    user = update.effective_user
+    
+    # Get player's language
+    lang = await asyncio.get_event_loop().run_in_executor(
+        executor,
+        get_player_language,
+        user.id
+    )
+    
+    if not context.args:
+        # Show available districts
+        districts = await asyncio.get_event_loop().run_in_executor(
+            executor,
+            get_all_districts
+        )
+        
+        message = [get_text("available_districts", lang)]
+        for district_id, name, description, *_ in districts:
+            message.append(f"• {name} (`{district_id}`)")
+        message.append("\n" + get_text("set_location_usage", lang))
+        
+        await update.message.reply_text("\n".join(message), parse_mode=ParseMode.MARKDOWN)
+        return
+    
+    district_id = context.args[0].lower()
+    
+    # Verify district exists
+    district = await asyncio.get_event_loop().run_in_executor(
+        executor,
+        get_district_info,
+        district_id
+    )
+    
+    if not district:
+        await update.message.reply_text(get_text("district_not_found", lang))
+        return
+    
+    # Update player's location
+    success = await asyncio.get_event_loop().run_in_executor(
+        executor,
+        update_player_location,
+        user.id,
+        district_id
+    )
+    
+    if success:
+        await update.message.reply_text(
+            get_text("location_update_success", lang, district=district[1])
+        )
+    else:
+        await update.message.reply_text(get_text("location_update_failed", lang))
+
+async def get_location_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Command to check player's current location."""
+    user = update.effective_user
+    
+    # Get player's language
+    lang = await asyncio.get_event_loop().run_in_executor(
+        executor,
+        get_player_language,
+        user.id
+    )
+    
+    # Get player's current location
+    district_id = await asyncio.get_event_loop().run_in_executor(
+        executor,
+        get_player_location,
+        user.id
+    )
+    
+    if district_id:
+        district = await asyncio.get_event_loop().run_in_executor(
+            executor,
+            get_district_info,
+            district_id
+        )
+        
+        if district:
+            await update.message.reply_text(
+                get_text("current_location", lang, district=district[1]) + "\n" +
+                get_text("location_bonus_info", lang)
+            )
+        else:
+            await update.message.reply_text(get_text("no_location_set", lang))
+    else:
+        await update.message.reply_text(get_text("no_location_set", lang))

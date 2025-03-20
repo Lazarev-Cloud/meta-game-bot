@@ -292,58 +292,56 @@ def process_action(action_id: int, player_id: int, action_type: str, target_type
     try:
         conn = sqlite3.connect('belgrade_game.db')
         cursor = conn.cursor()
-
-        # Получаем язык игрока
+        
+        # Get player's language
         lang = get_player_language(player_id)
-
-        # Рассчитываем успешность действия
-        success_result = calculate_action_success(action_type, player_id, target_id, power_multiplier)
-
-        # Базовые эффекты действий
-        base_effects = {
-            'influence': {
-                'control_points': 10,
-                'resource_cost': {'influence': 2}
-            },
-            'attack': {
-                'control_points': -15,
-                'resource_cost': {'force': 2}
-            },
-            'defense': {
-                'control_points': 5,
-                'resource_cost': {'force': 1, 'influence': 1}
-            }
+        
+        # Initialize result dictionary
+        result = {
+            'success': True,
+            'messages': [],
+            'effects': {}
         }
 
-        result = {
-            'status': success_result['status'],
-            'effects': {},
-            'messages': []
+        # Calculate success chance and roll
+        success_result = calculate_action_success(action_type, player_id, target_id, power_multiplier)
+        
+        # Get location bonus
+        location_bonus = get_location_bonus(player_id, target_id)
+        
+        # Base effects for different action types
+        base_effects = {
+            'influence': {'control_points': 10},
+            'attack': {'control_points': 15},
+            'support': {'control_points': 8},
+            'defend': {'control_points': 12}
         }
 
         if action_type in base_effects:
             effect = base_effects[action_type]
-            # Применяем множители к очкам контроля
-            control_points = int(effect['control_points'] * power_multiplier * success_result['effect_multiplier'])
+            # Apply multipliers to control points including location bonus
+            base_control_points = effect['control_points']
+            location_multiplier = 1.0 + (location_bonus / base_control_points)  # Convert bonus to multiplier
+            total_control_points = int(base_control_points * power_multiplier * success_result['effect_multiplier'] * location_multiplier)
 
             if target_type == 'district':
-                # Обновляем контроль района
+                # Update district control
                 cursor.execute("""
                     UPDATE district_control 
                     SET control_points = control_points + ?
                     WHERE district_id = ? AND player_id = ?
-                """, (control_points, target_id, player_id))
+                """, (total_control_points, target_id, player_id))
 
-                # Если строк не затронуто, создаем новую запись
+                # If no rows affected, create new record
                 if cursor.rowcount == 0:
                     cursor.execute("""
                         INSERT INTO district_control (district_id, player_id, control_points)
                         VALUES (?, ?, ?)
-                    """, (target_id, player_id, control_points))
+                    """, (target_id, player_id, total_control_points))
 
-                result['effects']['control_points'] = control_points
+                result['effects']['control_points'] = total_control_points
 
-                # Добавляем сообщение о результате
+                # Add result message
                 result['messages'].append(
                     get_text(f"action_result_{success_result['status']}", lang,
                              action=get_text(f"action_type_{action_type}", lang),
@@ -352,11 +350,18 @@ def process_action(action_id: int, player_id: int, action_type: str, target_type
                              chance=success_result['chance'])
                 )
 
-                # Если был множитель силы, добавляем сообщение
+                # If there was a power multiplier, add message
                 if power_multiplier != 1.0:
                     result['messages'].append(
                         get_text("joint_action_power_increase", lang,
                                  percent=f"{(power_multiplier - 1) * 100:.0f}")
+                    )
+                
+                # If there was a location bonus, add message
+                if location_bonus > 0:
+                    result['messages'].append(
+                        get_text("location_bonus_applied", lang,
+                                 bonus=location_bonus)
                     )
 
         conn.commit()
@@ -365,7 +370,11 @@ def process_action(action_id: int, player_id: int, action_type: str, target_type
 
     except Exception as e:
         logger.error(f"Error processing action: {e}")
-        return {'status': 'failed', 'error': str(e)}
+        return {
+            'success': False,
+            'messages': [str(e)],
+            'effects': {}
+        }
 
 
 def process_international_politician_action(politician_id: int) -> Optional[Dict[str, Any]]:

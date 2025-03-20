@@ -1111,3 +1111,53 @@ def update_base_resources(conn, player_id):
         WHERE player_id = ?
     """, (player_id,))
     return cursor.rowcount > 0
+
+@db_transaction
+def update_player_location(conn, player_id: int, district_id: str) -> bool:
+    """Update player's physical location in a district."""
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            INSERT OR REPLACE INTO player_locations (player_id, district_id, timestamp)
+            VALUES (?, ?, CURRENT_TIMESTAMP)
+            """,
+            (player_id, district_id)
+        )
+        return True
+    except Exception as e:
+        logger.error(f"Error updating player location: {e}")
+        return False
+
+@db_transaction
+def get_player_location(conn, player_id: int) -> Optional[str]:
+    """Get player's current district location."""
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT district_id FROM player_locations WHERE player_id = ?",
+            (player_id,)
+        )
+        result = cursor.fetchone()
+        return result[0] if result else None
+    except Exception as e:
+        logger.error(f"Error getting player location: {e}")
+        return None
+
+@db_transaction
+def get_location_bonus(conn, player_id: int, district_id: str) -> int:
+    """Get location-based control point bonus for a player in a district."""
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT district_id FROM player_locations WHERE player_id = ?",
+            (player_id,)
+        )
+        result = cursor.fetchone()
+        
+        if result and result[0] == district_id:
+            return 20  # Physical presence bonus
+        return 0
+    except Exception as e:
+        logger.error(f"Error calculating location bonus: {e}")
+        return 0
