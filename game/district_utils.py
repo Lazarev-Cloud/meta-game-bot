@@ -10,6 +10,13 @@ import logging
 import sqlite3
 import random
 from typing import Dict, List, Tuple, Optional, Any
+from db.game_queries import (
+    get_district_info,
+    get_district_control,
+    update_district_control,
+    get_district_resources
+)
+from languages import get_text
 
 logger = logging.getLogger(__name__)
 
@@ -378,3 +385,58 @@ def generate_district_status_report(lang="en"):
     except Exception as e:
         logger.error(f"Error generating district status report: {e}")
         return get_text('error_generating_report', lang, default="Error generating district status report.")
+
+
+def format_district_control(district_id: int, lang: str = "en") -> str:
+    """Format district control information for display."""
+    control = get_district_control(district_id)
+    if not control:
+        return get_text("district_not_found", lang)
+
+    info = [
+        f"*{control['district_name']}*",
+        f"{get_text('controlling_player', lang)}: {control['controller_name']}",
+        f"{get_text('control_points', lang)}: {control['control_points']}",
+        f"{get_text('control_status', lang)}: {get_text(control['status'], lang)}"
+    ]
+    return "\n".join(info)
+
+
+def get_district_summary(district_id: int, lang: str = "en") -> str:
+    """Get comprehensive summary of a district."""
+    district = get_district_info(district_id)
+    if not district:
+        return get_text("district_not_found", lang)
+
+    resources = get_district_resources(district_id)
+    control = get_district_control(district_id)
+
+    summary = [
+        f"*{district['name']}*",
+        f"{district['description']}",
+        "",
+        f"*{get_text('resources', lang)}:*"
+    ]
+
+    for resource_type, amount in resources.items():
+        if amount > 0:
+            summary.append(f"• {get_text(f'resource_{resource_type}', lang)}: {amount}")
+
+    summary.extend([
+        "",
+        f"*{get_text('control', lang)}:*",
+        f"• {get_text('controller', lang)}: {control['controller_name']}",
+        f"• {get_text('control_points', lang)}: {control['control_points']}",
+        f"• {get_text('status', lang)}: {get_text(control['status'], lang)}"
+    ])
+
+    return "\n".join(summary)
+
+
+def update_control(district_id: int, player_id: int, points: int, lang: str = "en") -> str:
+    """Update district control points and return confirmation."""
+    try:
+        update_district_control(district_id, player_id, points)
+        return get_text("control_updated", lang)
+    except Exception as e:
+        return get_text("control_update_failed", lang)

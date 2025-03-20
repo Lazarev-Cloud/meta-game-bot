@@ -12,15 +12,14 @@ from telegram.ext import (
 from config import ADMIN_IDS
 from languages import get_text, get_cycle_name, get_resource_name
 from db.queries import (
-    db_transaction,
-    register_player, set_player_name, get_player,
-    get_player_language, get_player_resources, update_player_resources,
-    get_remaining_actions, update_action_counts, get_news,
-    get_player_districts, add_news, use_action, get_district_info,
-    create_trade_offer, accept_trade_offer, get_all_districts,
-    update_base_resources, distribute_district_resources, reset_player_actions,
-    update_player_location, get_player_location
+    register_player, get_player, get_player_resources, update_player_resources,
+    get_district_info, get_district_control, update_district_control,
+    get_politician_info, update_politician_friendliness,
+    add_action, cancel_last_action, get_remaining_actions, use_action,
+    add_news, get_news, create_trade_offer, accept_trade_offer,
+    update_player_location, get_player_location, db_transaction
 )
+from db.schema import setup_database
 from game.districts import (
     format_district_info, get_district_by_name
 )
@@ -80,7 +79,7 @@ async def set_name_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Run database operation in thread pool
     success = await asyncio.get_event_loop().run_in_executor(
         executor,
-        set_player_name,
+        register_player,
         user.id,
         character_name
     )

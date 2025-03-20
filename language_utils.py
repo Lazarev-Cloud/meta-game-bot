@@ -13,6 +13,8 @@ from typing import List, Dict, Optional, Union, Any
 from database.utils import get_user_language, update_user_language, update_detected_language
 from database.schema import Language
 from languages import get_text
+from langdetect import detect
+from db.queries import get_player_language, set_player_language
 
 logger = logging.getLogger(__name__)
 
@@ -245,3 +247,11 @@ def format_action_name(action_type: str, lang: str = "en") -> str:
     except Exception as e:
         logger.error(f"Error formatting action name: {e}")
         return action_type.replace('_', ' ').title()
+
+def detect_user_language(text: str) -> str:
+    """Detect user's language from text."""
+    try:
+        detected = detect(text)
+        return detected if detected in SUPPORTED_LANGUAGES else 'en'
+    except:
+        return 'en'

@@ -1,29 +1,121 @@
 import logging
 import sqlite3
-from db.queries import (
-    get_politician_info, get_all_politicians,
-    update_politician_friendliness
+from db.game_queries import (
+    get_politician_info,
+    get_all_politicians,
+    get_player_politicians
 )
+from languages import get_text, format_ideology
+from typing import Dict, List, Optional, Any, Tuple
+from db.queries import db_connection_pool, db_transaction
 
 logger = logging.getLogger(__name__)
 
 
-def get_politician_by_name(name):
+@db_transaction
+def get_politician_by_name(name: str, conn: Any) -> Optional[Dict[str, Any]]:
     """Find a politician by name (case-insensitive partial match)."""
     try:
-        conn = sqlite3.connect('belgrade_game.db')
         cursor = conn.cursor()
-        cursor.execute(
-            "SELECT * FROM politicians WHERE name LIKE ? ORDER BY is_international, name",
-            (f"%{name}%",)
-        )
-        politicians = cursor.fetchall()
-        conn.close()
-
-        return politicians[0] if politicians else None
+        cursor.execute("""
+            SELECT p.*, d.name as district_name
+            FROM politicians p
+            LEFT JOIN districts d ON p.district_id = d.district_id
+            WHERE p.name LIKE ? 
+            ORDER BY p.is_international, p.name
+            LIMIT 1
+        """, (f"%{name}%",))
+        
+        row = cursor.fetchone()
+        if not row:
+            return None
+            
+        return {
+            'id': row[0],
+            'name': row[1],
+            'role': row[2],
+            'ideology_score': row[3],
+            'district_id': row[4],
+            'influence': row[5],
+            'friendliness': row[6],
+            'is_international': bool(row[7]),
+            'description': row[8],
+            'district_name': row[9]
+        }
     except Exception as e:
-        logger.error(f"Error finding politician by name: {e}")
+        logger.error(f"Error getting politician by name: {e}")
         return None
+
+
+@db_transaction
+def get_politician_info(politician_id: int, lang: str = 'en') -> Optional[Dict[str, Any]]:
+    """Get detailed information about a politician."""
+    try:
+        with db_connection_pool.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT p.name, p.role, p.ideology_score, p.influence, p.description,
+                       d.name as district_name
+                FROM politicians p
+                LEFT JOIN districts d ON p.district_id = d.district_id
+                WHERE p.politician_id = ?
+            """, (politician_id,))
+            
+            row = cursor.fetchone()
+            if not row:
+                return None
+                
+            return {
+                'name': row[0],
+                'role': row[1],
+                'ideology_score': row[2],
+                'influence': row[3],
+                'description': row[4],
+                'district': row[5]
+            }
+    except Exception as e:
+        logger.error(f"Error getting politician info: {e}")
+        return None
+
+
+@db_transaction
+def get_all_politicians(international: bool = False) -> List[Dict[str, Any]]:
+    """Get a list of all politicians."""
+    try:
+        with db_connection_pool.get_connection() as conn:
+            cursor = conn.cursor()
+            if international:
+                cursor.execute("""
+                    SELECT p.politician_id, p.name, p.role, p.ideology_score, p.influence,
+                           d.name as district_name
+                    FROM politicians p
+                    LEFT JOIN districts d ON p.district_id = d.district_id
+                    WHERE p.is_international = 1
+                    ORDER BY p.name
+                """)
+            else:
+                cursor.execute("""
+                    SELECT p.politician_id, p.name, p.role, p.ideology_score, p.influence,
+                           d.name as district_name
+                    FROM politicians p
+                    LEFT JOIN districts d ON p.district_id = d.district_id
+                    ORDER BY p.name
+                """)
+            
+            politicians = []
+            for row in cursor.fetchall():
+                politicians.append({
+                    'id': row[0],
+                    'name': row[1],
+                    'role': row[2],
+                    'ideology_score': row[3],
+                    'influence': row[4],
+                    'district': row[5]
+                })
+            return politicians
+    except Exception as e:
+        logger.error(f"Error getting politicians list: {e}")
+        return []
 
 
 def get_politician_relationship(politician_id, player_id):
@@ -69,105 +161,62 @@ def get_politician_relationship(politician_id, player_id):
             conn.close()
 
 
-def format_politician_info(politician_id, player_id, lang="en"):
-    """Format detailed information about a politician for display."""
-    from languages import get_text, format_ideology
-
-    politician = get_politician_info(politician_id=politician_id)
+def format_politician_info(politician_id: int, lang: str = 'en') -> str:
+    """Format politician information for display."""
+    politician = get_politician_info(politician_id, lang)
     if not politician:
-        return None
-
-    pol_id, name, role, ideology, district_id, influence, friendliness, is_intl, description = politician
-
-    # Get the player's specific relationship with this politician
-    relationship = get_politician_relationship(pol_id, player_id)
-    player_friendliness = relationship["friendliness"] if relationship else 50
-
-    # Get player's ideology
-    try:
-        conn = sqlite3.connect('belgrade_game.db')
-        cursor = conn.cursor()
-        cursor.execute("SELECT ideology_score FROM players WHERE player_id = ?", (player_id,))
-        player_record = cursor.fetchone()
-        player_ideology = player_record[0] if player_record else 0
-        conn.close()
-    except Exception as e:
-        logger.error(f"Error getting player ideology: {e}")
-        player_ideology = 0
-
-    # Format ideology
-    ideology_desc = format_ideology(ideology, lang)
-
-    # Determine player's ideological compatibility
-    ideology_diff = abs(player_ideology - ideology)
-    if ideology_diff <= 2:
-        compatibility = get_text("compatibility_good", lang)
-    elif ideology_diff <= 5:
-        compatibility = get_text("compatibility_moderate", lang)
-    else:
-        compatibility = get_text("compatibility_poor", lang)
-
-    # Get district name if applicable
-    district_name = ""
-    if district_id:
-        try:
-            conn = sqlite3.connect('belgrade_game.db')
-            cursor = conn.cursor()
-            cursor.execute("SELECT name FROM districts WHERE district_id = ?", (district_id,))
-            district_record = cursor.fetchone()
-            if district_record:
-                district_name = district_record[0]
-            conn.close()
-        except Exception as e:
-            logger.error(f"Error getting district name: {e}")
-
-    # Build response
-    politician_text = [
-        f"*{name}*",
-        f"{role}",
-        "",
-        f"*{get_text('ideology', lang, default='Ideology')}:* {ideology_desc} ({ideology})",
-        f"*{get_text('influence', lang, default='Influence')}:* {influence}",
-        f"*{get_text('relationship', lang, default='Relationship')}:* {player_friendliness}%",
-        f"*{get_text('compatibility', lang, default='Compatibility')}:* {compatibility}"
+        return get_text("politician_not_found", lang, name=politician_id)
+    
+    lines = [
+        f"*{politician['name']}*",
+        f"{get_text('role', lang)}: {get_text(politician['role'], lang)}",
+        f"{get_text('ideology', lang)}: {politician['ideology_score']}/100",
+        f"{get_text('influence', lang)}: {politician['influence']}"
     ]
+    
+    if politician['district']:
+        lines.append(f"{get_text('district', lang)}: {politician['district']}")
+    
+    if politician['description']:
+        lines.extend(["", politician['description']])
+    
+    return "\n".join(lines)
 
-    if district_name:
-        politician_text.append(f"*{get_text('district', lang, default='District')}:* {district_name}")
 
-    if description:
-        politician_text.append("")
-        politician_text.append(f"{description}")
-
-    return "\n".join(politician_text)
-
-
-def format_politicians_list(is_international=False, lang="en"):
-    """Format a list of politicians for display."""
-    from languages import get_text, format_ideology
-
-    politicians = get_all_politicians(is_international=is_international)
-
+def get_politician_list(lang: str = 'en', international: bool = False) -> str:
+    """Get a formatted list of politicians."""
+    politicians = get_all_politicians(international)
     if not politicians:
-        return get_text("no_politicians" if not is_international else "no_international", lang)
+        return get_text("no_politicians", lang)
+    
+    lines = [get_text("politician_list_header", lang)]
+    for p in politicians:
+        lines.append(
+            f"*{p['name']}* - {get_text('ideology', lang)}: {p['ideology_score']}, "
+            f"{get_text('influence', lang)}: {p['influence']}"
+        )
+    
+    return "\n".join(lines)
 
-    title = get_text("politicians_title" if not is_international else "international_title", lang)
 
-    politicians_text = [f"*{title}*\n"]
+def get_player_politician_summary(player_id: int, lang: str = "en") -> str:
+    """Get summary of player's relationships with politicians."""
+    relationships = get_player_politicians(player_id)
+    
+    if not relationships:
+        return get_text("no_politician_relationships", lang)
 
-    for politician in politicians:
-        pol_id, name, role, ideology, district_id, influence, friendliness, _, _ = politician
+    summary = [get_text("politician_relationships", lang)]
+    for rel in relationships:
+        # Format relationship entry
+        entry = [f"• *{rel['name']}*"]
+        entry.append(f"  {get_text('friendliness', lang)}: {rel['friendliness']}%")
+        if rel['interaction_count'] > 0:
+            entry.append(f"  {get_text('interactions', lang)}: {rel['interaction_count']}")
+        
+        summary.extend(entry)
 
-        # Format ideology
-        ideology_desc = format_ideology(ideology, lang)
-
-        politicians_text.append(f"• *{name}* - {role}")
-        politicians_text.append(f"  {get_text('ideology', lang, default='Ideology')}: {ideology_desc} ({ideology})")
-
-    if is_international:
-        politicians_text.append("\n" + get_text("international_note", lang))
-
-    return "\n".join(politicians_text)
+    return "\n".join(summary)
 
 
 def get_active_politicians(district_id=None):
@@ -272,3 +321,79 @@ def get_politician_abilities(politician_id, player_id, lang="en"):
     except Exception as e:
         logger.error(f"Error getting politician abilities: {e}")
         return None
+
+
+@db_transaction
+def get_district_politicians(district_id: int, conn: Any) -> List[Dict[str, Any]]:
+    """Get list of politicians in a district."""
+    try:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT p.*, d.name as district_name
+            FROM politicians p
+            LEFT JOIN districts d ON p.district_id = d.district_id
+            WHERE p.district_id = ? AND p.is_international = 0
+            ORDER BY p.name
+        """, (district_id,))
+        
+        politicians = []
+        for row in cursor.fetchall():
+            politicians.append({
+                'id': row[0],
+                'name': row[1],
+                'role': row[2],
+                'ideology_score': row[3],
+                'district_id': row[4],
+                'influence': row[5],
+                'friendliness': row[6],
+                'is_international': bool(row[7]),
+                'description': row[8],
+                'district_name': row[9]
+            })
+        return politicians
+    except Exception as e:
+        logger.error(f"Error getting district politicians: {e}")
+        return []
+
+
+def get_district_politician_summary(district_id: int, lang: str = "en") -> str:
+    """Get formatted summary of politicians in a district."""
+    with db_connection_pool.get_connection() as conn:
+        politicians = get_district_politicians(district_id, conn)
+        
+        if not politicians:
+            return get_text("no_district_politicians", lang)
+        
+        summary = [get_text("district_politicians", lang)]
+        for p in politicians:
+            summary.append(
+                f"*{p['name']}* - {p['role']}\n"
+                f"{get_text('ideology', lang)}: {format_ideology(p['ideology_score'])}, "
+                f"{get_text('influence', lang)}: {p['influence']}"
+            )
+            summary.append("")
+        
+        return "\n".join(summary).strip()
+
+
+def format_politicians_list(politicians: List[Dict[str, Any]], lang: str = 'en') -> str:
+    """Format a list of politicians with their details."""
+    if not politicians:
+        return get_text("no_politicians", lang)
+    
+    lines = [get_text("politician_list_header", lang)]
+    for p in politicians:
+        ideology = format_ideology(p['ideology_score'], lang)
+        lines.extend([
+            f"*{p['name']}*",
+            f"{get_text('role', lang)}: {get_text(p['role'], lang)}",
+            f"{get_text('ideology', lang)}: {ideology}",
+            f"{get_text('influence', lang)}: {p['influence']}"
+        ])
+        
+        if p.get('district'):
+            lines.append(f"{get_text('district', lang)}: {p['district']}")
+        
+        lines.append("")  # Add blank line between politicians
+    
+    return "\n".join(lines).strip()

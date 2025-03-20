@@ -11,7 +11,8 @@ import sqlite3
 import random
 import json
 from typing import Dict, List, Tuple, Optional, Any
-from languages import format_ideology
+from languages import format_ideology, get_text
+from db.queries import db_connection_pool, db_transaction
 logger = logging.getLogger(__name__)
 
 
@@ -47,8 +48,6 @@ def get_politician_action_options(politician_id: int, player_id: int, lang="en")
     Returns:
         List[Dict]: List of possible actions
     """
-    from languages import get_text
-
     try:
         # Get relationship data
         relationship = get_politician_relationship(politician_id, player_id)
@@ -801,3 +800,171 @@ def use_politician_ability(politician_id: int, player_id: int, ability_id: int) 
         if conn:
             conn.close()
         return False, "Error using ability"
+
+@db_transaction
+def get_politician_relationships(player_id: int, conn: Any) -> List[Dict[str, Any]]:
+    """Get list of politician relationships for a player."""
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT p.politician_id, p.name, p.role, p.ideology_score,
+               pr.friendliness, pr.interaction_count
+        FROM politicians p
+        LEFT JOIN politician_relationships pr ON p.politician_id = pr.politician_id 
+            AND pr.player_id = ?
+        ORDER BY pr.friendliness DESC
+    """, (player_id,))
+    
+    relationships = []
+    for row in cursor.fetchall():
+        pol_id, name, role, ideology, friendliness, interactions = row
+        relationships.append({
+            'id': pol_id,
+            'name': name,
+            'role': role,
+            'ideology_score': ideology,
+            'friendliness': friendliness or 50,  # Default friendliness
+            'interaction_count': interactions or 0
+        })
+    return relationships
+
+@db_transaction
+def update_relationship(
+    player_id: int,
+    politician_id: int,
+    friendliness_change: int,
+    conn: Any
+) -> Dict[str, Any]:
+    """Update relationship with a politician."""
+    cursor = conn.cursor()
+    
+    # Get current relationship
+    cursor.execute("""
+        SELECT friendliness, interaction_count
+        FROM politician_relationships
+        WHERE player_id = ? AND politician_id = ?
+    """, (player_id, politician_id))
+    
+    row = cursor.fetchone()
+    current_friendliness = row[0] if row else 50
+    interaction_count = row[1] if row else 0
+    
+    # Calculate new friendliness
+    new_friendliness = max(0, min(100, current_friendliness + friendliness_change))
+    
+    # Update or insert relationship
+    cursor.execute("""
+        INSERT OR REPLACE INTO politician_relationships 
+        (player_id, politician_id, friendliness, interaction_count)
+        VALUES (?, ?, ?, ?)
+    """, (player_id, politician_id, new_friendliness, interaction_count + 1))
+    
+    return {
+        'old_friendliness': current_friendliness,
+        'new_friendliness': new_friendliness,
+        'interaction_count': interaction_count + 1
+    }
+
+def format_relationship_info(player_id: int, politician_id: int, lang: str = "en") -> str:
+    """Format relationship information for display."""
+    with db_connection_pool.get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT p.name, p.role, p.ideology_score,
+                   pr.friendliness, pr.interaction_count
+            FROM politicians p
+            LEFT JOIN politician_relationships pr ON p.politician_id = pr.politician_id 
+                AND pr.player_id = ?
+            WHERE p.politician_id = ?
+        """, (player_id, politician_id))
+        
+        row = cursor.fetchone()
+        if not row:
+            return get_text("politician_not_found", lang)
+            
+        name, role, ideology, friendliness, interactions = row
+        
+        info = [
+            f"*{name}* - {role}",
+            f"{get_text('ideology', lang)}: {ideology}",
+            f"{get_text('friendliness', lang)}: {friendliness or 50}%",
+            f"{get_text('interactions', lang)}: {interactions or 0}"
+        ]
+        return "\n".join(info)
+
+def get_relationship_summary(player_id: int, lang: str = "en") -> str:
+    """Get summary of all politician relationships."""
+    with db_connection_pool.get_connection() as conn:
+        relationships = get_politician_relationships(player_id, conn)
+        
+        if not relationships:
+            return get_text("no_relationships", lang)
+
+        summary = [get_text("relationship_summary", lang)]
+        for rel in relationships:
+            summary.append(f"*{rel['name']}* - {rel['role']}")
+            summary.append(f"• {get_text('friendliness', lang)}: {rel['friendliness']}%")
+            if rel['interaction_count'] > 0:
+                summary.append(f"• {get_text('interactions', lang)}: {rel['interaction_count']}")
+            summary.append("")
+
+        return "\n".join(summary).strip()
+
+def interact_with_politician(
+    player_id: int,
+    politician_id: int,
+    interaction_type: str,
+    lang: str = "en"
+) -> str:
+    """Process an interaction with a politician."""
+    try:
+        with db_connection_pool.get_connection() as conn:
+            # Get interaction details
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT friendliness_change, cooldown_hours
+                FROM politician_interactions
+                WHERE interaction_type = ?
+            """, (interaction_type,))
+            
+            row = cursor.fetchone()
+            if not row:
+                return get_text("invalid_interaction", lang)
+                
+            friendliness_change, cooldown = row
+            
+            # Check cooldown
+            cursor.execute("""
+                SELECT last_interaction_time
+                FROM politician_interaction_history
+                WHERE player_id = ? AND politician_id = ?
+                    AND interaction_type = ?
+            """, (player_id, politician_id, interaction_type))
+            
+            row = cursor.fetchone()
+            if row and row[0]:
+                cursor.execute("""
+                    SELECT datetime('now') <= datetime(?, '+' || ? || ' hours')
+                    FROM politician_interaction_history
+                    WHERE player_id = ? AND politician_id = ?
+                        AND interaction_type = ?
+                """, (row[0], cooldown, player_id, politician_id, interaction_type))
+                if cursor.fetchone()[0]:
+                    return get_text("interaction_cooldown", lang)
+            
+            # Update relationship
+            result = update_relationship(player_id, politician_id, friendliness_change, conn)
+            
+            # Record interaction
+            cursor.execute("""
+                INSERT OR REPLACE INTO politician_interaction_history
+                (player_id, politician_id, interaction_type, last_interaction_time)
+                VALUES (?, ?, ?, datetime('now'))
+            """, (player_id, politician_id, interaction_type))
+            
+            return get_text("interaction_success", lang, params={
+                "old_friendliness": result['old_friendliness'],
+                "new_friendliness": result['new_friendliness']
+            })
+            
+    except Exception as e:
+        return get_text("interaction_error", lang)

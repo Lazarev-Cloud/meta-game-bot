@@ -3,6 +3,11 @@ from db.queries import (
     get_district_info, get_all_districts,
     get_district_control, update_district_control
 )
+from typing import Dict, List, Optional
+from db.game_queries import (
+    get_player_districts
+)
+from languages import get_text
 
 logger = logging.getLogger(__name__)
 
@@ -51,13 +56,12 @@ async def generate_text_map():
     return "\n".join(map_text)
 
 
-def get_district_by_name(name):
-    """Find a district by name (case-insensitive)."""
+def get_district_by_name(name: str) -> Optional[str]:
+    """Get district ID by name."""
     districts = get_all_districts()
-    for district in districts:
-        district_id, district_name, *_ = district
+    for district_id, district_name in districts:
         if district_name.lower() == name.lower():
-            return district
+            return district_id
     return None
 
 
@@ -75,68 +79,50 @@ def get_control_status_text(control_points, lang="en"):
         return get_text("control_weak", lang)
 
 
-def format_district_info(district_id, lang="en"):
-    """Format detailed information about a district."""
-    from languages import get_text, get_resource_name
-
+def format_district_info(district_id: str, lang: str = "en") -> str:
+    """Format district information for display."""
     district = get_district_info(district_id)
     if not district:
-        return None
+        return get_text("district_not_found", lang)
 
-    district_id, name, description, influence_res, resources_res, info_res, force_res = district
-
-    # Get control information
-    control_data = get_district_control(district_id)
-
-    # Get politicians in the district
-    import sqlite3
-    conn = sqlite3.connect('belgrade_game.db')
-    cursor = conn.cursor()
-    cursor.execute(
-        "SELECT name, role, ideology_score, influence FROM politicians WHERE district_id = ?",
-        (district_id,)
-    )
-    politicians = cursor.fetchall()
-    conn.close()
-
-    # Start building the response
-    district_text = [
-        f"*{name}*",
-        f"{description}",
-        "",
-        "*Resources Provided (when controlled):*",
-        f"🔵 {get_resource_name('influence', lang)}: {influence_res}",
-        f"💰 {get_resource_name('resources', lang)}: {resources_res}",
-        f"🔍 {get_resource_name('information', lang)}: {info_res}",
-        f"👊 {get_resource_name('force', lang)}: {force_res}",
-        ""
+    # Format the information
+    info = [
+        f"*{get_text('district_name', lang)}:* {district['name']}",
+        f"*{get_text('district_description', lang)}:* {district['description']}",
+        f"*{get_text('district_control', lang)}:* {district['control_points']}%"
     ]
 
-    if politicians:
-        district_text.append("*Key Politicians:*")
-        for politician in politicians:
-            pol_name, role, ideology, influence = politician
+    if district['controller_name']:
+        info.append(f"*{get_text('district_controller', lang)}:* {district['controller_name']}")
 
-            # Format ideology
-            from languages import format_ideology
-            ideology_desc = format_ideology(ideology, lang)
+    # Add resource production info
+    resources = []
+    if district['influence_resource'] > 0:
+        resources.append(f"{district['influence_resource']} {get_text('influence', lang)}")
+    if district['resources_resource'] > 0:
+        resources.append(f"{district['resources_resource']} {get_text('resources', lang)}")
+    if district['information_resource'] > 0:
+        resources.append(f"{district['information_resource']} {get_text('information', lang)}")
+    if district['force_resource'] > 0:
+        resources.append(f"{district['force_resource']} {get_text('force', lang)}")
 
-            district_text.append(f"• {pol_name} - {role}")
-            district_text.append(
-                f"  {get_text('ideology', lang, default='Ideology')}: {ideology_desc} ({ideology}), {get_text('influence', lang, default='Influence')}: {influence}")
+    if resources:
+        info.append(f"*{get_text('district_production', lang)}:* {', '.join(resources)}")
 
-        district_text.append("")
+    return "\n".join(info)
 
-    if control_data:
-        district_text.append("*Current Control:*")
-        for player_id, control_points, player_name in control_data:
-            if control_points > 0:
-                # Get control status text
-                control_status = get_control_status_text(control_points, lang)
-                district_text.append(
-                    f"• {player_name}: {control_points} {get_text('control_points', lang, default='points')} - {control_status}")
-    else:
-        district_text.append(
-            f"*{get_text('current_control', lang, default='Current Control')}:* {get_text('map_no_control', lang, default='No one has established control yet.')}")
 
-    return "\n".join(district_text)
+def get_player_district_summary(player_id: int, lang: str = "en") -> str:
+    """Get summary of player's district control."""
+    districts = get_player_districts(player_id)
+    
+    if not districts:
+        return get_text("no_districts_controlled", lang)
+
+    summary = [get_text("districts_controlled", lang)]
+    for district in districts:
+        summary.append(
+            f"• {district['name']}: {district['control_points']}%"
+        )
+
+    return "\n".join(summary)

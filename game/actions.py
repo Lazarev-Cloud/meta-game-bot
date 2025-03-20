@@ -8,7 +8,7 @@ from typing import Dict, Any, List, Optional, Literal
 from db.queries import (
     distribute_district_resources,
     add_news, get_news, get_player_resources, get_player_language,
-    get_player_districts, refresh_player_actions, db_transaction
+    get_player_districts, refresh_player_actions, db_transaction, db_connection_pool
 )
 from game.news import create_cycle_summary
 from languages import get_text, get_cycle_name

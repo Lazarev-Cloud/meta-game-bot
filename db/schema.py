@@ -1,380 +1,280 @@
-import sqlite3
+from typing import Dict, List, Optional, Any
+from db.queries import db_connection_pool, db_transaction
 import logging
 import datetime
 import json
 
 logger = logging.getLogger(__name__)
 
-def setup_database():
-    """Initialize database schema for the Belgrade game."""
-    try:
-        conn = sqlite3.connect('belgrade_game.db')
+def initialize_database() -> None:
+    """Initialize the database schema."""
+    with db_connection_pool.get_connection() as conn:
         cursor = conn.cursor()
 
-        # Check if database is already set up
-        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='districts'")
-        if cursor.fetchone():
-            logger.info("Database already exists, skipping setup")
-            conn.close()
-            return
-
-        # Create Players table
-        cursor.execute('''
-        CREATE TABLE IF NOT EXISTS players (
-            player_id INTEGER PRIMARY KEY,
-            username TEXT,
-            character_name TEXT,
-            ideology_score INTEGER DEFAULT 0,
-            main_actions_left INTEGER DEFAULT 1,
-            quick_actions_left INTEGER DEFAULT 2,
-            last_action_refresh TEXT,
-            language TEXT DEFAULT 'en'
-        )
-        ''')
-
-        # Create Resources table
-        cursor.execute('''
-        CREATE TABLE IF NOT EXISTS resources (
-            player_id INTEGER,
-            influence INTEGER DEFAULT 0,
-            resources INTEGER DEFAULT 0,
-            information INTEGER DEFAULT 0,
-            force INTEGER DEFAULT 0,
-            FOREIGN KEY (player_id) REFERENCES players (player_id)
-        )
-        ''')
-
-        # Create Districts table
-        cursor.execute('''
-        CREATE TABLE IF NOT EXISTS districts (
-            district_id TEXT PRIMARY KEY,
-            name TEXT,
-            description TEXT,
-            influence_resource INTEGER DEFAULT 0,
-            resources_resource INTEGER DEFAULT 0,
-            information_resource INTEGER DEFAULT 0,
-            force_resource INTEGER DEFAULT 0
-        )
-        ''')
-
-        # Create DistrictControl table
-        cursor.execute('''
-        CREATE TABLE IF NOT EXISTS district_control (
-            district_id TEXT,
-            player_id INTEGER,
-            control_points INTEGER DEFAULT 0,
-            last_action TEXT,
-            FOREIGN KEY (district_id) REFERENCES districts (district_id),
-            FOREIGN KEY (player_id) REFERENCES players (player_id)
-        )
-        ''')
-
-        # Create Politicians table
-        cursor.execute('''
-        CREATE TABLE IF NOT EXISTS politicians (
-            politician_id INTEGER PRIMARY KEY,
-            name TEXT,
-            role TEXT,
-            ideology_score INTEGER,
-            district_id TEXT,
-            influence INTEGER DEFAULT 0,
-            friendliness INTEGER DEFAULT 50,
-            is_international BOOLEAN DEFAULT 0,
-            description TEXT,
-            FOREIGN KEY (district_id) REFERENCES districts (district_id)
-        )
-        ''')
-
-        # Create Actions table
-        cursor.execute('''
-        CREATE TABLE IF NOT EXISTS actions (
-            action_id INTEGER PRIMARY KEY AUTOINCREMENT,
-            player_id INTEGER,
-            action_type TEXT,
-            target_type TEXT,
-            target_id TEXT,
-            resources_used TEXT,
-            timestamp TEXT,
-            cycle TEXT,
-            status TEXT DEFAULT 'pending',
-            result TEXT,
-            FOREIGN KEY (player_id) REFERENCES players (player_id)
-        )
-        ''')
-
-        # Create News table
-        cursor.execute('''
-        CREATE TABLE IF NOT EXISTS news (
-            news_id INTEGER PRIMARY KEY AUTOINCREMENT,
-            title TEXT,
-            content TEXT,
-            timestamp TEXT,
-            is_public BOOLEAN DEFAULT 1,
-            target_player_id INTEGER DEFAULT NULL,
-            is_fake BOOLEAN DEFAULT 0,
-            FOREIGN KEY (target_player_id) REFERENCES players (player_id)
-        )
-        ''')
-
-        # Create politician_relationships table
+        # Create tables
         cursor.execute("""
-            CREATE TABLE IF NOT EXISTS politician_relationships (
-                relationship_id INTEGER PRIMARY KEY AUTOINCREMENT,
-                politician_id INTEGER,
-                player_id INTEGER,
-                friendliness INTEGER NOT NULL DEFAULT 50,
-                interaction_count INTEGER NOT NULL DEFAULT 0,
-                last_interaction INTEGER,
-                FOREIGN KEY (politician_id) REFERENCES politicians(politician_id),
-                FOREIGN KEY (player_id) REFERENCES players(player_id)
+            CREATE TABLE IF NOT EXISTS players (
+                player_id INTEGER PRIMARY KEY,
+                username TEXT NOT NULL,
+                ideology_score INTEGER DEFAULT 50,
+                language TEXT DEFAULT 'en',
+                influence INTEGER DEFAULT 0,
+                last_action_time TIMESTAMP
             )
         """)
 
-        # Create politician_abilities table
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS districts (
+                district_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL UNIQUE,
+                description TEXT,
+                control_points INTEGER DEFAULT 0,
+                controller_id INTEGER,
+                FOREIGN KEY (controller_id) REFERENCES players(player_id)
+            )
+        """)
+
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS politicians (
+                politician_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL UNIQUE,
+                role TEXT NOT NULL,
+                ideology_score INTEGER DEFAULT 50,
+                district_id INTEGER,
+                influence INTEGER DEFAULT 0,
+                friendliness INTEGER DEFAULT 50,
+                is_international BOOLEAN DEFAULT FALSE,
+                description TEXT,
+                FOREIGN KEY (district_id) REFERENCES districts(district_id)
+            )
+        """)
+
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS politician_relationships (
+                player_id INTEGER,
+                politician_id INTEGER,
+                friendliness INTEGER DEFAULT 50,
+                interaction_count INTEGER DEFAULT 0,
+                PRIMARY KEY (player_id, politician_id),
+                FOREIGN KEY (player_id) REFERENCES players(player_id),
+                FOREIGN KEY (politician_id) REFERENCES politicians(politician_id)
+            )
+        """)
+
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS resource_types (
+                resource_type TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                description TEXT
+            )
+        """)
+
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS player_resources (
+                player_id INTEGER,
+                resource_type TEXT,
+                amount INTEGER DEFAULT 0,
+                PRIMARY KEY (player_id, resource_type),
+                FOREIGN KEY (player_id) REFERENCES players(player_id),
+                FOREIGN KEY (resource_type) REFERENCES resource_types(resource_type)
+            )
+        """)
+
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS district_resources (
+                district_id INTEGER,
+                resource_type TEXT,
+                production_rate INTEGER DEFAULT 0,
+                PRIMARY KEY (district_id, resource_type),
+                FOREIGN KEY (district_id) REFERENCES districts(district_id),
+                FOREIGN KEY (resource_type) REFERENCES resource_types(resource_type)
+            )
+        """)
+
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS languages (
+                language_code TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                native_name TEXT
+            )
+        """)
+
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS translations (
+                key TEXT,
+                language_code TEXT,
+                text TEXT NOT NULL,
+                PRIMARY KEY (key, language_code),
+                FOREIGN KEY (language_code) REFERENCES languages(language_code)
+            )
+        """)
+
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS actions (
+                action_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                description TEXT,
+                cost INTEGER,
+                cooldown_hours INTEGER DEFAULT 0,
+                required_influence INTEGER DEFAULT 0,
+                success_chance INTEGER DEFAULT 100
+            )
+        """)
+
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS player_actions (
+                player_id INTEGER,
+                action_id INTEGER,
+                last_used_timestamp TIMESTAMP,
+                PRIMARY KEY (player_id, action_id),
+                FOREIGN KEY (player_id) REFERENCES players(player_id),
+                FOREIGN KEY (action_id) REFERENCES actions(action_id)
+            )
+        """)
+
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS politician_abilities (
                 ability_id INTEGER PRIMARY KEY AUTOINCREMENT,
                 politician_id INTEGER,
                 name TEXT NOT NULL,
-                description TEXT NOT NULL,
-                cooldown INTEGER NOT NULL,  -- в циклах
-                cost TEXT NOT NULL,  -- JSON строка с ресурсами
-                effect_type TEXT NOT NULL,  -- тип эффекта
-                effect_value TEXT NOT NULL,  -- значение эффекта в JSON
-                required_friendliness INTEGER NOT NULL,
+                description TEXT,
+                cooldown_hours INTEGER DEFAULT 0,
+                cost INTEGER DEFAULT 0,
                 FOREIGN KEY (politician_id) REFERENCES politicians(politician_id)
             )
         """)
 
-        # Create politician_ability_usage table
         cursor.execute("""
-            CREATE TABLE IF NOT EXISTS politician_ability_usage (
-                usage_id INTEGER PRIMARY KEY AUTOINCREMENT,
-                politician_id INTEGER,
-                player_id INTEGER,
+            CREATE TABLE IF NOT EXISTS ability_history (
                 ability_id INTEGER,
-                last_used_cycle INTEGER,
-                FOREIGN KEY (politician_id) REFERENCES politicians(politician_id),
-                FOREIGN KEY (player_id) REFERENCES players(player_id),
-                FOREIGN KEY (ability_id) REFERENCES politician_abilities(ability_id)
+                player_id INTEGER,
+                used_timestamp TIMESTAMP,
+                PRIMARY KEY (ability_id, player_id),
+                FOREIGN KEY (ability_id) REFERENCES politician_abilities(ability_id),
+                FOREIGN KEY (player_id) REFERENCES players(player_id)
             )
         """)
 
-        # Create tables for trading system
-        cursor.execute('''
-        CREATE TABLE IF NOT EXISTS trade_offers (
-            offer_id INTEGER PRIMARY KEY AUTOINCREMENT,
-            sender_id INTEGER,
-            receiver_id INTEGER,
-            status TEXT DEFAULT 'pending',
-            created_at TEXT,
-            completed_at TEXT,
-            FOREIGN KEY (sender_id) REFERENCES players (player_id),
-            FOREIGN KEY (receiver_id) REFERENCES players (player_id)
-        )
-        ''')
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS news (
+                news_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                title TEXT NOT NULL,
+                content TEXT NOT NULL,
+                timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
 
-        cursor.execute('''
-        CREATE TABLE IF NOT EXISTS trade_resources (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            offer_id INTEGER,
-            resource_type TEXT,
-            amount INTEGER,
-            is_offer BOOLEAN,
-            FOREIGN KEY (offer_id) REFERENCES trade_offers (offer_id)
-        )
-        ''')
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS trades (
+                trade_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                offerer_id INTEGER,
+                offered_resources TEXT NOT NULL,  -- JSON string
+                requested_resources TEXT NOT NULL,  -- JSON string
+                status TEXT DEFAULT 'pending',
+                created_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                expiry_timestamp TIMESTAMP,
+                FOREIGN KEY (offerer_id) REFERENCES players(player_id)
+            )
+        """)
 
-        # Create table for joint actions
-        cursor.execute('''
-        CREATE TABLE IF NOT EXISTS joint_actions (
-            action_id INTEGER PRIMARY KEY AUTOINCREMENT,
-            initiator_id INTEGER,
-            district_id TEXT,
-            action_type TEXT,
-            created_at TEXT,
-            expires_at TEXT,
-            status TEXT DEFAULT 'pending',
-            FOREIGN KEY (initiator_id) REFERENCES players (player_id),
-            FOREIGN KEY (district_id) REFERENCES districts (district_id)
-        )
-        ''')
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS joint_actions (
+                action_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                initiator_id INTEGER,
+                title TEXT NOT NULL,
+                description TEXT,
+                required_participants INTEGER DEFAULT 2,
+                status TEXT DEFAULT 'pending',
+                created_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                deadline_timestamp TIMESTAMP,
+                FOREIGN KEY (initiator_id) REFERENCES players(player_id)
+            )
+        """)
 
-        cursor.execute('''
-        CREATE TABLE IF NOT EXISTS joint_action_participants (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            action_id INTEGER,
-            player_id INTEGER,
-            join_time TEXT,
-            resources TEXT,
-            FOREIGN KEY (action_id) REFERENCES joint_actions (action_id),
-            FOREIGN KEY (player_id) REFERENCES players (player_id)
-        )
-        ''')
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS joint_action_participants (
+                action_id INTEGER,
+                player_id INTEGER,
+                joined_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (action_id, player_id),
+                FOREIGN KEY (action_id) REFERENCES joint_actions(action_id),
+                FOREIGN KEY (player_id) REFERENCES players(player_id)
+            )
+        """)
 
-        # Create table for district control history
-        cursor.execute('''
-        CREATE TABLE IF NOT EXISTS district_control_history (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            district_id TEXT,
-            player_id INTEGER,
-            cycle INTEGER,
-            control_points_change INTEGER,
-            timestamp TEXT,
-            FOREIGN KEY (district_id) REFERENCES districts (district_id),
-            FOREIGN KEY (player_id) REFERENCES players (player_id)
-        )
-        ''')
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS commands (
+                command TEXT PRIMARY KEY,
+                description TEXT NOT NULL
+            )
+        """)
 
-        # Initialize districts data
-        districts = [
-            ('stari_grad', 'Stari grad', 'Center of political power', 2, 0, 2, 0),
-            ('liman', 'Liman', 'Economic and business center', 1, 3, 0, 0),
-            ('petrovaradin', 'Petrovaradin', 'Criminal networks, smuggling', 0, 0, 1, 3),
-            ('grbavica', 'Grbavica', 'Diplomatic ties and embassies', 2, 0, 2, 0),
-            ('adamoviceva', 'Adamoviceva naselje', 'Military power and security', 1, 0, 0, 3),
-            ('sajmiste', 'Sajmište', 'Industrial and working-class district', 0, 3, 0, 1),
-            ('podbara', 'Podbara', 'Youth and protest movements', 2, 0, 2, 0),
-            ('salajka', 'Salajka', 'Cultural and religious elite', 2, 1, 0, 0)
-        ]
+        # Initialize basic data
+        initialize_basic_data(conn)
 
-        cursor.executemany(
-            "INSERT INTO districts VALUES (?, ?, ?, ?, ?, ?, ?)",
-            districts
-        )
+def initialize_basic_data(conn: Any) -> None:
+    """Initialize basic data in the database."""
+    cursor = conn.cursor()
 
-        # Initialize politicians data
-        politicians = [
-            (1, 'Slobodan Milošević', 'President of Yugoslavia', 5, 'stari_grad', 6, 50, 0,
-             'Supporter of centralized power and opponent of radical reforms'),
-            (2, 'Milan Milutinović', 'Administration, regional influence', 3, 'stari_grad', 4, 50, 0,
-             'Can slow down reforms but helps with bureaucracy'),
-            (3, 'Zoran Đinđić', 'Leader of the Democratic Party', -5, 'liman', 7, 50, 0,
-             'Promoting democratization and economic reforms'),
-            (4, 'Željko "Arkan" Ražnatović', 'Criminal networks, black market', -2, 'petrovaradin', 5, 50, 0,
-             'Influential figure in criminal circles and politics'),
-            (5, 'Borislav Milošević', 'International diplomats', 3, 'grbavica', 4, 50, 0,
-             'Ambassador of Yugoslavia to Russia'),
-            (
-                6, 'Nebojša Pavković', 'Military command', -4, 'adamoviceva', 6, 50, 0,
-                'Supporter of hardline security policies'),
-            (7, 'Miroljub Labus', 'Union leaders', 2, 'sajmiste', 4, 50, 0,
-             'Advocated for economic reforms and integration with Europe'),
-            (8, 'Čedomir "Čeda" Jovanović', 'Student movement leader', -4, 'podbara', 5, 50, 0,
-             'Active participant in protests against the Milošević regime'),
-            (
-                9, 'Patriarch Pavle', 'Religious leaders', -1, 'salajka', 5, 50, 0,
-                'Supports traditional values and status quo')
-        ]
+    # Initialize resource types
+    resource_types = [
+        ('money', 'Money', 'Basic currency'),
+        ('influence', 'Influence', 'Political influence points'),
+        ('support', 'Support', 'Public support points')
+    ]
+    cursor.executemany("""
+        INSERT OR IGNORE INTO resource_types (resource_type, name, description)
+        VALUES (?, ?, ?)
+    """, resource_types)
 
-        # International politicians
-        international_politicians = get_international_politicians_data()
+    # Initialize languages
+    languages = [
+        ('en', 'English', 'English'),
+        ('sr', 'Serbian', 'Српски'),
+        ('ru', 'Russian', 'Русский')
+    ]
+    cursor.executemany("""
+        INSERT OR IGNORE INTO languages (language_code, name, native_name)
+        VALUES (?, ?, ?)
+    """, languages)
 
-        cursor.executemany(
-            "INSERT INTO politicians VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            politicians
-        )
-        cursor.executemany(
-            "INSERT INTO politicians VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            international_politicians
-        )
+    # Initialize commands
+    commands = [
+        ('start', 'Start the game'),
+        ('help', 'Show available commands'),
+        ('profile', 'View your profile'),
+        ('language', 'Change language'),
+        ('districts', 'View districts'),
+        ('politicians', 'View politicians'),
+        ('actions', 'View available actions'),
+        ('resources', 'View your resources'),
+        ('trades', 'View active trades'),
+        ('news', 'View latest news')
+    ]
+    cursor.executemany("""
+        INSERT OR IGNORE INTO commands (command, description)
+        VALUES (?, ?)
+    """, commands)
 
-        # Initialize politician abilities
-        politician_abilities = [
-            # Неманя Ковачевич
-            (1, 1, "Административный ресурс", 
-             "Позволяет заблокировать одну заявку противника в день в районе Стари Град",
-             1,  # cooldown в циклах
-             json.dumps({"influence": 2, "information": 1}),  # cost
-             "block_action",  # effect_type
-             json.dumps({"district_id": "stari_grad"}),  # effect_value
-             80),  # required_friendliness
+    conn.commit()
 
-            # Профессор Драган Йович
-            (2, 3, "Студенческий протест",
-             "Можно организовать протест в любом районе (+15 ОК к атаке)",
-             2,  # cooldown
-             json.dumps({"influence": 2, "information": 2}),
-             "attack_bonus",
-             json.dumps({"bonus": 15}),
-             75),
-
-            # Зоран "Зоки" Новакович
-            (3, 4, "Теневые связи",
-             "Конвертирует 2 любых ресурса в 4 Силы раз в день",
-             1,  # cooldown
-             json.dumps({"influence": 1, "information": 1}),
-             "resource_conversion",
-             json.dumps({"force": 4}),
-             70),
-
-            # Полковник Бранко Петрович
-            (4, 6, "Силовая зачистка",
-             "Можно 'обнулить' контроль противника в одном районе раз в 3 цикла",
-             3,  # cooldown
-             json.dumps({"force": 3, "influence": 2}),
-             "reset_control",
-             json.dumps({"district_id": None}),  # district_id будет указан при использовании
-             85)
-        ]
-
-        cursor.executemany(
-            "INSERT INTO politician_abilities VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            politician_abilities
-        )
-
-        conn.commit()
-        logger.info("Database setup completed successfully")
-    except sqlite3.Error as e:
-        logger.error(f"Database setup error: {e}")
-    finally:
-        if conn:
-            conn.close()
-
-def update_database_schema():
-    """
-    Update database schema to resolve ambiguous column names and add missing columns
-    """
-    try:
-        conn = sqlite3.connect('belgrade_game.db')
+def update_database_schema() -> None:
+    """Update the database schema if needed."""
+    with db_connection_pool.get_connection() as conn:
         cursor = conn.cursor()
-
-        # Add fully qualified column names to tables
-        cursor.execute("""
-            ALTER TABLE politicians 
-            ADD COLUMN politician_district_id TEXT 
-            REFERENCES districts(district_id)
-        """)
-
-        # Ensure news table has created_at column
-        cursor.execute("""
-            ALTER TABLE news 
-            ADD COLUMN created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-        """)
-
-        # Update existing queries to use fully qualified column names
-        cursor.execute("""
-            CREATE VIEW v_politician_districts AS
-            SELECT 
-                p.politician_id, 
-                p.name, 
-                p.politician_district_id AS district_id,
-                d.name AS district_name
-            FROM politicians p
-            LEFT JOIN districts d ON p.politician_district_id = d.district_id
-        """)
-
+        
+        # Add new columns or tables here
+        try:
+            # Example: Add a new column to the players table
+            cursor.execute("""
+                ALTER TABLE players
+                ADD COLUMN last_login TIMESTAMP
+            """)
+        except Exception as e:
+            # Column might already exist
+            pass
+            
         conn.commit()
-        conn.close()
-        logger.info("Database schema updated successfully")
-    except sqlite3.OperationalError as e:
-        # Ignore error if column already exists
-        if "duplicate column name" not in str(e) and "column created_at already exists" not in str(e):
-            logger.error(f"Error updating database schema: {e}")
-    except Exception as e:
-        logger.error(f"Unexpected error updating database schema: {e}")
-
-
 
 def get_international_politicians_data():
     """Get initial international politicians data"""
@@ -384,3 +284,12 @@ def get_international_politicians_data():
     return [(i+10, p["name"], p["role"], p["ideology_score"], 
              None, p["influence"], 50, 1, p["description"]) 
             for i, p in enumerate(INTERNATIONAL_POLITICIANS)]
+
+def setup_database() -> None:
+    """Set up the database by initializing schema and basic data."""
+    try:
+        initialize_database()
+        logger.info("Database schema initialized successfully")
+    except Exception as e:
+        logger.error(f"Error initializing database schema: {e}")
+        raise

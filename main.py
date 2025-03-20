@@ -16,6 +16,7 @@ from bot.callbacks import register_callbacks
 from bot.commands import register_commands
 from config import TOKEN, ADMIN_IDS
 from db.schema import setup_database
+from db.queries import db_connection_pool, cleanup_database_pool
 from game.actions import schedule_jobs
 
 # Enable logging
@@ -85,15 +86,16 @@ def validate_system():
     """Perform validation checks to ensure the system is properly configured."""
     try:
         # Check database connection
-        conn = sqlite3.connect('belgrade_game.db')
+        conn = db_connection_pool.get_connection()
         cursor = conn.cursor()
 
         # Check essential tables
-        essential_tables = ['players', 'resources', 'districts', 'politicians', 'actions']
+        essential_tables = ['players', 'districts', 'politicians', 'resources']
         for table in essential_tables:
             cursor.execute(f"SELECT name FROM sqlite_master WHERE type='table' AND name='{table}'")
             if not cursor.fetchone():
                 logger.error(f"Essential table {table} is missing from the database!")
+                return
 
         # Check if districts and politicians are populated
         cursor.execute("SELECT COUNT(*) FROM districts")
@@ -168,4 +170,7 @@ async def error_handler(update, context):
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    finally:
+        cleanup_database_pool()

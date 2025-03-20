@@ -16,7 +16,7 @@ from language_utils import (
     get_language_name,
     detect_user_language
 )
-from database.utils import update_user_activity, get_user
+from db.queries import get_player, register_player
 
 logger = logging.getLogger(__name__)
 
@@ -26,12 +26,9 @@ async def language_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user = update.effective_user
         
         # Check if user exists in database
-        db_user = get_user(user.id)
-        if not db_user:
-            await update.message.reply_text(
-                get_text("not_registered", "en")
-            )
-            return
+        player = get_player(user.id)
+        if not player:
+            register_player(user.id, user.username)
 
         # Get current language
         current_lang = get_player_language(user.id)
@@ -62,8 +59,8 @@ async def language_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     try:
         # Check if user exists in database
-        db_user = get_user(user.id)
-        if not db_user:
+        player = get_player(user.id)
+        if not player:
             await query.answer(get_text("not_registered", "en"))
             return
 

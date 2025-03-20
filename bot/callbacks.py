@@ -1,17 +1,20 @@
 import logging
 import sqlite3
 import asyncio
+from typing import Dict, List, Optional, Any, Callable
 
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
-from telegram.ext import Application, CallbackQueryHandler, ContextTypes, CallbackContext
+from telegram.ext import Application, CallbackQueryHandler, ContextTypes, CallbackContext, CommandHandler
 
 from bot.commands import register_commands, executor
 from config import TOKEN
 from db.queries import (
-    get_player_resources, update_player_resources,
-    get_remaining_actions, use_action, add_action,
-    update_district_control, use_politician_ability,
-    get_all_districts
+    get_player, get_player_resources, update_player_resources,
+    get_district_info, get_district_control, update_district_control,
+    get_politician_info, update_politician_friendliness,
+    add_action, cancel_last_action, get_remaining_actions, use_action,
+    add_news, get_news, create_trade_offer, accept_trade_offer,
+    update_player_location, get_player_location, db_connection_pool, db_transaction
 )
 from db.schema import setup_database
 from game.actions import (
@@ -20,8 +23,11 @@ from game.actions import (
 )
 from game.actions import schedule_jobs
 from game.districts import format_district_info
-from game.politicians import format_politician_info
+from game.politicians import format_politician_info, get_politician_list
 from languages import get_text, get_player_language, set_player_language, get_action_name, get_resource_name
+from game.resources import format_resource_info, get_player_resource_summary
+from game.news import format_news_item, get_news_feed
+from game.trading import format_trade_info, get_active_trade_list
 
 # Enable logging
 logging.basicConfig(
@@ -59,11 +65,11 @@ async def show_district_selection(query, message_text):
     lang = get_player_language(user.id)
 
     try:
-        conn = sqlite3.connect('belgrade_game.db')
+        conn = db_connection_pool.get_connection()
         cursor = conn.cursor()
         cursor.execute("SELECT district_id, name FROM districts ORDER BY name")
         districts = cursor.fetchall()
-        conn.close()
+        db_connection_pool.return_connection(conn)
 
         keyboard = []
         for district_id, name in districts:
@@ -92,15 +98,15 @@ async def show_resource_selection(query, action_type, district_id):
 
     try:
         # Get district name
-        conn = sqlite3.connect('belgrade_game.db')
+        conn = db_connection_pool.get_connection()
         cursor = conn.cursor()
         cursor.execute("SELECT name FROM districts WHERE district_id = ?", (district_id,))
         district_result = cursor.fetchone()
         district_name = district_result[0] if district_result else district_id
+        db_connection_pool.return_connection(conn)
 
         # Get player's resources
         resources = get_player_resources(user.id)
-        conn.close()
 
         if not resources:
             await query.edit_message_text(get_text("not_registered", lang))
@@ -171,22 +177,18 @@ async def process_quick_action(query, action_type, target_type, target_id):
             return
 
         # Get target name for display
-        if target_type == "district":
-            conn = sqlite3.connect('belgrade_game.db')
+        with db_connection_pool.get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute("SELECT name FROM districts WHERE district_id = ?", (target_id,))
-            target_result = cursor.fetchone()
-            target_name = target_result[0] if target_result else target_id
-            conn.close()
-        elif target_type == "politician":
-            conn = sqlite3.connect('belgrade_game.db')
-            cursor = conn.cursor()
-            cursor.execute("SELECT name FROM politicians WHERE politician_id = ?", (target_id,))
-            target_result = cursor.fetchone()
-            target_name = target_result[0] if target_result else target_id
-            conn.close()
-        else:
-            target_name = target_id
+            if target_type == "district":
+                cursor.execute("SELECT name FROM districts WHERE district_id = ?", (target_id,))
+                target_result = cursor.fetchone()
+                target_name = target_result[0] if target_result else target_id
+            elif target_type == "politician":
+                cursor.execute("SELECT name FROM politicians WHERE politician_id = ?", (target_id,))
+                target_result = cursor.fetchone()
+                target_name = target_result[0] if target_result else target_id
+            else:
+                target_name = target_id
 
         # Different processing based on action type
         if action_type == QUICK_ACTION_RECON:
@@ -273,7 +275,7 @@ async def process_quick_action(query, action_type, target_type, target_id):
 
 
 async def process_main_action(query, action_type, target_type, target_id, resources_list):
-    """Process a main action such as influence, attack, or defense."""
+    """Process a main action such as influence or attack."""
     user = query.from_user
     lang = get_player_language(user.id)
 
@@ -285,15 +287,14 @@ async def process_main_action(query, action_type, target_type, target_id, resour
             return
 
         # Get target name for display
-        if target_type == "district":
-            conn = sqlite3.connect('belgrade_game.db')
+        with db_connection_pool.get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute("SELECT name FROM districts WHERE district_id = ?", (target_id,))
-            target_result = cursor.fetchone()
-            target_name = target_result[0] if target_result else target_id
-            conn.close()
-        else:
-            target_name = target_id
+            if target_type == "district":
+                cursor.execute("SELECT name FROM districts WHERE district_id = ?", (target_id,))
+                target_result = cursor.fetchone()
+                target_name = target_result[0] if target_result else target_id
+            else:
+                target_name = target_id
 
         # Parse resources
         resource_types = resources_list
@@ -442,11 +443,27 @@ async def show_politician_info(query, politician_id):
 
 
 async def process_politician_influence(query, politician_id):
-    """Process an influence action on a politician."""
+    """Process a politician influence action."""
     user = query.from_user
     lang = get_player_language(user.id)
 
     try:
+        # Get politician info
+        with db_connection_pool.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT name, friendliness, district_id
+                FROM politicians
+                WHERE politician_id = ?
+            """, (politician_id,))
+            politician = cursor.fetchone()
+
+        if not politician:
+            await query.edit_message_text(get_text("politician_not_found", lang, name=politician_id))
+            return
+
+        name, friendliness, district_id = politician
+
         # Check if player has main actions left
         actions = get_remaining_actions(user.id)
         if actions['main'] <= 0:
@@ -458,14 +475,6 @@ async def process_politician_influence(query, politician_id):
         if resources['influence'] < 2:
             await query.edit_message_text(get_text("politician_influence_no_resources", lang))
             return
-
-        # Get politician name
-        conn = sqlite3.connect('belgrade_game.db')
-        cursor = conn.cursor()
-        cursor.execute("SELECT name FROM politicians WHERE politician_id = ?", (politician_id,))
-        politician_result = cursor.fetchone()
-        politician_name = politician_result[0] if politician_result else str(politician_id)
-        conn.close()
 
         # Deduct resources
         update_player_resources(user.id, 'influence', -2)
@@ -480,7 +489,7 @@ async def process_politician_influence(query, politician_id):
         add_action(user.id, "influence", "politician", str(politician_id), resources_used)
 
         await query.edit_message_text(
-            get_text("politician_influence_success", lang, name=politician_name)
+            get_text("politician_influence_success", lang, name=name)
         )
 
     except Exception as e:
@@ -507,19 +516,18 @@ async def process_politician_info(query, politician_id):
             return
 
         # Get politician information
-        conn = sqlite3.connect('belgrade_game.db')
-        cursor = conn.cursor()
-        cursor.execute(
-            """
-            SELECT p.name, p.role, p.ideology_score, p.influence, p.district_id, p.is_international, d.name
-            FROM politicians p
-            LEFT JOIN districts d ON p.district_id = d.district_id
-            WHERE p.politician_id = ?
-            """,
-            (politician_id,)
-        )
-        politician_result = cursor.fetchone()
-        conn.close()
+        with db_connection_pool.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                SELECT p.name, p.role, p.ideology_score, p.influence, p.district_id, p.is_international, d.name
+                FROM politicians p
+                LEFT JOIN districts d ON p.district_id = d.district_id
+                WHERE p.politician_id = ?
+                """,
+                (politician_id,)
+            )
+            politician_result = cursor.fetchone()
 
         if not politician_result:
             await query.edit_message_text(get_text("politician_not_found", lang, name=politician_id))
@@ -565,11 +573,27 @@ async def process_politician_info(query, politician_id):
 
 
 async def process_politician_undermine(query, politician_id):
-    """Process an undermining action on a politician."""
+    """Process a politician undermine action."""
     user = query.from_user
     lang = get_player_language(user.id)
 
     try:
+        # Get politician info
+        with db_connection_pool.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT name, friendliness, district_id
+                FROM politicians
+                WHERE politician_id = ?
+            """, (politician_id,))
+            politician = cursor.fetchone()
+
+        if not politician:
+            await query.edit_message_text(get_text("politician_not_found", lang, name=politician_id))
+            return
+
+        name, friendliness, district_id = politician
+
         # Check if player has main actions left
         actions = get_remaining_actions(user.id)
         if actions['main'] <= 0:
@@ -581,14 +605,6 @@ async def process_politician_undermine(query, politician_id):
         if resources['information'] < 2:
             await query.edit_message_text(get_text("politician_undermine_no_resources", lang))
             return
-
-        # Get politician name
-        conn = sqlite3.connect('belgrade_game.db')
-        cursor = conn.cursor()
-        cursor.execute("SELECT name FROM politicians WHERE politician_id = ?", (politician_id,))
-        politician_result = cursor.fetchone()
-        politician_name = politician_result[0] if politician_result else str(politician_id)
-        conn.close()
 
         # Deduct resources
         update_player_resources(user.id, 'information', -2)
@@ -603,7 +619,7 @@ async def process_politician_undermine(query, politician_id):
         add_action(user.id, "undermine", "politician", str(politician_id), resources_used)
 
         await query.edit_message_text(
-            get_text("politician_undermine_success", lang, name=politician_name)
+            get_text("politician_undermine_success", lang, name=name)
         )
 
     except Exception as e:
@@ -612,7 +628,7 @@ async def process_politician_undermine(query, politician_id):
 
 
 async def use_ability_callback(query: CallbackQuery):
-    """Handle using a politician's ability."""
+    """Process an ability use callback."""
     user = query.from_user
     lang = get_player_language(user.id)
 
@@ -621,6 +637,22 @@ async def use_ability_callback(query: CallbackQuery):
         _, politician_id, ability_id = query.data.split(':')
         politician_id = int(politician_id)
         ability_id = int(ability_id)
+
+        # Get ability info
+        with db_connection_pool.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT name, cooldown, last_used
+                FROM politician_abilities
+                WHERE ability_id = ?
+            """, (ability_id,))
+            ability = cursor.fetchone()
+
+        if not ability:
+            await query.edit_message_text(get_text("error_ability_not_found", lang))
+            return
+
+        name, cooldown, last_used = ability
 
         # Use the ability
         success, message = await asyncio.get_event_loop().run_in_executor(

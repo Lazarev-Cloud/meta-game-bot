@@ -8,8 +8,7 @@ This file contains all translations and language-related utilities
 
 import logging
 from typing import Dict, Any, Optional, Union
-from database.utils import get_user_language, update_user_language
-from database.schema import Language
+from db.queries import get_player_language, set_player_language
 
 logger = logging.getLogger(__name__)
 
@@ -170,7 +169,12 @@ TRANSLATIONS = {
         "success_created": "New item has been created.",
         "success_action": "Action completed successfully.",
         "success_purchase": "Purchase completed successfully.",
-        "success_trade": "Trade completed successfully."
+        "success_trade": "Trade completed successfully.",
+        "ideology_far_right": "Far Right",
+        "ideology_right": "Right",
+        "ideology_center": "Center",
+        "ideology_left": "Left",
+        "ideology_far_left": "Far Left"
     },
 
     "ru": {
@@ -328,7 +332,12 @@ TRANSLATIONS = {
         "success_created": "Новый элемент создан.",
         "success_action": "Действие успешно выполнено.",
         "success_purchase": "Покупка успешно завершена.",
-        "success_trade": "Торговля успешно завершена."
+        "success_trade": "Торговля успешно завершена.",
+        "ideology_far_right": "Далеко правый",
+        "ideology_right": "Право",
+        "ideology_center": "Центр",
+        "ideology_left": "Лево",
+        "ideology_far_left": "Далеко лево"
     }
 }
 
@@ -371,12 +380,69 @@ def get_text(key: str, lang: str = "en", default: Optional[str] = None, **kwargs
 
 def get_player_language(player_id: int) -> str:
     """Get player's language preference from database"""
-    return get_user_language(player_id)
+    return get_player_language(player_id)
 
 def set_player_language(player_id: int, language: str) -> bool:
     """Set player's language preference in database"""
-    return update_user_language(player_id, language)
+    return set_player_language(player_id, language)
 
 def init_language_support():
     """Initialize language support"""
     logger.info("Language support initialized")
+
+def get_cycle_name(cycle_type: str, lang: str = "en") -> str:
+    """Get the localized name of a game cycle type."""
+    cycle_types = {
+        "en": {
+            "influence": "Influence Phase",
+            "action": "Action Phase",
+            "resolution": "Resolution Phase",
+            "maintenance": "Maintenance Phase"
+        },
+        "ru": {
+            "influence": "Фаза влияния",
+            "action": "Фаза действий",
+            "resolution": "Фаза разрешения",
+            "maintenance": "Фаза обслуживания"
+        }
+    }
+    
+    if lang not in cycle_types:
+        lang = "en"
+    
+    return cycle_types[lang].get(cycle_type, cycle_type)
+
+def get_resource_name(resource_type: str, lang: str = "en") -> str:
+    """Get the localized name of a resource type."""
+    try:
+        return TRANSLATIONS[lang]["resource_types"].get(resource_type, resource_type)
+    except KeyError:
+        return TRANSLATIONS["en"]["resource_types"].get(resource_type, resource_type)
+
+def format_ideology(ideology_score: int, lang: str = "en") -> str:
+    """Format ideology score into text description."""
+    if ideology_score >= 80:
+        return get_text("ideology_far_right", lang)
+    elif ideology_score >= 60:
+        return get_text("ideology_right", lang)
+    elif ideology_score >= 40:
+        return get_text("ideology_center", lang)
+    elif ideology_score >= 20:
+        return get_text("ideology_left", lang)
+    else:
+        return get_text("ideology_far_left", lang)
+
+def get_action_name(action_type: str, lang: str = "en") -> str:
+    """Get localized name for an action type."""
+    action_key = f"action_types.{action_type}"
+    default_name = action_type.replace("_", " ").title()
+    
+    # Try to get the action name from translations
+    action_name = get_text(action_key, lang, default=None)
+    if action_name:
+        return action_name
+        
+    # If not found in translations, check if it's in the action_types dictionary
+    translations = TRANSLATIONS.get(lang, TRANSLATIONS["en"])
+    action_types = translations.get("action_types", {})
+    return action_types.get(action_type, default_name)
