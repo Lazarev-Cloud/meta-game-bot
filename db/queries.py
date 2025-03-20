@@ -259,42 +259,163 @@ def cleanup_database_pool():
 
 
 # Optional: Context manager for manual connection management
-class DatabaseConnection:
+class DatabaseConnectionPool:
     """
-    Context manager for database connections.
-
-    Usage:
-    with DatabaseConnection() as conn:
-        # perform database operations
+    Advanced thread-safe SQLite connection pool with robust error handling
     """
 
-    def __init__(self):
-        self.conn = None
+    def __init__(
+            self,
+            db_path: str = 'belgrade_game.db',
+            max_connections: int = 10,
+            timeout: float = 30.0,  # Increased timeout
+            max_retries: int = 5,  # Increased retry attempts
+            initial_pragmas: Optional[Dict[str, str]] = None
+    ):
+        self._db_path = db_path
+        self._max_connections = max_connections
+        self._timeout = timeout
+        self._max_retries = max_retries
 
-    def __enter__(self):
-        self.conn = db_connection_pool.get_connection()
-        self.conn.execute("BEGIN")
-        return self.conn
+        # Enhanced PRAGMA settings for better concurrency and performance
+        self._pragmas = {
+            "foreign_keys": "ON",
+            "journal_mode": "WAL",  # Write-Ahead Logging for better concurrency
+            "synchronous": "NORMAL",
+            "cache_size": "-2000",  # Larger cache
+            "temp_store": "MEMORY"  # Use memory for temp tables
+        }
+        if initial_pragmas:
+            self._pragmas.update(initial_pragmas)
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        if exc_type is None:
-            try:
-                self.conn.commit()
-            except Exception as e:
-                logger.error(f"Error committing transaction: {e}")
-                self.conn.rollback()
-        else:
-            try:
-                self.conn.rollback()
-            except Exception as e:
-                logger.error(f"Error rolling back transaction: {e}")
+        self._pool: list[sqlite3.Connection] = []
+        self._lock = threading.Lock()
+        self._connection_count = 0
+        self._local = threading.local()
 
+        # Set up initial database configuration
+        self._initialize_database()
+
+    def _initialize_database(self):
+        """
+        Create initial database configuration with enhanced settings
+        """
         try:
-            db_connection_pool.return_connection(self.conn)
-        except Exception as e:
-            logger.error(f"Error returning connection to pool: {e}")
+            conn = sqlite3.connect(self._db_path, timeout=self._timeout)
 
+            # Apply all configured PRAGMA settings
+            for pragma, value in self._pragmas.items():
+                try:
+                    conn.execute(f"PRAGMA {pragma} = {value}")
+                except sqlite3.Error as pragma_error:
+                    logger.warning(f"Could not set PRAGMA {pragma}: {pragma_error}")
 
+            conn.commit()
+            conn.close()
+        except sqlite3.Error as e:
+            logger.error(f"Database initialization error: {e}")
+            raise DatabaseConnectionPoolError(f"Failed to initialize database: {e}")
+
+    def get_connection(self) -> sqlite3.Connection:
+        """
+        Get a connection with exponential backoff and robust error handling
+        """
+        retry_delay = 0.1  # Start with a small delay
+        for attempt in range(self._max_retries):
+            try:
+                # Check thread-local connection
+                if hasattr(self._local, 'connection') and self._local.connection:
+                    try:
+                        # Validate connection
+                        self._local.connection.execute("SELECT 1")
+                        return self._local.connection
+                    except (sqlite3.Error, sqlite3.ProgrammingError):
+                        self._local.connection = None
+
+                # Acquire lock and get/create connection
+                with self._lock:
+                    if self._pool:
+                        conn = self._pool.pop()
+                    elif self._connection_count < self._max_connections:
+                        self._connection_count += 1
+                        conn = self._create_connection()
+                    else:
+                        raise DatabaseConnectionPoolError("No available database connections")
+
+                # Store in thread-local storage
+                self._local.connection = conn
+                return conn
+
+            except (sqlite3.OperationalError, DatabaseConnectionPoolError) as e:
+                logger.warning(f"Connection attempt {attempt + 1} failed: {e}")
+
+                # Exponential backoff with jitter
+                time.sleep(retry_delay * (1 + random.random()))
+                retry_delay *= 2  # Exponential increase
+
+                if attempt == self._max_retries - 1:
+                    logger.error(f"Failed to get database connection after {self._max_retries} attempts")
+                    raise
+
+    def _create_connection(self) -> sqlite3.Connection:
+        """
+        Create a new database connection with configured PRAGMAs
+        """
+        try:
+            conn = sqlite3.connect(
+                self._db_path,
+                timeout=self._timeout,
+                isolation_level=None  # Enable autocommit mode
+            )
+
+            # Apply all configured PRAGMA settings
+            for pragma, value in self._pragmas.items():
+                conn.execute(f"PRAGMA {pragma} = {value}")
+
+            return conn
+        except sqlite3.Error as e:
+            logger.error(f"Failed to create database connection: {e}")
+            raise DatabaseConnectionPoolError(f"Connection creation failed: {e}")
+
+    def return_connection(self, conn: sqlite3.Connection):
+        """
+        Return a connection to the pool with validation
+        """
+        with self._lock:
+            try:
+                # Validate connection
+                conn.execute("SELECT 1")
+            except (sqlite3.ProgrammingError, sqlite3.OperationalError):
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+                self._connection_count -= 1
+                return
+
+            if len(self._pool) < self._max_connections:
+                self._pool.append(conn)
+            else:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+                self._connection_count -= 1
+
+    def close_all_connections(self):
+        """
+        Gracefully close all connections in the pool
+        """
+        with self._lock:
+            while self._pool:
+                conn = self._pool.pop()
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+            self._connection_count = 0
+            if hasattr(self._local, 'connection'):
+                self._local.connection = None
 # Player-related queries
 @db_transaction
 def get_player(conn, player_id):
