@@ -31,24 +31,6 @@ EVENING_CYCLE_DEADLINE = datetime.time(18, 0)  # 6:00 PM
 EVENING_CYCLE_RESULTS = datetime.time(19, 0)  # 7:00 PM
 
 
-async def schedule_jobs(application):
-    """Set up scheduled jobs for game cycle processing."""
-    job_queue = application.job_queue
-
-    # Schedule morning cycle results
-    morning_time = datetime.time(hour=MORNING_CYCLE_RESULTS.hour, minute=MORNING_CYCLE_RESULTS.minute)
-    job_queue.run_daily(process_game_cycle, time=morning_time)
-
-    # Schedule evening cycle results
-    evening_time = datetime.time(hour=EVENING_CYCLE_RESULTS.hour, minute=EVENING_CYCLE_RESULTS.minute)
-    job_queue.run_daily(process_game_cycle, time=evening_time)
-
-    # Schedule periodic action refreshes every 3 hours
-    job_queue.run_repeating(refresh_actions, interval=3 * 60 * 60)
-
-    logger.info("Scheduled jobs set up")
-
-
 async def process_game_cycle(context):
     """Process actions and update game state at the end of a cycle."""
     now = datetime.datetime.now().time()
@@ -101,7 +83,6 @@ async def process_game_cycle(context):
         tb_list = traceback.format_exception(None, e, e.__traceback__)
         tb_string = ''.join(tb_list)
         logger.error(f"Exception traceback:\n{tb_string}")
-
 
 # Helper functions to break down the process
 def get_pending_actions(cycle):
@@ -173,7 +154,6 @@ def get_random_international_politicians(min_count, max_count):
     except Exception as e:
         logger.error(f"Error getting international politicians: {e}")
         return []
-
 
 def process_action(action_id, player_id, action_type, target_type, target_id):
     """Process a single action and return the result"""
@@ -280,6 +260,82 @@ def process_action(action_id, player_id, action_type, target_type, target_id):
                 }
 
     return result
+
+
+def process_international_politicians():
+    """Process actions by international politicians"""
+    # Choose 1-3 random international politicians to activate
+    conn = sqlite3.connect('belgrade_game.db')
+    cursor = conn.cursor()
+
+    cursor.execute("SELECT politician_id, name FROM politicians WHERE is_international = 1")
+    international_politicians = cursor.fetchall()
+
+    num_active = random.randint(1, 3)
+    active_politicians = random.sample(international_politicians, min(num_active, len(international_politicians)))
+
+    activated_events = []
+
+    for politician_id, name in active_politicians:
+        # Process this politician's action
+        event = process_international_politician_action(politician_id)
+        if event:
+            activated_events.append(event)
+
+    conn.close()
+    return activated_events
+
+
+async def schedule_jobs(application):
+    """Set up scheduled jobs for game cycle processing."""
+    job_queue = application.job_queue
+
+    # Schedule morning cycle results
+    morning_time = datetime.time(hour=MORNING_CYCLE_RESULTS.hour, minute=MORNING_CYCLE_RESULTS.minute)
+    job_queue.run_daily(process_game_cycle, time=morning_time)
+
+    # Schedule evening cycle results
+    evening_time = datetime.time(hour=EVENING_CYCLE_RESULTS.hour, minute=EVENING_CYCLE_RESULTS.minute)
+    job_queue.run_daily(process_game_cycle, time=evening_time)
+
+    # Schedule periodic action refreshes every 3 hours
+    job_queue.run_repeating(refresh_actions, interval=3 * 60 * 60)
+
+    logger.info("Scheduled jobs set up")
+
+
+async def refresh_actions(context):
+    """Refresh actions for all players every 3 hours."""
+    conn = sqlite3.connect('belgrade_game.db')
+    cursor = conn.cursor()
+
+    # Get all active players
+    cursor.execute("SELECT player_id FROM players")
+    players = cursor.fetchall()
+
+    for player_id_tuple in players:
+        player_id = player_id_tuple[0]
+
+        # Refresh their actions
+        cursor.execute(
+            "UPDATE players SET main_actions_left = 1, quick_actions_left = 2, last_action_refresh = ? WHERE player_id = ?",
+            (datetime.datetime.now().isoformat(), player_id)
+        )
+
+        # Notify the player
+        try:
+            lang = get_player_language(player_id)
+            await context.bot.send_message(
+                chat_id=player_id,
+                text=get_text("actions_refreshed_notification", lang)
+            )
+        except Exception as e:
+            logger.error(f"Failed to notify player {player_id} about action refresh: {e}")
+
+    conn.commit()
+    conn.close()
+
+    logger.info("Actions refreshed for all players")
 
 
 def process_international_politician_action(politician_id):
@@ -539,7 +595,7 @@ async def notify_players_of_results(context, cycle):
         logger.error(f"Error in notify_players_of_results: {e}")
 
 
-async def refresh_actions(context):
+async def refresh_actions_job(context):
     """Refresh actions for all players every 3 hours."""
     try:
         # Get all active players
@@ -567,7 +623,7 @@ async def refresh_actions(context):
 
         logger.info("Actions refreshed for all players")
     except Exception as e:
-        logger.error(f"Error in refresh_actions: {e}")
+        logger.error(f"Error in refresh_actions_job: {e}")
 
 
 def get_current_cycle():
@@ -595,3 +651,94 @@ def get_cycle_results_time():
         return MORNING_CYCLE_RESULTS
     else:
         return EVENING_CYCLE_RESULTS
+
+
+def process_coordinated_action(action_id, player_id, action_type, target_type, target_id, resources_used):
+    """Process a coordinated action."""
+    try:
+        # Get all participants
+        participants = get_coordinated_action_participants(action_id)
+        
+        # Calculate total resources
+        total_resources = {}
+        for participant in participants:
+            participant_resources = json.loads(participant[1])
+            for resource_type, amount in participant_resources.items():
+                if resource_type in total_resources:
+                    total_resources[resource_type] += amount
+                else:
+                    total_resources[resource_type] = amount
+        
+        # Process the action with combined resources
+        if action_type == ACTION_ATTACK:
+            result = process_attack(target_id, total_resources)
+        elif action_type == ACTION_DEFENSE:
+            result = process_defense(target_id, total_resources)
+        else:
+            return {"success": False, "message": "Invalid action type"}
+        
+        # Close the coordinated action
+        close_coordinated_action(action_id)
+        
+        return result
+    except Exception as e:
+        logger.error(f"Error processing coordinated action {action_id}: {e}")
+        return {"success": False, "message": str(e)}
+
+def process_attack(district_id, resources):
+    """Process an attack action with combined resources."""
+    try:
+        # Get current control points
+        current_control = get_district_control(district_id)
+        
+        # Calculate attack power
+        attack_power = 0
+        for resource_type, amount in resources.items():
+            if resource_type == "force":
+                attack_power += amount * 2  # Force is most effective for attacks
+            elif resource_type == "influence":
+                attack_power += amount * 1.5  # Influence is moderately effective
+            else:
+                attack_power += amount  # Other resources are less effective
+        
+        # Apply attack
+        new_control = max(0, current_control - attack_power)
+        update_district_control(district_id, new_control)
+        
+        return {
+            "success": True,
+            "message": f"Attack successful. District control reduced by {attack_power} points.",
+            "new_control": new_control
+        }
+    except Exception as e:
+        logger.error(f"Error processing attack: {e}")
+        return {"success": False, "message": str(e)}
+
+def process_defense(district_id, resources):
+    """Process a defense action with combined resources."""
+    try:
+        # Get current control points
+        current_control = get_district_control(district_id)
+        
+        # Calculate defense power
+        defense_power = 0
+        for resource_type, amount in resources.items():
+            if resource_type == "influence":
+                defense_power += amount * 2  # Influence is most effective for defense
+            elif resource_type == "force":
+                defense_power += amount * 1.5  # Force is moderately effective
+            else:
+                defense_power += amount  # Other resources are less effective
+        
+        # Apply defense
+        new_control = min(100, current_control + defense_power)
+        update_district_control(district_id, new_control)
+        
+        return {
+            "success": True,
+            "message": f"Defense successful. District control increased by {defense_power} points.",
+            "new_control": new_control
+        }
+    except Exception as e:
+        logger.error(f"Error processing defense: {e}")
+        return {"success": False, "message": str(e)}

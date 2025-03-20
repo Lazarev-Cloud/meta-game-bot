@@ -544,3 +544,174 @@ def distribute_district_resources(conn):
             update_player_resources_internal(conn, player_id, "information", information)
         if force > 0:
             update_player_resources_internal(conn, player_id, "force", force)
+
+@db_transaction
+def create_coordinated_action(conn, initiator_id, action_type, target_type, target_id, resources_used):
+    """Create a new coordinated action."""
+    cursor = conn.cursor()
+    now = datetime.datetime.now()
+    expires_at = now + datetime.timedelta(minutes=30)
+
+    # Determine current cycle
+    current_time = now.time()
+    if datetime.time(6, 0) <= current_time < datetime.time(13, 1):
+        cycle = "morning"
+    else:
+        cycle = "evening"
+
+    cursor.execute(
+        """
+        INSERT INTO coordinated_actions 
+        (initiator_id, action_type, target_type, target_id, resources_used, timestamp, cycle, expires_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (initiator_id, action_type, target_type, target_id, json.dumps(resources_used), 
+         now.isoformat(), cycle, expires_at.isoformat())
+    )
+    action_id = cursor.lastrowid
+
+    # Add initiator as first participant
+    cursor.execute(
+        """
+        INSERT INTO coordinated_action_participants 
+        (action_id, player_id, resources_used, joined_at)
+        VALUES (?, ?, ?, ?)
+        """,
+        (action_id, initiator_id, json.dumps(resources_used), now.isoformat())
+    )
+
+    return action_id
+
+@db_transaction
+def join_coordinated_action(conn, player_id, action_id, resources_used):
+    """Join an existing coordinated action."""
+    cursor = conn.cursor()
+
+    # Check if action exists and is still open
+    cursor.execute(
+        """
+        SELECT action_id, expires_at, status 
+        FROM coordinated_actions 
+        WHERE action_id = ?
+        """,
+        (action_id,)
+    )
+    action = cursor.fetchone()
+    
+    if not action:
+        return False, "Action not found"
+    
+    if action[2] != 'open':
+        return False, "Action is no longer open"
+    
+    expires_at = datetime.datetime.fromisoformat(action[1])
+    if datetime.datetime.now() > expires_at:
+        return False, "Action has expired"
+
+    # Add participant
+    cursor.execute(
+        """
+        INSERT INTO coordinated_action_participants 
+        (action_id, player_id, resources_used, joined_at)
+        VALUES (?, ?, ?, ?)
+        """,
+        (action_id, player_id, json.dumps(resources_used), datetime.datetime.now().isoformat())
+    )
+
+    return True, "Successfully joined action"
+
+@db_transaction
+def get_open_coordinated_actions(conn):
+    """Get all open coordinated actions."""
+    cursor = conn.cursor()
+    now = datetime.datetime.now().isoformat()
+    
+    cursor.execute(
+        """
+        SELECT ca.action_id, ca.initiator_id, ca.action_type, ca.target_type, 
+               ca.target_id, ca.resources_used, ca.timestamp, ca.cycle,
+               p.character_name as initiator_name
+        FROM coordinated_actions ca
+        JOIN players p ON ca.initiator_id = p.player_id
+        WHERE ca.status = 'open' AND ca.expires_at > ?
+        ORDER BY ca.timestamp DESC
+        """,
+        (now,)
+    )
+    
+    return cursor.fetchall()
+
+@db_transaction
+def get_coordinated_action_participants(conn, action_id):
+    """Get all participants of a coordinated action."""
+    cursor = conn.cursor()
+    
+    cursor.execute(
+        """
+        SELECT cap.player_id, cap.resources_used, cap.joined_at,
+               p.character_name
+        FROM coordinated_action_participants cap
+        JOIN players p ON cap.player_id = p.player_id
+        WHERE cap.action_id = ?
+        ORDER BY cap.joined_at ASC
+        """,
+        (action_id,)
+    )
+    
+    return cursor.fetchall()
+
+@db_transaction
+def close_coordinated_action(conn, action_id):
+    """Close a coordinated action and convert it to regular actions."""
+    cursor = conn.cursor()
+    
+    # Get action details
+    cursor.execute(
+        """
+        SELECT action_type, target_type, target_id, cycle
+        FROM coordinated_actions
+        WHERE action_id = ?
+        """,
+        (action_id,)
+    )
+    action = cursor.fetchone()
+    
+    if not action:
+        return False
+    
+    action_type, target_type, target_id, cycle = action
+    
+    # Get all participants
+    participants = get_coordinated_action_participants(conn, action_id)
+    
+    # Create regular actions for each participant
+    for participant in participants:
+        player_id, resources_used, _, _ = participant
+        add_action(conn, player_id, action_type, target_type, target_id, json.loads(resources_used))
+    
+    # Mark action as closed
+    cursor.execute(
+        "UPDATE coordinated_actions SET status = 'closed' WHERE action_id = ?",
+        (action_id,)
+    )
+    
+    return True
+
+@db_transaction
+def cleanup_expired_coordinated_actions(conn):
+    """Clean up expired coordinated actions."""
+    cursor = conn.cursor()
+    now = datetime.datetime.now().isoformat()
+    
+    # Get expired actions
+    cursor.execute(
+        "SELECT action_id FROM coordinated_actions WHERE status = 'open' AND expires_at <= ?",
+        (now,)
+    )
+    expired_actions = cursor.fetchall()
+    
+    # Close each expired action
+    for action in expired_actions:
+        close_coordinated_action(conn, action[0])
+    
+    return len(expired_actions)

@@ -475,7 +475,7 @@ async def admin_set_ideology(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
     if len(args) != 2:
         await update.message.reply_text(get_text("admin_set_ideology_usage", lang,
-                                            default="Usage: /admin_set_ideology [player_id] [ideology_score]"))
+                                                 default="Usage: /admin_set_ideology [player_id] [ideology_score]"))
         return
 
     try:
@@ -485,7 +485,7 @@ async def admin_set_ideology(update: Update, context: ContextTypes.DEFAULT_TYPE)
         # Validate ideology score
         if ideology_score < -5 or ideology_score > 5:
             await update.message.reply_text(get_text("admin_set_ideology_invalid", lang,
-                                                default="Ideology score must be between -5 and +5."))
+                                                     default="Ideology score must be between -5 and +5."))
             return
 
         conn = sqlite3.connect('belgrade_game.db')
@@ -508,8 +508,8 @@ async def admin_set_ideology(update: Update, context: ContextTypes.DEFAULT_TYPE)
         conn.close()
 
         await update.message.reply_text(get_text("admin_set_ideology_success", lang,
-                                            player_id=player_id, score=ideology_score,
-                                            default=f"Ideology score for player {player_id} set to {ideology_score}."))
+                                                 player_id=player_id, score=ideology_score,
+                                                 default=f"Ideology score for player {player_id} set to {ideology_score}."))
 
     except ValueError:
         await update.message.reply_text(get_text("admin_invalid_args", lang))
@@ -755,18 +755,18 @@ async def view_district_command(update: Update, context: ContextTypes.DEFAULT_TY
             keyboard = [
                 [
                     InlineKeyboardButton(get_text("action_influence", lang),
-                                      callback_data=f"action_influence:{district_id}"),
+                                         callback_data=f"action_influence:{district_id}"),
                     InlineKeyboardButton(get_text("action_attack", lang),
-                                      callback_data=f"action_attack:{district_id}")
+                                         callback_data=f"action_attack:{district_id}")
                 ],
                 [
                     InlineKeyboardButton(get_text("action_defense", lang),
-                                      callback_data=f"action_defend:{district_id}"),
+                                         callback_data=f"action_defend:{district_id}"),
                     InlineKeyboardButton(get_text("action_recon", lang), callback_data=f"quick_recon:{district_id}")
                 ],
                 [
                     InlineKeyboardButton(get_text("action_support", lang),
-                                      callback_data=f"quick_support:{district_id}")
+                                         callback_data=f"quick_support:{district_id}")
                 ]
             ]
 
@@ -858,7 +858,7 @@ async def politician_status_command(update: Update, context: ContextTypes.DEFAUL
             keyboard = [
                 [
                     InlineKeyboardButton(get_text("action_influence", lang),
-                                      callback_data=f"pol_influence:{pol_id}"),
+                                         callback_data=f"pol_influence:{pol_id}"),
                     InlineKeyboardButton(get_text("action_recon", lang), callback_data=f"pol_info:{pol_id}")
                 ],
                 [
@@ -964,9 +964,9 @@ async def convert_resource_command(update: Update, context: ContextTypes.DEFAULT
 
     await update.message.reply_text(
         get_text("conversion_success", lang,
-                resources_used=resources_needed,
-                amount=amount,
-                resource_type=get_resource_name(resource_type, lang))
+                 resources_used=resources_needed,
+                 amount=amount,
+                 resource_type=get_resource_name(resource_type, lang))
     )
 
 
@@ -1021,10 +1021,10 @@ async def check_income_command(update: Update, context: ContextTypes.DEFAULT_TYP
             income_text += ", ".join(resources_list) + "\n"
 
         income_text += "\n" + get_text("income_total", lang,
-                                     influence=total_income["influence"],
-                                     resources=total_income["resources"],
-                                     information=total_income["information"],
-                                     force=total_income["force"])
+                                       influence=total_income["influence"],
+                                       resources=total_income["resources"],
+                                       information=total_income["information"],
+                                       force=total_income["force"])
 
         income_text += "\n\n" + get_text("income_note", lang)
 
@@ -1138,6 +1138,90 @@ async def admin_process_cycle(update: Update, context: ContextTypes.DEFAULT_TYPE
     await process_game_cycle(context)
 
     await update.message.reply_text(get_text("admin_cycle_processed", lang))
+
+
+async def join_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Join a coordinated action."""
+    user = update.effective_user
+    lang = get_player_language(user.id)
+
+    # Check if player is registered
+    player = get_player(user.id)
+    if not player:
+        await update.message.reply_text(get_text("not_registered", lang))
+        return
+
+    # Check arguments
+    args = context.args
+    if len(args) < 4:
+        await update.message.reply_text(get_text("join_usage", lang))
+        return
+
+    try:
+        action_id = int(args[0])
+        action_type = args[1].lower()
+        target_type = args[2].lower()
+        target_id = args[3]
+        resources_list = args[4:] if len(args) > 4 else []
+
+        # Validate action type
+        if action_type not in [ACTION_ATTACK, ACTION_DEFENSE]:
+            await update.message.reply_text(get_text("invalid_action_type", lang))
+            return
+
+        # Parse resources
+        resources_dict = {}
+        for resource_type in resources_list:
+            if resource_type in resources_dict:
+                resources_dict[resource_type] += 1
+            else:
+                resources_dict[resource_type] = 1
+
+        # Check if player has the resources
+        player_resources = get_player_resources(user.id)
+        for resource_type, amount in resources_dict.items():
+            if player_resources.get(resource_type, 0) < amount:
+                await update.message.reply_text(
+                    get_text("insufficient_resources", lang, resource_type=get_resource_name(resource_type, lang))
+                )
+                return
+
+        # Check if player has main actions left
+        actions = get_remaining_actions(user.id)
+        if actions['main'] <= 0:
+            await update.message.reply_text(get_text("no_main_actions", lang))
+            return
+
+        # Join the coordinated action
+        success, message = join_coordinated_action(user.id, action_id, resources_dict)
+        
+        if success:
+            # Deduct resources
+            for resource_type, amount in resources_dict.items():
+                update_player_resources(user.id, resource_type, -amount)
+
+            # Use action
+            use_action(user.id, True)
+
+            # Format resources for display
+            resources_display = []
+            for resource_type, amount in resources_dict.items():
+                resources_display.append(f"{amount} {get_resource_name(resource_type, lang)}")
+            resources_text = ", ".join(resources_display)
+
+            await update.message.reply_text(
+                get_text("action_joined", lang,
+                         action_type=get_action_name(action_type, lang),
+                         resources=resources_text)
+            )
+        else:
+            await update.message.reply_text(message)
+
+    except ValueError:
+        await update.message.reply_text(get_text("invalid_arguments", lang))
+    except Exception as e:
+        logger.error(f"Error in join_command: {e}")
+        await update.message.reply_text(get_text("action_error", lang))
 
 
 def register_commands(application):

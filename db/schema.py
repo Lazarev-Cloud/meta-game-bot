@@ -115,6 +115,35 @@ def setup_database():
         )
         ''')
 
+        # Create CoordinatedActions table
+        cursor.execute('''
+        CREATE TABLE IF NOT EXISTS coordinated_actions (
+            action_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            initiator_id INTEGER,
+            action_type TEXT,
+            target_type TEXT,
+            target_id TEXT,
+            resources_used TEXT,
+            timestamp TEXT,
+            cycle TEXT,
+            status TEXT DEFAULT 'open',
+            expires_at TEXT,
+            FOREIGN KEY (initiator_id) REFERENCES players (player_id)
+        )
+        ''')
+
+        # Create CoordinatedActionParticipants table
+        cursor.execute('''
+        CREATE TABLE IF NOT EXISTS coordinated_action_participants (
+            action_id INTEGER,
+            player_id INTEGER,
+            resources_used TEXT,
+            joined_at TEXT,
+            FOREIGN KEY (action_id) REFERENCES coordinated_actions (action_id),
+            FOREIGN KEY (player_id) REFERENCES players (player_id)
+        )
+        ''')
+
         # Create table for politician relationships
         cursor.execute('''
         CREATE TABLE IF NOT EXISTS politician_relationships (
