@@ -2,7 +2,7 @@ import logging
 import sqlite3
 
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
-from telegram.ext import Application, CallbackQueryHandler, ContextTypes
+from telegram.ext import Application, CallbackQueryHandler, ContextTypes, CallbackContext
 
 from bot.commands import register_commands, executor
 from config import TOKEN
