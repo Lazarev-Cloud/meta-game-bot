@@ -15,7 +15,6 @@ from languages_update import init_language_support
 import sqlite3
 from config import TOKEN, ADMIN_IDS
 from db.schema import setup_database
-from game.actions import schedule_jobs
 
 # Enable logging
 logging.basicConfig(
@@ -67,7 +66,8 @@ def main() -> None:
 
         # Set up scheduled jobs
         logger.info("Setting up scheduled jobs...")
-        application.job_queue.run_once(schedule_jobs, 1)
+        from game.actions import schedule_jobs
+        application.job_queue.run_once(lambda ctx: schedule_jobs(application), 1)
 
         # Add error handler
         logger.info("Setting up error handler...")

@@ -2,15 +2,12 @@ import logging
 import sqlite3
 
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
-from telegram.ext import Application, CallbackQueryHandler, ContextTypes
-from config import TOKEN
-from db.schema import setup_database
-from game.actions import schedule_jobs
+from telegram.ext import CallbackQueryHandler, ContextTypes
 from languages import get_text, get_player_language, set_player_language, get_action_name, get_resource_name
 from db.queries import (
     get_player_resources, update_player_resources,
     get_remaining_actions, use_action, add_action,
-    update_district_control, get_district_info
+    update_district_control
 )
 from game.actions import (
     ACTION_INFLUENCE, ACTION_ATTACK, ACTION_DEFENSE,
@@ -185,6 +182,7 @@ async def process_quick_action(query, action_type, target_type, target_id):
 
             # Get district info for immediate display
             if target_type == "district":
+                from game.districts import get_district_info
                 district_info = format_district_info(target_id, lang)
 
                 await query.edit_message_text(

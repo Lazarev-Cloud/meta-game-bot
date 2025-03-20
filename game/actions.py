@@ -31,6 +31,24 @@ EVENING_CYCLE_DEADLINE = datetime.time(18, 0)  # 6:00 PM
 EVENING_CYCLE_RESULTS = datetime.time(19, 0)  # 7:00 PM
 
 
+async def schedule_jobs(application):
+    """Set up scheduled jobs for game cycle processing."""
+    job_queue = application.job_queue
+
+    # Schedule morning cycle results
+    morning_time = datetime.time(hour=MORNING_CYCLE_RESULTS.hour, minute=MORNING_CYCLE_RESULTS.minute)
+    job_queue.run_daily(process_game_cycle, time=morning_time)
+
+    # Schedule evening cycle results
+    evening_time = datetime.time(hour=EVENING_CYCLE_RESULTS.hour, minute=EVENING_CYCLE_RESULTS.minute)
+    job_queue.run_daily(process_game_cycle, time=evening_time)
+
+    # Schedule periodic action refreshes every 3 hours
+    job_queue.run_repeating(refresh_actions, interval=3 * 60 * 60)
+
+    logger.info("Scheduled jobs set up")
+
+
 async def process_game_cycle(context):
     """Process actions and update game state at the end of a cycle."""
     now = datetime.datetime.now().time()
@@ -83,6 +101,7 @@ async def process_game_cycle(context):
         tb_list = traceback.format_exception(None, e, e.__traceback__)
         tb_string = ''.join(tb_list)
         logger.error(f"Exception traceback:\n{tb_string}")
+
 
 # Helper functions to break down the process
 def get_pending_actions(cycle):
@@ -154,6 +173,7 @@ def get_random_international_politicians(min_count, max_count):
     except Exception as e:
         logger.error(f"Error getting international politicians: {e}")
         return []
+
 
 def process_action(action_id, player_id, action_type, target_type, target_id):
     """Process a single action and return the result"""
@@ -260,82 +280,6 @@ def process_action(action_id, player_id, action_type, target_type, target_id):
                 }
 
     return result
-
-
-def process_international_politicians():
-    """Process actions by international politicians"""
-    # Choose 1-3 random international politicians to activate
-    conn = sqlite3.connect('belgrade_game.db')
-    cursor = conn.cursor()
-
-    cursor.execute("SELECT politician_id, name FROM politicians WHERE is_international = 1")
-    international_politicians = cursor.fetchall()
-
-    num_active = random.randint(1, 3)
-    active_politicians = random.sample(international_politicians, min(num_active, len(international_politicians)))
-
-    activated_events = []
-
-    for politician_id, name in active_politicians:
-        # Process this politician's action
-        event = process_international_politician_action(politician_id)
-        if event:
-            activated_events.append(event)
-
-    conn.close()
-    return activated_events
-
-
-async def schedule_jobs(application):
-    """Set up scheduled jobs for game cycle processing."""
-    job_queue = application.job_queue
-
-    # Schedule morning cycle results
-    morning_time = datetime.time(hour=MORNING_CYCLE_RESULTS.hour, minute=MORNING_CYCLE_RESULTS.minute)
-    job_queue.run_daily(process_game_cycle, time=morning_time)
-
-    # Schedule evening cycle results
-    evening_time = datetime.time(hour=EVENING_CYCLE_RESULTS.hour, minute=EVENING_CYCLE_RESULTS.minute)
-    job_queue.run_daily(process_game_cycle, time=evening_time)
-
-    # Schedule periodic action refreshes every 3 hours
-    job_queue.run_repeating(refresh_actions, interval=3 * 60 * 60)
-
-    logger.info("Scheduled jobs set up")
-
-
-async def refresh_actions(context):
-    """Refresh actions for all players every 3 hours."""
-    conn = sqlite3.connect('belgrade_game.db')
-    cursor = conn.cursor()
-
-    # Get all active players
-    cursor.execute("SELECT player_id FROM players")
-    players = cursor.fetchall()
-
-    for player_id_tuple in players:
-        player_id = player_id_tuple[0]
-
-        # Refresh their actions
-        cursor.execute(
-            "UPDATE players SET main_actions_left = 1, quick_actions_left = 2, last_action_refresh = ? WHERE player_id = ?",
-            (datetime.datetime.now().isoformat(), player_id)
-        )
-
-        # Notify the player
-        try:
-            lang = get_player_language(player_id)
-            await context.bot.send_message(
-                chat_id=player_id,
-                text=get_text("actions_refreshed_notification", lang)
-            )
-        except Exception as e:
-            logger.error(f"Failed to notify player {player_id} about action refresh: {e}")
-
-    conn.commit()
-    conn.close()
-
-    logger.info("Actions refreshed for all players")
 
 
 def process_international_politician_action(politician_id):
@@ -595,7 +539,7 @@ async def notify_players_of_results(context, cycle):
         logger.error(f"Error in notify_players_of_results: {e}")
 
 
-async def refresh_actions_job(context):
+async def refresh_actions(context):
     """Refresh actions for all players every 3 hours."""
     try:
         # Get all active players
@@ -623,7 +567,7 @@ async def refresh_actions_job(context):
 
         logger.info("Actions refreshed for all players")
     except Exception as e:
-        logger.error(f"Error in refresh_actions_job: {e}")
+        logger.error(f"Error in refresh_actions: {e}")
 
 
 def get_current_cycle():
