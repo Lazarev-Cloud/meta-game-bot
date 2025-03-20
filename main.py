@@ -8,16 +8,17 @@ Main entry point for the bot application
 
 import logging
 import sys
-import sqlite3
+
 from telegram import Update
 from telegram.ext import Application
-from languages import get_text, get_player_language, init_language_support
+
 from bot.callbacks import register_callbacks
 from bot.commands import register_commands
 from config import TOKEN, ADMIN_IDS
-from db.schema import setup_database
 from db.queries import db_connection_pool, cleanup_database_pool
+from db.schema import setup_database
 from game.actions import schedule_jobs
+from languages import get_text, get_player_language, init_language_support
 
 # Enable logging
 logging.basicConfig(
@@ -46,6 +47,12 @@ def main() -> None:
         logger.info("Initializing language support...")
         init_language_support()
 
+        # Additional translations
+        logger.info("Initializing additional translations...")
+        from languages_update import update_translations, update_admin_translations
+        update_translations()
+        update_admin_translations()
+
         # Create the Application
         logger.info("Initializing Telegram bot...")
         application = Application.builder().token(TOKEN).build()
@@ -58,7 +65,7 @@ def main() -> None:
         logger.info("Registering callback handlers...")
         register_callbacks(application)
 
-        # Set up scheduled jobs - no await needed
+        # Set up scheduled jobs
         logger.info("Setting up scheduled jobs...")
         application.job_queue.run_once(schedule_jobs, 1)
 
@@ -112,11 +119,28 @@ def validate_system():
 
         # Check if all required translations are present
         from languages import TRANSLATIONS
-        essential_keys = ['welcome', 'help_title', 'status_title', 'action_influence', 'resources_title']
+        essential_keys = [
+            'welcome', 'help_title', 'status_title', 'action_influence',
+            'resources_title', 'language_current', 'language_changed'
+        ]
         for lang in TRANSLATIONS:
             for key in essential_keys:
                 if key not in TRANSLATIONS[lang]:
                     logger.warning(f"Essential translation key '{key}' is missing for language '{lang}'")
+
+        # Verify language command is properly registered
+        from bot.commands import language_command
+        if not language_command:
+            logger.warning("Language command not properly defined")
+
+        # Verify language callback handler is registered
+        from bot.callbacks import handle_language_callback
+        if not handle_language_callback:
+            logger.warning("Language callback handler not properly defined")
+
+        logger.info("System validation complete")
+    except Exception as e:
+        logger.error(f"System validation error: {e}")
 
         # Check if admin IDs are configured
         if not ADMIN_IDS:

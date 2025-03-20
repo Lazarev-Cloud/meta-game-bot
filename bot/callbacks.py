@@ -1,20 +1,20 @@
-import logging
-import sqlite3
 import asyncio
-from typing import Dict, List, Optional, Any, Callable
+import logging
 
-from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
-from telegram.ext import Application, CallbackQueryHandler, ContextTypes, CallbackContext, CommandHandler
+from db.queries import executor
+from game.politician_utils import use_politician_ability  # Import the missing function
+
+logger = logging.getLogger(__name__)
+from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
+from telegram.ext import Application, CallbackQueryHandler, ContextTypes
 
 from bot.commands import register_commands, executor
-from config import TOKEN
+from config import ADMIN_IDS
 from db.queries import (
-    get_player, get_player_resources, update_player_resources,
-    get_district_info, get_district_control, update_district_control,
-    get_politician_info, update_politician_friendliness,
-    add_action, cancel_last_action, get_remaining_actions, use_action,
-    add_news, get_news, create_trade_offer, accept_trade_offer,
-    update_player_location, get_player_location, db_connection_pool, db_transaction
+    get_player_resources, update_player_resources,
+    update_district_control,
+    add_action, get_remaining_actions, use_action,
+    db_connection_pool, db_transaction
 )
 from db.schema import setup_database
 from game.actions import (
@@ -23,17 +23,15 @@ from game.actions import (
 )
 from game.actions import schedule_jobs
 from game.districts import format_district_info
-from game.politicians import format_politician_info, get_politician_list
+from game.politicians import format_politician_info
+# Import trading functions from game.trading instead of db.game_queries
+from game.trading import accept_trade_offer
 from languages import get_text, get_player_language, set_player_language, get_action_name, get_resource_name
-from game.resources import format_resource_info, get_player_resource_summary
-from game.news import format_news_item, get_news_feed
-from game.trading import format_trade_info, get_active_trade_list
 
 # Enable logging
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
 )
-logger = logging.getLogger(__name__)
 
 
 def main():
@@ -627,10 +625,19 @@ async def process_politician_undermine(query, politician_id):
         await query.edit_message_text(get_text("action_error", lang))
 
 
-async def use_ability_callback(query: CallbackQuery):
-    """Process an ability use callback."""
+async def use_ability_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Process an ability use callback with the correct function signature.
+
+    Args:
+        update: The update object containing the callback query
+        context: The callback context
+    """
+    query = update.callback_query
     user = query.from_user
     lang = get_player_language(user.id)
+
+    # Answer the callback to remove the loading indicator
+    await query.answer()
 
     try:
         # Parse callback data
@@ -654,7 +661,7 @@ async def use_ability_callback(query: CallbackQuery):
 
         name, cooldown, last_used = ability
 
-        # Use the ability
+        # Use the ability - run in executor to prevent blocking
         success, message = await asyncio.get_event_loop().run_in_executor(
             executor,
             use_politician_ability,
@@ -679,7 +686,6 @@ async def use_ability_callback(query: CallbackQuery):
         await query.edit_message_text(
             get_text("error_using_ability", lang)
         )
-
 
 # Callback query handler for inline keyboard buttons
 async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -900,6 +906,149 @@ async def handle_district_callback(update: Update, context: ContextTypes.DEFAULT
         await query.edit_message_text(get_text("invalid_district_action", lang))
 
 
+async def handle_language_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """
+    Handle language selection callback when user clicks a language button.
+
+    Args:
+        update: The update object containing the callback query
+        context: The callback context
+    """
+    query = update.callback_query
+    user = query.from_user
+
+    # Answer the callback to remove the loading indicator
+    await query.answer()
+
+    try:
+        # Parse the callback data to get the selected language
+        data = query.data.split(':')
+        if len(data) != 2 or data[0] != "lang":
+            logger.error(f"Invalid language callback data: {query.data}")
+            await query.edit_message_text("Error processing language selection. Please try again.")
+            return
+
+        new_lang = data[1]
+
+        # Define database operations with transaction decorator
+        @db_transaction
+        def get_player_data(conn, player_id):
+            cursor = conn.cursor()
+            cursor.execute("SELECT player_id, language FROM players WHERE player_id = ?", (player_id,))
+            return cursor.fetchone()
+
+        @db_transaction
+        def register_new_player(conn, player_id, username, language):
+            cursor = conn.cursor()
+            now = datetime.datetime.now().isoformat()
+            cursor.execute(
+                "INSERT INTO players (player_id, username, last_action_refresh, language) VALUES (?, ?, ?, ?)",
+                (player_id, username, now, language)
+            )
+
+            # Initialize resources for the new player
+            cursor.execute(
+                "INSERT INTO resources (player_id, influence, resources, information, force) VALUES (?, 5, 5, 5, 5)",
+                (player_id,)
+            )
+            return True
+
+        @db_transaction
+        def update_player_language(conn, player_id, language):
+            cursor = conn.cursor()
+            cursor.execute(
+                "UPDATE players SET language = ? WHERE player_id = ?",
+                (language, player_id)
+            )
+            return cursor.rowcount > 0
+
+        # Get current player data
+        player_data = await asyncio.get_event_loop().run_in_executor(
+            executor,
+            get_player_data,
+            user.id
+        )
+
+        # Process based on whether player exists
+        if not player_data:
+            # Register new player with selected language
+            success = await asyncio.get_event_loop().run_in_executor(
+                executor,
+                register_new_player,
+                user.id, user.username, new_lang
+            )
+            current_lang = new_lang
+            is_new_player = True
+        else:
+            current_lang = player_data[1] if player_data[1] else "en"
+            is_new_player = False
+
+        # Validate the language selection
+        supported_languages = ["en", "ru"]
+        if new_lang not in supported_languages:
+            logger.warning(f"Unsupported language selection: {new_lang}")
+            await query.edit_message_text(get_text("language_invalid", current_lang))
+            return
+
+        # If same language selected, just acknowledge
+        if new_lang == current_lang and not is_new_player:
+            await query.edit_message_text(
+                get_text("language_current", current_lang, language=get_language_name(current_lang))
+            )
+            return
+
+        # Update the language preference if needed
+        if not is_new_player:
+            success = await asyncio.get_event_loop().run_in_executor(
+                executor,
+                update_player_language,
+                user.id, new_lang
+            )
+
+        if success or is_new_player:
+            # Show confirmation in the new language
+            confirmation_text = get_text("language_changed", new_lang)
+
+            # Create updated keyboard with current selection marked
+            keyboard = []
+            for lang_code in supported_languages:
+                button_text = get_text(f"language_button_{lang_code}", new_lang)
+                # Mark the selected language
+                if lang_code == new_lang:
+                    button_text += " ✓"
+                keyboard.append([InlineKeyboardButton(button_text, callback_data=f"lang:{lang_code}")])
+
+            reply_markup = InlineKeyboardMarkup(keyboard)
+
+            # Update the message with the new language and keyboard
+            await query.edit_message_text(
+                confirmation_text,
+                reply_markup=reply_markup
+            )
+
+            logger.info(f"Language changed to {new_lang} for user {user.id}")
+        else:
+            # Show error in the original language
+            await query.edit_message_text(get_text("language_change_failed", current_lang))
+            logger.error(f"Failed to update language for user {user.id}")
+
+    except Exception as e:
+        # Handle any unexpected errors
+        logger.error(f"Error in language callback: {e}")
+        try:
+            # Try to show error in user's language, fall back to English
+            error_text = get_text("error_message", "en")
+            await query.edit_message_text(error_text)
+        except Exception:
+            # If all else fails, show a simple error message
+            await query.edit_message_text("An error occurred. Please try again.")
+
+        # Log detailed error information
+        import traceback
+        tb_list = traceback.format_exception(None, e, e.__traceback__)
+        tb_string = ''.join(tb_list)
+        logger.error(f"Language callback error traceback:\n{tb_string}")
+
 async def handle_politician_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle politician-related callbacks."""
     query = update.callback_query
@@ -953,6 +1102,16 @@ async def admin_resources_callback(update: Update, context: ContextTypes.DEFAULT
     else:
         await query.edit_message_text("Invalid admin resource action.")
 
+# Helper function to get language name for display
+def get_language_name(lang_code: str) -> str:
+    """Get the display name of a language code."""
+    language_names = {
+        "en": "English",
+        "ru": "Русский"
+    }
+    return language_names.get(lang_code, lang_code.upper())
+
+
 
 async def admin_resource_change_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle admin resource change callbacks."""
@@ -999,23 +1158,48 @@ async def admin_resource_change_callback(update: Update, context: ContextTypes.D
 
 
 def register_callbacks(application):
-    """Register callback query handlers."""
-    # Existing callbacks
+    """Register all callback query handlers for the application."""
+
+    # Basic callback handlers
     application.add_handler(CallbackQueryHandler(button_callback, pattern="^action_"))
-    application.add_handler(CallbackQueryHandler(handle_quick_action_callback, pattern="^quick_action_"))
     application.add_handler(CallbackQueryHandler(handle_cancel_callback, pattern="^cancel_"))
     application.add_handler(CallbackQueryHandler(handle_district_callback, pattern="^district_"))
     application.add_handler(CallbackQueryHandler(handle_politician_callback, pattern="^politician_"))
     application.add_handler(CallbackQueryHandler(handle_trade_callback, pattern="^trade_"))
-    
-    # New admin resource management callbacks
+
+    # Language selection callback
+    application.add_handler(CallbackQueryHandler(handle_language_callback, pattern="^lang:"))
+
+    # Politician ability usage
+    application.add_handler(CallbackQueryHandler(use_ability_callback, pattern="^use_ability:"))
+
+    # Admin resource management callbacks
     application.add_handler(CallbackQueryHandler(admin_resources_callback, pattern="^admin_resources_"))
     application.add_handler(CallbackQueryHandler(admin_resource_change_callback, pattern="^admin_resource_"))
 
-    # New ability management callbacks
-    application.add_handler(CallbackQueryHandler(use_ability_callback, pattern="^use_ability:"))
+    # Default handler for unhandled callbacks
+    application.add_handler(CallbackQueryHandler(default_callback_handler))
 
     logger.info("Callback handlers registered")
+
+
+async def default_callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle callbacks that don't match any specific pattern."""
+    query = update.callback_query
+    await query.answer()
+
+    logger.warning(f"Unhandled callback data: {query.data}")
+
+    # Get user's language
+    user = query.from_user
+    try:
+        lang = get_player_language(user.id)
+    except Exception:
+        lang = "en"  # Default to English on error
+
+    await query.edit_message_text(
+        get_text("unknown_callback", lang, default="Unknown action. Please try again.")
+    )
 
 
 if __name__ == "__main__":

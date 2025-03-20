@@ -4,6 +4,12 @@ import asyncio
 from concurrent.futures import ThreadPoolExecutor
 from typing import Optional, List, Dict, Any, Tuple
 
+from telegram.constants import ParseMode
+
+from db.queries import get_player_language as db_get_player_language, update_action_counts, get_player_language, \
+    reset_player_actions, get_player_districts, get_all_districts, distribute_district_resources, update_base_resources
+from languages import get_player_language as lang_get_player_language
+
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import (
     CommandHandler, MessageHandler, filters,
@@ -827,7 +833,7 @@ async def action_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Run database operations in thread pool
     lang = await asyncio.get_event_loop().run_in_executor(
         executor,
-        get_player_language,
+        db_get_player_language,
         user.id
     )
 
@@ -1412,29 +1418,55 @@ async def check_income_command(update: Update, context: ContextTypes.DEFAULT_TYP
 
 
 async def language_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Change the interface language."""
-    user = update.effective_user
+    """Handle the /language command to change interface language."""
+    try:
+        user = update.effective_user
 
-    # Run database operations in thread pool
-    lang = await asyncio.get_event_loop().run_in_executor(
-        executor,
-        get_player_language,
-        user.id
-    )
+        # Get player's current language from database
+        @db_transaction
+        def get_current_lang(conn, user_id):
+            cursor = conn.cursor()
+            cursor.execute("SELECT language FROM players WHERE player_id = ?", (user_id,))
+            result = cursor.fetchone()
+            return result[0] if result and result[0] else "en"
 
-    keyboard = [
-        [
-            InlineKeyboardButton(get_text("language_button_en", lang), callback_data="lang:en"),
-            InlineKeyboardButton(get_text("language_button_ru", lang), callback_data="lang:ru")
+        # Check if player exists, if not register them
+        @db_transaction
+        def ensure_player_exists(conn, user_id, username):
+            cursor = conn.cursor()
+            cursor.execute("SELECT player_id FROM players WHERE player_id = ?", (user_id,))
+            if not cursor.fetchone():
+                now = datetime.datetime.now().isoformat()
+                cursor.execute(
+                    "INSERT INTO players (player_id, username, last_action_refresh) VALUES (?, ?, ?)",
+                    (user_id, username, now)
+                )
+                return False
+            return True
+
+        player_exists = ensure_player_exists(user.id, user.username)
+        current_lang = get_current_lang(user.id)
+
+        # Create language selection keyboard
+        keyboard = [
+            [
+                InlineKeyboardButton(get_text("language_button_en", current_lang),
+                                     callback_data="lang:en"),
+                InlineKeyboardButton(get_text("language_button_ru", current_lang),
+                                     callback_data="lang:ru")
+            ]
         ]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
+        reply_markup = InlineKeyboardMarkup(keyboard)
 
-    await update.message.reply_text(
-        get_text("language_current", lang, language=lang) + "\n\n" +
-        get_text("language_select", lang),
-        reply_markup=reply_markup
-    )
+        # Show current language and prompt for selection
+        await update.message.reply_text(
+            get_text("language_current", current_lang, language=current_lang) + "\n\n" +
+            get_text("language_select", current_lang),
+            reply_markup=reply_markup
+        )
+    except Exception as e:
+        logger.error(f"Error in language command: {e}")
+        await update.message.reply_text("Error processing language command. Please try again.")
 
 
 async def receive_info_content(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1756,7 +1788,7 @@ def register_commands(application):
         },
         fallbacks=[CommandHandler("cancel", cancel_handler)]
     )
-    application.add_handler(conv_handler)
+    application.add_handler(CommandHandler("language", language_command))
 
     # Add basic command handlers
     application.add_handler(CommandHandler("help", help_command))

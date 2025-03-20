@@ -148,65 +148,53 @@ def get_player_politicians(conn, player_id: int) -> List[Dict[str, Any]]:
     return results
 
 @db_transaction
-def get_active_trades(conn) -> List[Dict[str, Any]]:
-    """Get all active trade offers."""
+def get_player_resources(conn, player_id: int) -> Dict[str, int]:
+    """Get player resources."""
     cursor = conn.cursor()
     cursor.execute("""
-        SELECT t.*, 
-               p1.character_name as offerer_name,
-               p2.character_name as target_name
-        FROM trades t
-        JOIN players p1 ON t.offerer_id = p1.player_id
-        LEFT JOIN players p2 ON t.target_id = p2.player_id
-        WHERE t.status = 'active'
-        ORDER BY t.created_at DESC
-    """)
-    
-    results = []
-    for row in cursor.fetchall():
-        results.append({
-            'trade_id': row[0],
-            'offerer_id': row[1],
-            'target_id': row[2],
-            'offer_resource_type': row[3],
-            'offer_amount': row[4],
-            'request_resource_type': row[5],
-            'request_amount': row[6],
-            'status': row[7],
-            'created_at': row[8],
-            'offerer_name': row[9],
-            'target_name': row[10]
-        })
-    return results
+        SELECT influence, resources, information, force
+        FROM resources
+        WHERE player_id = ?
+    """, (player_id,))
+
+    row = cursor.fetchone()
+    if not row:
+        return {"influence": 0, "resources": 0, "information": 0, "force": 0}
+
+    return {
+        "influence": row[0],
+        "resources": row[1],
+        "information": row[2],
+        "force": row[3]
+    }
 
 @db_transaction
-def get_trade_info(conn, trade_id: int) -> Optional[Dict[str, Any]]:
-    """Get information about a specific trade."""
+def update_district_control(conn, player_id: int, district_id: str, points: int) -> bool:
+    """Update district control points."""
     cursor = conn.cursor()
+
+    # Check current control
     cursor.execute("""
-        SELECT t.*, 
-               p1.character_name as offerer_name,
-               p2.character_name as target_name
-        FROM trades t
-        JOIN players p1 ON t.offerer_id = p1.player_id
-        LEFT JOIN players p2 ON t.target_id = p2.player_id
-        WHERE t.trade_id = ?
-    """, (trade_id,))
-    
-    result = cursor.fetchone()
-    if not result:
-        return None
-    
-    return {
-        'trade_id': result[0],
-        'offerer_id': result[1],
-        'target_id': result[2],
-        'offer_resource_type': result[3],
-        'offer_amount': result[4],
-        'request_resource_type': result[5],
-        'request_amount': result[6],
-        'status': result[7],
-        'created_at': result[8],
-        'offerer_name': result[9],
-        'target_name': result[10]
-    } 
+        SELECT control_points
+        FROM district_control
+        WHERE player_id = ? AND district_id = ?
+    """, (player_id, district_id))
+
+    row = cursor.fetchone()
+
+    if row:
+        # Update existing control
+        new_points = max(0, row[0] + points)
+        cursor.execute("""
+            UPDATE district_control
+            SET control_points = ?
+            WHERE player_id = ? AND district_id = ?
+        """, (new_points, player_id, district_id))
+    else:
+        # Insert new control record
+        cursor.execute("""
+            INSERT INTO district_control (player_id, district_id, control_points)
+            VALUES (?, ?, ?)
+        """, (player_id, district_id, max(0, points)))
+
+    return True

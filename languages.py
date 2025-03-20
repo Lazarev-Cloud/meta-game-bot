@@ -8,19 +8,28 @@ This file contains all translations and language-related utilities
 
 import logging
 from typing import Dict, Any, Optional, Union
-from db.queries import get_player_language, set_player_language
+from db.queries import get_player_language, set_player_language, db_transaction
 
 logger = logging.getLogger(__name__)
 
 # Dictionary of translations
 TRANSLATIONS = {
     "en": {
-        # Language settings
+
+        "status_title": "Status for {character_name}",
+        "action_influence": "Increase Influence",
+        "resources_title": "Your Resources",
+        "no_politicians": "No politicians available at this time",
+        "admin_commands": "Admin Commands",
+        "admin_help_hint": "Use /admin_help to see all admin commands.",
+        "help_footer": "For more information about any command, use /help [command]",
+
+        # Language command translations
         "language_current": "Your current language is: {language}",
         "language_select": "Please select your preferred language:",
         "language_changed": "Language changed to English",
         "language_button_en": "English",
-        "language_button_ru": "Русский",
+        "language_button_ru": "Russian",
         "language_invalid": "Invalid language selection",
         "language_change_failed": "Failed to change language. Please try again.",
         "language_detection_error": "Could not detect your language. Defaulting to English.",
@@ -178,7 +187,15 @@ TRANSLATIONS = {
     },
 
     "ru": {
-        # Language settings
+        "status_title": "Статус для {character_name}",
+        "action_influence": "Увеличить влияние",
+        "resources_title": "Ваши ресурсы",
+        "no_politicians": "Политики в данный момент недоступны",
+        "admin_commands": "Команды администратора",
+        "admin_help_hint": "Используйте /admin_help чтобы увидеть все команды администратора.",
+        "help_footer": "Для получения дополнительной информации о любой команде используйте /help [команда]",
+
+        # Language command translations
         "language_current": "Ваш текущий язык: {language}",
         "language_select": "Пожалуйста, выберите предпочитаемый язык:",
         "language_changed": "Язык изменён на русский",
@@ -378,9 +395,24 @@ def get_text(key: str, lang: str = "en", default: Optional[str] = None, **kwargs
         logger.error(f"Error in get_text: {e}")
         return default if default is not None else f"[Error: {key}]"
 
-def get_player_language(player_id: int) -> str:
+
+def get_player_language(player_id):
     """Get player's language preference from database"""
-    return get_player_language(player_id)
+    # WRONG - Creates infinite recursion
+    # return get_player_language(player_id)
+
+    # CORRECT implementation
+    from db.queries import db_transaction
+
+    @db_transaction
+    def get_language_from_db(conn, player_id):
+        cursor = conn.cursor()
+        cursor.execute("SELECT language FROM players WHERE player_id = ?", (player_id,))
+        result = cursor.fetchone()
+        return result[0] if result else "en"
+
+    return get_language_from_db(player_id)
+
 
 def set_player_language(player_id: int, language: str) -> bool:
     """Set player's language preference in database"""
