@@ -35,26 +35,16 @@ class DatabaseConnectionPool:
             max_retries: int = 3,
             initial_pragmas: Optional[Dict[str, str]] = None
     ):
-        """
-        Initialize the connection pool.
-
-        :param db_path: Path to the SQLite database
-        :param max_connections: Maximum number of connections in the pool
-        :param timeout: Connection timeout in seconds
-        :param max_retries: Maximum number of retry attempts for locked database
-        :param initial_pragmas: Optional dictionary of PRAGMA settings to apply
-        """
+        """Initialize database connection pool with thread-local storage."""
         self._db_path = db_path
         self._max_connections = max_connections
         self._timeout = timeout
         self._max_retries = max_retries
-
-        # Default and custom PRAGMA settings
         self._pragmas = {
             "foreign_keys": "ON",
             "journal_mode": "WAL",
             "synchronous": "NORMAL",
-            "cache_size": "-2000"  # ~2MB cache
+            "cache_size": "-2000"
         }
         if initial_pragmas:
             self._pragmas.update(initial_pragmas)
@@ -63,7 +53,9 @@ class DatabaseConnectionPool:
         self._lock = threading.Lock()
         self._connection_count = 0
 
-        # Ensure the database exists and is configured
+        # Thread-local storage for connections
+        self._local = threading.local()
+
         self._initialize_database()
 
     def _initialize_database(self):
@@ -114,37 +106,46 @@ class DatabaseConnectionPool:
 
     def get_connection(self) -> sqlite3.Connection:
         """
-        Retrieve a database connection from the pool.
+        Get a connection specific to the current thread.
 
-        :return: SQLite database connection
-        :raises DatabaseConnectionPoolError: If connection cannot be obtained
+        Returns:
+            A SQLite connection for the current thread
         """
+        # Check if there's already a connection for this thread
+        if hasattr(self._local, 'connection') and self._local.connection:
+            try:
+                # Test the connection
+                self._local.connection.execute("SELECT 1")
+                return self._local.connection
+            except (sqlite3.Error, sqlite3.ProgrammingError):
+                # Connection is invalid, remove it
+                self._local.connection = None
+
+        # Get a new connection
         with self._lock:
-            # Check if a connection is available in the pool
             if self._pool:
-                return self._pool.pop()
-
-            # Check if we can create a new connection
-            if self._connection_count < self._max_connections:
+                conn = self._pool.pop()
+            elif self._connection_count < self._max_connections:
                 self._connection_count += 1
-                return self._create_connection()
+                conn = self._create_connection()
+            else:
+                raise DatabaseConnectionPoolError("No available database connections")
 
-            # If no connections available and pool is full, wait and retry
-            logger.warning("Connection pool exhausted, waiting for available connection")
-            raise DatabaseConnectionPoolError("No available database connections")
+        # Store in thread-local storage
+        self._local.connection = conn
+        return conn
 
     def return_connection(self, conn: sqlite3.Connection):
-        """
-        Return a connection to the pool or close it.
+        """Return a connection to the pool."""
+        # If it's the thread's connection, just keep it for reuse
+        if hasattr(self._local, 'connection') and self._local.connection is conn:
+            return
 
-        :param conn: SQLite database connection to return
-        """
+        # Otherwise return to pool as before
         with self._lock:
-            # Validate connection before returning
             try:
                 conn.execute("SELECT 1")
             except (sqlite3.ProgrammingError, sqlite3.OperationalError):
-                # Connection is no longer valid, close it
                 try:
                     conn.close()
                 except Exception:
@@ -152,7 +153,6 @@ class DatabaseConnectionPool:
                 self._connection_count -= 1
                 return
 
-            # Return to pool or close if pool is full
             if len(self._pool) < self._max_connections:
                 self._pool.append(conn)
             else:
@@ -161,6 +161,15 @@ class DatabaseConnectionPool:
                 except Exception:
                     pass
                 self._connection_count -= 1
+
+    def close_thread_connection(self):
+        """Close and remove the current thread's connection."""
+        if hasattr(self._local, 'connection') and self._local.connection:
+            try:
+                self._local.connection.close()
+            except Exception:
+                pass
+            self._local.connection = None
 
     def close_all_connections(self):
         """
@@ -183,6 +192,7 @@ db_connection_pool = DatabaseConnectionPool()
 def db_transaction(func: Callable) -> Callable:
     """
     Decorator for database transactions with advanced error handling.
+    Uses thread-local connections.
     """
     @wraps(func)
     def wrapper(*args: Any, **kwargs: Any) -> Any:
@@ -192,7 +202,7 @@ def db_transaction(func: Callable) -> Callable:
 
         for attempt in range(max_retries):
             try:
-                # Get connection from the pool
+                # Get thread-local connection from the pool
                 conn = db_connection_pool.get_connection()
 
                 # Start a transaction
@@ -231,13 +241,11 @@ def db_transaction(func: Callable) -> Callable:
                 raise
 
             finally:
-                if conn:
-                    try:
-                        db_connection_pool.return_connection(conn)
-                    except Exception as e:
-                        logger.error(f"Error returning connection: {e}")
+                # No need to explicitly return the connection if using thread-local storage
+                pass
 
     return wrapper
+
 
 # Cleanup method to be called when the application exits
 def cleanup_database_pool():
