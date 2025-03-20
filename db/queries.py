@@ -1161,3 +1161,135 @@ def get_location_bonus(conn, player_id: int, district_id: str) -> int:
     except Exception as e:
         logger.error(f"Error calculating location bonus: {e}")
         return 0
+
+@db_transaction
+def reset_player_actions(conn, player_id):
+    """Reset a player's available actions."""
+    cursor = conn.cursor()
+    now = datetime.datetime.now().isoformat()
+
+    # Check if player exists
+    cursor.execute("SELECT player_id FROM players WHERE player_id = ?", (player_id,))
+    if not cursor.fetchone():
+        return False
+
+    # Reset actions
+    cursor.execute(
+        "UPDATE players SET main_actions_left = 1, quick_actions_left = 2, last_action_refresh = ? WHERE player_id = ?",
+        (now, player_id)
+    )
+
+    return cursor.rowcount > 0
+
+@db_transaction
+def use_politician_ability(conn, politician_id, player_id, ability_id):
+    """Use a politician's ability."""
+    try:
+        cursor = conn.cursor()
+        now = datetime.datetime.now().isoformat()
+
+        # Get current cycle
+        from game.actions import get_current_cycle
+        current_cycle = get_current_cycle()
+
+        # Get ability details
+        cursor.execute(
+            """
+            SELECT cost, cooldown_cycles
+            FROM politician_abilities
+            WHERE ability_id = ? AND politician_id = ?
+            """,
+            (ability_id, politician_id)
+        )
+        ability = cursor.fetchone()
+        if not ability:
+            return False, "Ability not found"
+
+        cost, cooldown = ability
+        cost = eval(cost)  # Convert string representation to dict
+
+        # Check if ability is on cooldown
+        cursor.execute(
+            """
+            SELECT last_used
+            FROM ability_usage
+            WHERE politician_id = ? AND player_id = ? AND ability_id = ?
+            """,
+            (politician_id, player_id, ability_id)
+        )
+        last_usage = cursor.fetchone()
+        
+        if last_usage:
+            last_used = last_usage[0]
+            cycles_since_use = (current_cycle - last_used) % 2  # Assuming 2 cycles per day
+            if cycles_since_use < cooldown:
+                return False, f"Ability on cooldown for {cooldown - cycles_since_use} more cycles"
+
+        # Check if player has enough resources
+        cursor.execute(
+            """
+            SELECT influence, resources, information, force
+            FROM resources
+            WHERE player_id = ?
+            """,
+            (player_id,)
+        )
+        player_resources = cursor.fetchone()
+        if not player_resources:
+            return False, "Player resources not found"
+
+        influence, resources, information, force = player_resources
+
+        # Check if player has enough of each required resource
+        if influence < cost.get('influence', 0):
+            return False, "Not enough influence"
+        if resources < cost.get('resources', 0):
+            return False, "Not enough resources"
+        if information < cost.get('information', 0):
+            return False, "Not enough information"
+        if force < cost.get('force', 0):
+            return False, "Not enough force"
+
+        # Deduct resources
+        cursor.execute(
+            """
+            UPDATE resources
+            SET influence = influence - ?,
+                resources = resources - ?,
+                information = information - ?,
+                force = force - ?
+            WHERE player_id = ?
+            """,
+            (
+                cost.get('influence', 0),
+                cost.get('resources', 0),
+                cost.get('information', 0),
+                cost.get('force', 0),
+                player_id
+            )
+        )
+
+        # Record ability usage
+        if last_usage:
+            cursor.execute(
+                """
+                UPDATE ability_usage
+                SET last_used = ?
+                WHERE politician_id = ? AND player_id = ? AND ability_id = ?
+                """,
+                (current_cycle, politician_id, player_id, ability_id)
+            )
+        else:
+            cursor.execute(
+                """
+                INSERT INTO ability_usage (politician_id, player_id, ability_id, last_used)
+                VALUES (?, ?, ?, ?)
+                """,
+                (politician_id, player_id, ability_id, current_cycle)
+            )
+
+        return True, "Ability used successfully"
+
+    except Exception as e:
+        logger.error(f"Error using politician ability: {e}")
+        return False, str(e)

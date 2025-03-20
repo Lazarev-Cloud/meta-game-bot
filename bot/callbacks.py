@@ -10,7 +10,8 @@ from config import TOKEN
 from db.queries import (
     get_player_resources, update_player_resources,
     get_remaining_actions, use_action, add_action,
-    update_district_control, use_politician_ability
+    update_district_control, use_politician_ability,
+    get_all_districts
 )
 from db.schema import setup_database
 from game.actions import (
@@ -764,6 +765,205 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     else:
         await query.edit_message_text(f"Unrecognized callback: {callback_data}")
+
+
+async def handle_cancel_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle cancellation of any action."""
+    query = update.callback_query
+    await query.answer()
+
+    user = query.from_user
+    lang = get_player_language(user.id)
+
+    await query.edit_message_text(get_text("action_cancelled", lang))
+
+
+async def handle_trade_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle trade-related callbacks."""
+    query = update.callback_query
+    await query.answer()
+
+    user = query.from_user
+    lang = get_player_language(user.id)
+    data = query.data.split(':')
+    action = data[1]
+
+    if action == "accept":
+        trade_id = int(data[2])
+        success = await asyncio.get_event_loop().run_in_executor(
+            executor,
+            accept_trade_offer,
+            trade_id,
+            user.id
+        )
+        if success:
+            await query.edit_message_text(get_text("trade_accepted", lang))
+        else:
+            await query.edit_message_text(get_text("trade_failed", lang))
+    else:
+        await query.edit_message_text(get_text("invalid_trade_action", lang))
+
+
+async def handle_quick_action_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle quick action type selection."""
+    query = update.callback_query
+    await query.answer()
+
+    user = query.from_user
+    data = query.data.split(':')
+    action_type = data[1]
+
+    # Get player's language
+    lang = await asyncio.get_event_loop().run_in_executor(
+        executor,
+        get_player_language,
+        user.id
+    )
+
+    # Check if player has quick actions left
+    actions = await asyncio.get_event_loop().run_in_executor(
+        executor,
+        get_remaining_actions,
+        user.id
+    )
+
+    if actions['quick'] <= 0:
+        await query.message.reply_text(get_text("no_quick_actions", lang))
+        return
+
+    # Show district selection for the chosen action type
+    districts = await asyncio.get_event_loop().run_in_executor(
+        executor,
+        get_all_districts
+    )
+
+    keyboard = []
+    for district in districts:
+        district_id, name = district[0], district[1]
+        keyboard.append([InlineKeyboardButton(name, callback_data=f"quick_{action_type}:{district_id}")])
+
+    keyboard.append([InlineKeyboardButton(get_text("action_cancel", lang), callback_data="action_cancel")])
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    await query.message.edit_text(
+        get_text(f"select_district_for_{action_type}", lang),
+        reply_markup=reply_markup
+    )
+
+
+async def handle_district_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle district-related callbacks."""
+    query = update.callback_query
+    await query.answer()
+
+    user = query.from_user
+    lang = get_player_language(user.id)
+    data = query.data.split(':')
+    action = data[1]
+
+    if action == "view":
+        district_id = data[2]
+        await show_district_info(query, district_id)
+    else:
+        await query.edit_message_text(get_text("invalid_district_action", lang))
+
+
+async def handle_politician_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle politician-related callbacks."""
+    query = update.callback_query
+    await query.answer()
+
+    user = query.from_user
+    lang = get_player_language(user.id)
+    data = query.data.split(':')
+    action = data[1]
+
+    if action == "view":
+        politician_id = int(data[2])
+        await show_politician_info(query, politician_id)
+    else:
+        await query.edit_message_text(get_text("invalid_politician_action", lang))
+
+
+async def admin_resources_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle admin resource management callbacks."""
+    query = update.callback_query
+    await query.answer()
+
+    user = query.from_user
+    if user.id not in ADMIN_IDS:
+        await query.edit_message_text("Admin access required.")
+        return
+
+    lang = get_player_language(user.id)
+    data = query.data.split(':')
+    action = data[1]
+
+    if action == "list":
+        # Show list of players to manage resources
+        players = await asyncio.get_event_loop().run_in_executor(
+            executor,
+            list_all_players
+        )
+
+        keyboard = []
+        for player in players:
+            player_id, name = player[0], player[1] or "Unnamed"
+            keyboard.append([InlineKeyboardButton(name, callback_data=f"admin_resource_select:{player_id}")])
+
+        keyboard.append([InlineKeyboardButton("Cancel", callback_data="admin_cancel")])
+        reply_markup = InlineKeyboardMarkup(keyboard)
+
+        await query.edit_message_text(
+            "Select a player to manage their resources:",
+            reply_markup=reply_markup
+        )
+    else:
+        await query.edit_message_text("Invalid admin resource action.")
+
+
+async def admin_resource_change_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle admin resource change callbacks."""
+    query = update.callback_query
+    await query.answer()
+
+    user = query.from_user
+    if user.id not in ADMIN_IDS:
+        await query.edit_message_text("Admin access required.")
+        return
+
+    lang = get_player_language(user.id)
+    data = query.data.split(':')
+    action = data[1]
+
+    if action == "select":
+        player_id = int(data[2])
+        # Show resource type selection
+        keyboard = [
+            [InlineKeyboardButton("Influence", callback_data=f"admin_resource_type:{player_id}:influence")],
+            [InlineKeyboardButton("Resources", callback_data=f"admin_resource_type:{player_id}:resources")],
+            [InlineKeyboardButton("Information", callback_data=f"admin_resource_type:{player_id}:information")],
+            [InlineKeyboardButton("Force", callback_data=f"admin_resource_type:{player_id}:force")],
+            [InlineKeyboardButton("Cancel", callback_data="admin_cancel")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+
+        await query.edit_message_text(
+            "Select resource type to modify:",
+            reply_markup=reply_markup
+        )
+    elif action == "type":
+        player_id = int(data[2])
+        resource_type = data[3]
+        context.user_data['admin_resource_player'] = player_id
+        context.user_data['admin_resource_type'] = resource_type
+
+        await query.edit_message_text(
+            f"Enter amount to change {resource_type} (positive to add, negative to subtract):"
+        )
+        return "WAITING_ADMIN_RESOURCE_AMOUNT"
+    else:
+        await query.edit_message_text("Invalid admin resource change action.")
 
 
 def register_callbacks(application):

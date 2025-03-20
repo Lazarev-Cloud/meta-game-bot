@@ -207,3 +207,68 @@ def get_active_politicians(district_id=None):
     except Exception as e:
         logger.error(f"Error getting active politicians: {e}")
         return []
+
+
+def get_politician_abilities(politician_id, player_id, lang="en"):
+    """Get available abilities for a politician."""
+    try:
+        conn = sqlite3.connect('belgrade_game.db')
+        cursor = conn.cursor()
+
+        # Get politician's abilities
+        cursor.execute(
+            """
+            SELECT ability_id, name, description, cost, cooldown_cycles
+            FROM politician_abilities
+            WHERE politician_id = ?
+            """,
+            (politician_id,)
+        )
+        abilities = cursor.fetchall()
+
+        # Get last ability usage
+        cursor.execute(
+            """
+            SELECT ability_id, last_used
+            FROM ability_usage
+            WHERE politician_id = ? AND player_id = ?
+            """,
+            (politician_id, player_id)
+        )
+        last_usage = {row[0]: row[1] for row in cursor.fetchall()}
+
+        # Get current cycle
+        from game.actions import get_current_cycle
+        current_cycle = get_current_cycle()
+
+        result = []
+        for ability in abilities:
+            ability_id, name, description, cost, cooldown = ability
+            cost = eval(cost)  # Convert string representation to dict
+            
+            # Check if ability is available
+            is_available = True
+            cycles_remaining = 0
+            
+            if ability_id in last_usage:
+                last_used = last_usage[ability_id]
+                cycles_since_use = (current_cycle - last_used) % 2  # Assuming 2 cycles per day
+                if cycles_since_use < cooldown:
+                    is_available = False
+                    cycles_remaining = cooldown - cycles_since_use
+
+            result.append({
+                'id': ability_id,
+                'name': name,
+                'description': description,
+                'cost': cost,
+                'is_available': is_available,
+                'cycles_remaining': cycles_remaining
+            })
+
+        conn.close()
+        return result
+
+    except Exception as e:
+        logger.error(f"Error getting politician abilities: {e}")
+        return None

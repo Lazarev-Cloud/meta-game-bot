@@ -18,7 +18,7 @@ from db.queries import (
     get_remaining_actions, update_action_counts, get_news,
     get_player_districts, add_news, use_action, get_district_info,
     create_trade_offer, accept_trade_offer, get_all_districts,
-    update_base_resources, process_district_resources, reset_player_actions,
+    update_base_resources, distribute_district_resources, reset_player_actions,
     update_player_location, get_player_location
 )
 from game.districts import (
@@ -342,41 +342,6 @@ async def admin_help_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
     await update.message.reply_text(admin_help_text, parse_mode='Markdown')
 
 
-async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Display help message with available commands."""
-    user = update.effective_user
-
-    # Run database operation in thread pool
-    lang = await asyncio.get_event_loop().run_in_executor(
-        executor,
-        get_player_language,
-        user.id
-    )
-
-    # Check if the user is an admin
-    is_admin = user.id in ADMIN_IDS
-
-    # Basic commands for all users
-    help_text = (
-        f"<b>{get_text('help_title', lang)}</b>\n\n"
-        f"{get_text('help_basic', lang)}\n\n"
-        f"{get_text('help_action', lang)}\n\n"
-        f"{get_text('help_resource', lang)}\n\n"
-        f"{get_text('help_political', lang)}\n\n"
-    )
-
-    # Add admin hint for admins
-    if is_admin:
-        help_text += (
-            f"<b>{get_text('admin_commands', lang, default='Admin Commands')}:</b>\n"
-            f"{get_text('admin_help_hint', lang, default='Use /admin_help to see all admin commands.')}\n\n"
-        )
-
-    help_text += get_text('help_footer', lang)
-
-    await update.message.reply_text(help_text, parse_mode='HTML')
-
-
 @db_transaction
 def list_all_players(conn):
     """List all registered players from the database."""
@@ -439,26 +404,6 @@ async def admin_list_players(update: Update, context: ContextTypes.DEFAULT_TYPE)
     except Exception as e:
         logger.error(f"Error in admin_list_players: {e}")
         await update.message.reply_text(get_text("admin_error", lang, error=str(e)))
-
-
-@db_transaction
-def reset_player_actions(conn, player_id):
-    """Reset a player's available actions."""
-    cursor = conn.cursor()
-    now = datetime.datetime.now().isoformat()
-
-    # Check if player exists
-    cursor.execute("SELECT player_id FROM players WHERE player_id = ?", (player_id,))
-    if not cursor.fetchone():
-        return False
-
-    # Reset actions
-    cursor.execute(
-        "UPDATE players SET main_actions_left = 1, quick_actions_left = 2, last_action_refresh = ? WHERE player_id = ?",
-        (now, player_id)
-    )
-
-    return cursor.rowcount > 0
 
 
 @db_transaction
@@ -1884,7 +1829,7 @@ async def process_cycle_results():
             # Process district resources
             await asyncio.get_event_loop().run_in_executor(
                 executor,
-                process_district_resources,
+                distribute_district_resources,
                 player_id
             )
             
@@ -2183,3 +2128,37 @@ async def get_location_command(update: Update, context: ContextTypes.DEFAULT_TYP
             await update.message.reply_text(get_text("no_location_set", lang))
     else:
         await update.message.reply_text(get_text("no_location_set", lang))
+
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Display help message with available commands."""
+    user = update.effective_user
+
+    # Run database operation in thread pool
+    lang = await asyncio.get_event_loop().run_in_executor(
+        executor,
+        get_player_language,
+        user.id
+    )
+
+    # Check if the user is an admin
+    is_admin = user.id in ADMIN_IDS
+
+    # Basic commands for all users
+    help_text = (
+        f"<b>{get_text('help_title', lang)}</b>\n\n"
+        f"{get_text('help_basic', lang)}\n\n"
+        f"{get_text('help_action', lang)}\n\n"
+        f"{get_text('help_resource', lang)}\n\n"
+        f"{get_text('help_political', lang)}\n\n"
+    )
+
+    # Add admin hint for admins
+    if is_admin:
+        help_text += (
+            f"<b>{get_text('admin_commands', lang, default='Admin Commands')}:</b>\n"
+            f"{get_text('admin_help_hint', lang, default='Use /admin_help to see all admin commands.')}\n\n"
+        )
+
+    help_text += get_text('help_footer', lang)
+
+    await update.message.reply_text(help_text, parse_mode='HTML')
