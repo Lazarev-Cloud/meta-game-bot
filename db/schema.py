@@ -12,8 +12,45 @@ def setup_database():
 
         # Check if database is already set up
         cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='districts'")
-        if cursor.fetchone():
-            logger.info("Database already exists, skipping setup")
+        tables_exist = cursor.fetchone() is not None
+
+        if tables_exist:
+            # Check if coordinated_actions tables exist
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='coordinated_actions'")
+            if not cursor.fetchone():
+                logger.info("Creating missing coordinated_actions tables")
+                # Create CoordinatedActions table
+                cursor.execute('''
+                CREATE TABLE IF NOT EXISTS coordinated_actions (
+                    action_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    initiator_id INTEGER,
+                    action_type TEXT,
+                    target_type TEXT,
+                    target_id TEXT,
+                    resources_used TEXT,
+                    timestamp TEXT,
+                    cycle TEXT,
+                    status TEXT DEFAULT 'open',
+                    expires_at TEXT,
+                    FOREIGN KEY (initiator_id) REFERENCES players (player_id)
+                )
+                ''')
+
+                # Create CoordinatedActionParticipants table
+                cursor.execute('''
+                CREATE TABLE IF NOT EXISTS coordinated_action_participants (
+                    action_id INTEGER,
+                    player_id INTEGER,
+                    resources_used TEXT,
+                    joined_at TEXT,
+                    FOREIGN KEY (action_id) REFERENCES coordinated_actions (action_id),
+                    FOREIGN KEY (player_id) REFERENCES players (player_id)
+                )
+                ''')
+                conn.commit()
+                logger.info("Coordinated actions tables created")
+            else:
+                logger.info("Database already exists, skipping setup")
             conn.close()
             return
 
@@ -112,35 +149,6 @@ def setup_database():
             target_player_id INTEGER DEFAULT NULL,
             is_fake BOOLEAN DEFAULT 0,
             FOREIGN KEY (target_player_id) REFERENCES players (player_id)
-        )
-        ''')
-
-        # Create CoordinatedActions table
-        cursor.execute('''
-        CREATE TABLE IF NOT EXISTS coordinated_actions (
-            action_id INTEGER PRIMARY KEY AUTOINCREMENT,
-            initiator_id INTEGER,
-            action_type TEXT,
-            target_type TEXT,
-            target_id TEXT,
-            resources_used TEXT,
-            timestamp TEXT,
-            cycle TEXT,
-            status TEXT DEFAULT 'open',
-            expires_at TEXT,
-            FOREIGN KEY (initiator_id) REFERENCES players (player_id)
-        )
-        ''')
-
-        # Create CoordinatedActionParticipants table
-        cursor.execute('''
-        CREATE TABLE IF NOT EXISTS coordinated_action_participants (
-            action_id INTEGER,
-            player_id INTEGER,
-            resources_used TEXT,
-            joined_at TEXT,
-            FOREIGN KEY (action_id) REFERENCES coordinated_actions (action_id),
-            FOREIGN KEY (player_id) REFERENCES players (player_id)
         )
         ''')
 

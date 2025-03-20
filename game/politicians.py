@@ -26,6 +26,40 @@ def get_politician_by_name(name):
         return None
 
 
+def get_politician_by_id(politician_id):
+    """Find a politician by ID."""
+    try:
+        conn = sqlite3.connect('belgrade_game.db')
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT politician_id, name, role, ideology_score, district_id, influence, friendliness, is_international, description FROM politicians WHERE politician_id = ?",
+            (politician_id,)
+        )
+        politician_tuple = cursor.fetchone()
+        conn.close()
+
+        if not politician_tuple:
+            return None
+            
+        # Convert tuple to dictionary
+        politician = {
+            "politician_id": politician_tuple[0],
+            "name": politician_tuple[1],
+            "role": politician_tuple[2],
+            "ideology_score": politician_tuple[3],
+            "district_id": politician_tuple[4],
+            "influence": politician_tuple[5],
+            "friendliness": politician_tuple[6],
+            "is_international": politician_tuple[7],
+            "description": politician_tuple[8]
+        }
+        
+        return politician
+    except Exception as e:
+        logger.error(f"Error finding politician by ID: {e}")
+        return None
+
+
 def get_politician_relationship(politician_id, player_id):
     """Get the relationship status between a politician and a player."""
     try:

@@ -52,13 +52,44 @@ async def generate_text_map():
 
 
 def get_district_by_name(name):
-    """Find a district by name (case-insensitive)."""
-    districts = get_all_districts()
-    for district in districts:
-        district_id, district_name, *_ = district
-        if district_name.lower() == name.lower():
-            return district
-    return None
+    """Get district by name."""
+    import sqlite3
+    conn = sqlite3.connect('belgrade_game.db')
+    cursor = conn.cursor()
+    
+    cursor.execute("SELECT * FROM districts WHERE name LIKE ?", (f"%{name}%",))
+    district = cursor.fetchone()
+    
+    conn.close()
+    return district
+
+
+def get_district_by_id(district_id):
+    """Get district by ID."""
+    import sqlite3
+    conn = sqlite3.connect('belgrade_game.db')
+    cursor = conn.cursor()
+    
+    cursor.execute("SELECT district_id, name, description, influence_resource, resources_resource, information_resource, force_resource FROM districts WHERE district_id = ?", (district_id,))
+    district_tuple = cursor.fetchone()
+    
+    conn.close()
+    
+    if not district_tuple:
+        return None
+        
+    # Convert tuple to dictionary
+    district = {
+        "district_id": district_tuple[0],
+        "name": district_tuple[1],
+        "description": district_tuple[2],
+        "influence_resource": district_tuple[3],
+        "resources_resource": district_tuple[4],
+        "information_resource": district_tuple[5],
+        "force_resource": district_tuple[6]
+    }
+    
+    return district
 
 
 def get_control_status_text(control_points, lang="en"):

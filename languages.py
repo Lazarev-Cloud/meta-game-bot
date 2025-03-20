@@ -15,13 +15,50 @@ TRANSLATIONS = {
         "operation_cancelled": "Operation cancelled.",
         "not_registered": "You are not registered. Use /start to begin the game.",
 
+        # General terms
+        "id": "ID",
+        "name": "Имя",
+        "username": "Имя пользователя",
+        "resources": "Ресурсы",
+        
+        # Admin command descriptions
+        "admin_resources_desc": "Добавить ресурсы игроку",
+        "admin_control_desc": "Установить контроль над районом",
+        "admin_ideology_desc": "Установить идеологический счет игрока (-5 до +5)",
+        "admin_list_desc": "Список всех зарегистрированных игроков",
+        "admin_reset_desc": "Сбросить доступные действия игрока",
+        "admin_reset_all_desc": "Сбросить доступные действия всех игроков",
+
         # Help and documentation
         "help_title": "Belgrade Game Command Guide",
         "help_basic": "*Basic Commands:*\n• /start - Begin the game and register your character\n• /help - Display this command list\n• /status - Check your resources and district control\n• /map - View the current control map\n• /time - Show current game cycle and time until next\n• /news - Display recent news\n• /language - Change interface language",
-        "help_action": "*Action Commands:*\n• /action - Submit a main action (influence, attack, defense)\n• /quick_action - Submit a quick action (recon, spread info, support)\n• /cancel_action - Cancel your last pending action\n• /actions_left - Check your remaining actions\n• /view_district [district] - View information about a district",
+        "help_action": "*Action Commands:*\n• /action - Submit a main action (influence, attack, defense)\n• /quick_action - Submit a quick action (recon, spread info, support)\n• /cancel_action - Cancel your last pending action\n• /join [action_id] [type] [target] [id] - Join a coordinated action\n• /coordinated_actions - List all open coordinated actions\n• /actions_left - Check your remaining actions\n• /view_district [district] - View information about a district",
         "help_resource": "*Resource Commands:*\n• /resources - View your current resources\n• /convert_resource [type] [amount] - Convert resources\n• /check_income - Check your expected resource income",
         "help_political": "*Political Commands:*\n• /politicians - List available politicians\n• /politician_status [name] - Get information about a specific politician\n• /international - Information about international politicians",
         "help_footer": "For detailed game rules, refer to the game document.",
+
+        # Join command
+        "join_usage": "Usage: /join [action_id] [action_type] [target_type] [target_id] [resources...]\nExample: /join 123 attack district vračar influence force",
+        "action_joined": "You have joined the {action_type} action using {resources}.",
+        "invalid_action_type": "Invalid action type. Use 'attack' or 'defense'.",
+        "invalid_arguments": "Invalid arguments. Check your command syntax and try again.",
+        
+        # Coordinated actions
+        "coordinated_actions_title": "Open Coordinated Actions",
+        "no_coordinated_actions": "There are no open coordinated actions to join at this time.",
+        "action_id": "Action ID",
+        "action_type": "Action Type",
+        "target": "Target",
+        "initiator": "Initiated by",
+        "participants": "Participants",
+        "join_command": "Join with",
+        "coordinated_actions_help": "Use the /join command with the suggested format to join a coordinated action.\nCoordinated actions are more powerful when multiple players join them.",
+        "select_action_mode": "Do you want to perform a regular {action_type} action or create a coordinated action that others can join?",
+        "action_regular": "Regular Action",
+        "action_coordinated": "Create Coordinated Action",
+        "action_submit": "Submit Action",
+        "no_resources_selected": "You need to select at least one resource for this action.",
+        "coordinated_action_created": "You have created a coordinated {action_type} action targeting {target_name} using {resources}.\n\nAction ID: {action_id}\n\nOther players can join this action using the /join command.",
 
         # Status information
         "status_title": "Status of {character_name}",
@@ -53,7 +90,7 @@ TRANSLATIONS = {
         "no_news": "There is no news to report at this time.",
 
         # Actions
-        "no_main_actions": "You have no main actions left. Actions refresh every 3 hours or at the start of a new cycle.",
+        "no_main_actions": "You have no main actions left. Please wait for the next cycle.",
         "no_quick_actions": "You have no quick actions left. Actions refresh every 3 hours or at the start of a new cycle.",
         "select_action_type": "Select the type of main action you want to perform:",
         "select_quick_action": "Select the type of quick action you want to perform:",
@@ -143,8 +180,12 @@ TRANSLATIONS = {
 
         # Resources used in actions
         "select_resources": "Select resources to use for {action_type} action in {district_name}:",
+        "selected": "Selected",
         "insufficient_resources": "You don't have enough {resource_type} resources. Action cancelled.",
         "action_submitted": "Your {action_type} action in {target_name} has been submitted using {resources}. Results will be processed at the end of the cycle.",
+        "action_success": "Your {type} action in {target} has been submitted. Results will be processed at the end of the cycle.",
+        "action_coordinated_created": "You've created a coordinated {type} action targeting {target}. Action ID: {id}. Other players can join using /join.",
+        "no_main_actions": "You have no main actions left. Please wait for the next cycle.",
         "info_spreading": "Your information has been spread through the news network. It will appear in the next news cycle.",
         "enter_info_content": "What information do you want to spread? Please type your message:",
         "invalid_info_content": "Please provide valid information content.",
@@ -183,16 +224,56 @@ TRANSLATIONS = {
         "operation_cancelled": "Операция отменена.",
         "not_registered": "Вы не зарегистрированы. Используйте /start, чтобы начать игру.",
 
+        # General terms
+        "id": "ID",
+        "name": "Имя",
+        "username": "Имя пользователя",
+        "resources": "Ресурсы",
+        "influence": "Влияние",
+        "relationship": "Отношения",
+        "compatibility": "Совместимость",
+        
+        # Admin command descriptions
+        "admin_resources_desc": "Добавить ресурсы игроку",
+        "admin_control_desc": "Установить контроль над районом",
+        "admin_ideology_desc": "Установить идеологический счет игрока (-5 до +5)",
+        "admin_list_desc": "Список всех зарегистрированных игроков",
+        "admin_reset_desc": "Сбросить доступные действия игрока",
+        "admin_reset_all_desc": "Сбросить доступные действия всех игроков",
+
         # Help and documentation
-        "help_title": "Руководство по командам Белградской Игры",
+        "help_title": "Руководство по командам Игры Белград",
         "help_basic": "*Основные команды:*\n• /start - Начать игру и зарегистрировать персонажа\n• /help - Показать список команд\n• /status - Проверить ресурсы и контроль районов\n• /map - Просмотреть текущую карту контроля\n• /time - Показать текущий игровой цикл и время до следующего\n• /news - Показать последние новости\n• /language - Изменить язык интерфейса",
-        "help_action": "*Команды действий:*\n• /action - Подать основную заявку (влияние, атака, защита)\n• /quick_action - Подать быструю заявку (разведка, информация, поддержка)\n• /cancel_action - Отменить последнюю заявку\n• /actions_left - Проверить оставшиеся заявки\n• /view_district [район] - Просмотр информации о районе",
+        "help_action": "*Команды действий:*\n• /action - Подать основную заявку (влияние, атака, защита)\n• /quick_action - Подать быструю заявку (разведка, информация, поддержка)\n• /cancel_action - Отменить последнюю заявку\n• /join [action_id] [тип] [цель] [id] - Присоединиться к координированному действию\n• /coordinated_actions - Список всех открытых координированных действий\n• /actions_left - Проверить оставшиеся заявки\n• /view_district [район] - Просмотр информации о районе",
         "help_resource": "*Команды ресурсов:*\n• /resources - Просмотр имеющихся ресурсов\n• /convert_resource [тип] [количество] - Конвертация ресурсов\n• /check_income - Проверка ожидаемого прихода ресурсов",
         "help_political": "*Политические команды:*\n• /politicians - Список доступных политиков\n• /politician_status [имя] - Информация о конкретном политике\n• /international - Информация о международных политиках",
-        "help_footer": "Для подробных правил игры обратитесь к игровому документу.",
+        "help_footer": "Подробные правила игры см. в документе игры.",
+
+        # Join command
+        "join_usage": "Использование: /join [action_id] [action_type] [target_type] [target_id] [ресурсы...]\nПример: /join 123 attack district vračar influence force",
+        "action_joined": "Вы присоединились к действию {action_type}, используя {resources}.",
+        "invalid_action_type": "Неверный тип действия. Используйте 'attack' или 'defense'.",
+        "invalid_arguments": "Неверные аргументы. Проверьте синтаксис команды и попробуйте еще раз.",
+        
+        # Coordinated actions
+        "coordinated_actions_title": "Открытые координированные действия",
+        "no_coordinated_actions": "В данный момент нет открытых координированных действий для присоединения.",
+        "action_id": "ID действия",
+        "action_type": "Тип действия",
+        "target": "Цель",
+        "initiator": "Инициатор",
+        "participants": "Участники",
+        "join_command": "Присоединиться",
+        "coordinated_actions_help": "Используйте команду /join с предложенным форматом для присоединения к координированному действию.\nКоординированные действия становятся более эффективными, когда к ним присоединяются несколько игроков.",
+        "select_action_mode": "Хотите выполнить обычное действие {action_type} или создать координированное действие, к которому могут присоединиться другие?",
+        "action_regular": "Обычное действие",
+        "action_coordinated": "Создать координированное действие",
+        "action_submit": "Подтвердить действие",
+        "no_resources_selected": "Вам нужно выбрать хотя бы один ресурс для этого действия.",
+        "coordinated_action_created": "Вы создали координированное действие {action_type} нацеленное на {target_name}, используя {resources}.\n\nID действия: {action_id}\n\nДругие игроки могут присоединиться к этому действию, используя команду /join.",
 
         # Status information
-        "status_title": "Статус персонажа {character_name}",
+        "status_title": "Статус {character_name}",
         "status_ideology": "Идеология: {ideology} ({score})",
         "status_resources": "*Ресурсы:*\n🔵 Влияние: {influence}\n💰 Ресурсы: {resources}\n🔍 Информация: {information}\n👊 Сила: {force}",
         "status_actions": "*Оставшиеся действия:*\nОсновные заявки: {main}\nБыстрые заявки: {quick}",
@@ -221,7 +302,7 @@ TRANSLATIONS = {
         "no_news": "На данный момент новостей нет.",
 
         # Actions
-        "no_main_actions": "У вас не осталось основных заявок. Заявки обновляются каждые 3 часа или в начале нового цикла.",
+        "no_main_actions": "У вас не осталось основных заявок. Пожалуйста, дождитесь следующего цикла.",
         "no_quick_actions": "У вас не осталось быстрых заявок. Заявки обновляются каждые 3 часа или в начале нового цикла.",
         "select_action_type": "Выберите тип основной заявки, которую хотите выполнить:",
         "select_quick_action": "Выберите тип быстрой заявки, которую хотите выполнить:",
@@ -311,8 +392,12 @@ TRANSLATIONS = {
 
         # Resources used in actions
         "select_resources": "Выберите ресурсы для {action_type} действия в районе {district_name}:",
+        "selected": "Выбрано",
         "insufficient_resources": "У вас недостаточно ресурсов типа {resource_type}. Действие отменено.",
         "action_submitted": "Ваше действие {action_type} в {target_name} было подано с использованием {resources}. Результаты будут обработаны в конце цикла.",
+        "action_success": "Ваше действие {type} в {target} было отправлено. Результаты будут обработаны в конце цикла.",
+        "action_coordinated_created": "Вы создали координированное действие {type} нацеленное на {target}. ID действия: {id}. Другие игроки могут присоединиться, используя /join.",
+        "no_main_actions": "У вас не осталось основных действий. Пожалуйста, дождитесь следующего цикла.",
         "info_spreading": "Ваша информация распространена через новостную сеть. Она появится в следующем новостном цикле.",
         "enter_info_content": "Какую информацию вы хотите распространить? Пожалуйста, напишите сообщение:",
         "invalid_info_content": "Пожалуйста, предоставьте корректное содержание информации.",

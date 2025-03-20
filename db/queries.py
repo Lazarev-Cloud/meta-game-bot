@@ -13,12 +13,14 @@ def db_transaction(func):
     @wraps(func)
     def wrapper(*args, **kwargs):
         conn = None
-        max_retries = 3
+        max_retries = 5
         retry_delay = 0.5  # seconds
 
         for attempt in range(max_retries):
             try:
-                conn = sqlite3.connect('belgrade_game.db', timeout=10.0)  # Increased timeout
+                conn = sqlite3.connect('belgrade_game.db', timeout=20.0)  # Increased timeout
+                # Enable WAL mode for better concurrency
+                conn.execute('PRAGMA journal_mode=WAL')
                 result = func(conn, *args, **kwargs)
                 conn.commit()
                 return result
@@ -33,7 +35,7 @@ def db_transaction(func):
                     continue
 
                 logger.error(f"Database error in {func.__name__}: {e}")
-                raise
+                return None  # Return None instead of raising to avoid crashes
             finally:
                 if conn:
                     conn.close()

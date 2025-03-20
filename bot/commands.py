@@ -7,12 +7,14 @@ from telegram.ext import (
     ConversationHandler, ContextTypes
 )
 from config import ADMIN_IDS
-from languages import get_text, get_cycle_name, get_resource_name
+from languages import get_text, get_cycle_name, get_resource_name, get_action_name
 from db.queries import (
     register_player, set_player_name, get_player,
     get_player_language, get_player_resources, update_player_resources,
     get_remaining_actions, update_action_counts, get_news,
-    get_player_districts, add_news, use_action, get_district_info
+    get_player_districts, add_news, use_action, get_district_info,
+    join_coordinated_action, get_open_coordinated_actions,
+    get_coordinated_action_participants
 )
 from game.districts import (
     generate_text_map, format_district_info, get_district_by_name
@@ -21,7 +23,8 @@ from game.politicians import (
     format_politicians_list, format_politician_info, get_politician_by_name
 )
 from game.actions import (
-    process_game_cycle, get_current_cycle, get_cycle_deadline, get_cycle_results_time
+    process_game_cycle, get_current_cycle, get_cycle_deadline, get_cycle_results_time,
+    ACTION_ATTACK, ACTION_DEFENSE
 )
 
 logger = logging.getLogger(__name__)
@@ -1224,6 +1227,64 @@ async def join_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(get_text("action_error", lang))
 
 
+async def list_coordinated_actions_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """List all open coordinated actions that players can join."""
+    user = update.effective_user
+    lang = get_player_language(user.id)
+
+    # Check if player is registered
+    player = get_player(user.id)
+    if not player:
+        await update.message.reply_text(get_text("not_registered", lang))
+        return
+
+    # Get all open coordinated actions
+    open_actions = get_open_coordinated_actions()
+    
+    if not open_actions:
+        await update.message.reply_text(get_text("no_coordinated_actions", lang))
+        return
+    
+    # Format actions
+    response = f"*{get_text('coordinated_actions_title', lang)}*\n\n"
+    
+    for action in open_actions:
+        action_id = action[0]
+        initiator_name = action[8] or get_text("unnamed", lang)
+        action_type_raw = action[2]
+        action_type = get_action_name(action_type_raw, lang)
+        target_type = action[3]
+        target_id = action[4]
+        
+        # Get target name based on type
+        if target_type == "district":
+            from game.districts import get_district_by_id
+            target_info = get_district_by_id(target_id)
+            target_name = target_info[1] if target_info else target_id
+        elif target_type == "politician":
+            from game.politicians import get_politician_by_id
+            target_info = get_politician_by_id(target_id)
+            target_name = target_info[1] if target_info else target_id
+        else:
+            target_name = target_id
+        
+        # Get participants
+        participants = get_coordinated_action_participants(action_id)
+        participant_count = len(participants)
+        
+        # Format action entry
+        response += f"*{get_text('action_id', lang)}: {action_id}*\n"
+        response += f"{get_text('action_type', lang)}: {action_type}\n"
+        response += f"{get_text('target', lang)}: {target_name} ({target_type})\n"
+        response += f"{get_text('initiator', lang)}: {initiator_name}\n"
+        response += f"{get_text('participants', lang)}: {participant_count}\n"
+        response += f"{get_text('join_command', lang)}: `/join {action_id} {action_type_raw} {target_type} {target_id}`\n\n"
+    
+    response += get_text("coordinated_actions_help", lang)
+    
+    await update.message.reply_text(response, parse_mode='Markdown')
+
+
 def register_commands(application):
     """Register all command handlers."""
     # Create conversation handler for /start command
@@ -1249,6 +1310,8 @@ def register_commands(application):
     application.add_handler(CommandHandler("quick_action", quick_action_command))
     application.add_handler(CommandHandler("cancel_action", cancel_action_command))
     application.add_handler(CommandHandler("actions_left", actions_left_command))
+    application.add_handler(CommandHandler("join", join_command))
+    application.add_handler(CommandHandler("coordinated_actions", list_coordinated_actions_command))
 
     # District and politician handlers
     application.add_handler(CommandHandler("view_district", view_district_command))
