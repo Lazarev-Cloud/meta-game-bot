@@ -430,17 +430,46 @@ def get_remaining_actions(conn, player_id):
 def use_action(conn, player_id, is_main_action):
     """Decrement action count when player uses an action."""
     cursor = conn.cursor()
+
+    # Log what kind of action is being used
+    logger.info(f"Player {player_id} using {'main' if is_main_action else 'quick'} action")
+
     if is_main_action:
+        # First check if player has main actions left
+        cursor.execute(
+            "SELECT main_actions_left FROM players WHERE player_id = ?",
+            (player_id,)
+        )
+        actions_left = cursor.fetchone()
+        if not actions_left or actions_left[0] <= 0:
+            logger.warning(f"Player {player_id} has no main actions left")
+            return False
+
         cursor.execute(
             "UPDATE players SET main_actions_left = main_actions_left - 1 WHERE player_id = ? AND main_actions_left > 0",
             (player_id,)
         )
     else:
+        # First check if player has quick actions left
+        cursor.execute(
+            "SELECT quick_actions_left FROM players WHERE player_id = ?",
+            (player_id,)
+        )
+        actions_left = cursor.fetchone()
+        if not actions_left or actions_left[0] <= 0:
+            logger.warning(f"Player {player_id} has no quick actions left")
+            return False
+
         cursor.execute(
             "UPDATE players SET quick_actions_left = quick_actions_left - 1 WHERE player_id = ? AND quick_actions_left > 0",
             (player_id,)
         )
-    return cursor.rowcount > 0
+
+    # Log the result
+    result = cursor.rowcount > 0
+    logger.info(f"Action usage result for player {player_id}: {result}")
+
+    return result
 
 
 @db_transaction
@@ -717,3 +746,38 @@ def cleanup_expired_coordinated_actions(conn):
         close_coordinated_action(conn, action[0])
     
     return len(expired_actions)
+
+
+@db_transaction
+def get_coordinated_action_details(conn, action_id):
+    """Get detailed information about a coordinated action."""
+    cursor = conn.cursor()
+    now = datetime.datetime.now().isoformat()
+
+    cursor.execute(
+        """
+        SELECT action_id, initiator_id, action_type, target_type, 
+               target_id, resources_used, timestamp, cycle, status
+        FROM coordinated_actions
+        WHERE action_id = ? AND status = 'open' AND expires_at > ?
+        """,
+        (action_id, now)
+    )
+
+    action = cursor.fetchone()
+
+    if not action:
+        return None
+
+    # Convert to dictionary
+    return {
+        'action_id': action[0],
+        'initiator_id': action[1],
+        'action_type': action[2],
+        'target_type': action[3],
+        'target_id': action[4],
+        'resources_used': json.loads(action[5]),
+        'timestamp': action[6],
+        'cycle': action[7],
+        'status': action[8]
+    }

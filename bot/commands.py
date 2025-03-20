@@ -273,7 +273,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"<b>{get_text('help_title', lang)}</b>\n\n"
         f"{get_text('help_basic', lang)}\n\n"
         f"{get_text('help_action', lang)}\n\n"
-        f"{get_text('help_resource', lang)}\n\n"
+        f"{get_text('help_resource', lang, default='*Resource Commands:*\n• /resources - View your current resources\n• /convert_resource [type] [amount] - Convert resources\n• /exchange - Interactive resource exchange menu\n• /check_income - Check your expected resource income')}\n\n"
         f"{get_text('help_political', lang)}\n\n"
     )
 
@@ -639,6 +639,7 @@ async def action_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton(get_text("action_influence", lang), callback_data=f"action_type:influence")],
         [InlineKeyboardButton(get_text("action_attack", lang), callback_data=f"action_type:attack")],
         [InlineKeyboardButton(get_text("action_defense", lang), callback_data=f"action_type:defense")],
+        [InlineKeyboardButton(get_text("action_join", lang, default="Join"), callback_data=f"action_type:join")],
         [InlineKeyboardButton(get_text("action_cancel", lang), callback_data="action_cancel")]
     ]
 
@@ -906,15 +907,17 @@ async def resources_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(get_text("not_registered", lang))
         return
 
+    # Resource management
     resources_text = (
         f"*{get_text('resources_title', lang)}*\n\n"
         f"🔵 {get_resource_name('influence', lang)}: {resources['influence']}\n"
         f"💰 {get_resource_name('resources', lang)}: {resources['resources']}\n"
         f"🔍 {get_resource_name('information', lang)}: {resources['information']}\n"
         f"👊 {get_resource_name('force', lang)}: {resources['force']}\n\n"
-        f"{get_text('resources_guide', lang)}"
+        f"{get_text('resources_guide', lang)}\n\n"
+        f"*{get_text('resources_exchange_help', lang, default='Resource Exchange')}*\n"
+        f"{get_text('resources_exchange_info', lang, default='Use /exchange for an interactive resource exchange interface.')}"
     )
-
     await update.message.reply_text(resources_text, parse_mode='Markdown')
 
 
@@ -1143,8 +1146,10 @@ async def admin_process_cycle(update: Update, context: ContextTypes.DEFAULT_TYPE
     await update.message.reply_text(get_text("admin_cycle_processed", lang))
 
 
+# In bot/commands.py - Modify the join_command function
+
 async def join_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Join a coordinated action."""
+    """Show available coordinated actions to join via buttons."""
     user = update.effective_user
     lang = get_player_language(user.id)
 
@@ -1154,77 +1159,138 @@ async def join_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(get_text("not_registered", lang))
         return
 
-    # Check arguments
-    args = context.args
-    if len(args) < 4:
-        await update.message.reply_text(get_text("join_usage", lang))
+    # Get all open coordinated actions
+    open_actions = get_open_coordinated_actions()
+
+    if not open_actions:
+        await update.message.reply_text(get_text("no_coordinated_actions", lang))
         return
 
-    try:
-        action_id = int(args[0])
-        action_type = args[1].lower()
-        target_type = args[2].lower()
-        target_id = args[3]
-        resources_list = args[4:] if len(args) > 4 else []
+    # Create buttons for each coordinated action
+    keyboard = []
 
-        # Validate action type
-        if action_type not in [ACTION_ATTACK, ACTION_DEFENSE]:
-            await update.message.reply_text(get_text("invalid_action_type", lang))
-            return
+    for action in open_actions:
+        action_id = action[0]
+        action_type_raw = action[2]
+        action_type = get_action_name(action_type_raw, lang)
+        target_type = action[3]
+        target_id = action[4]
 
-        # Parse resources
-        resources_dict = {}
-        for resource_type in resources_list:
-            if resource_type in resources_dict:
-                resources_dict[resource_type] += 1
-            else:
-                resources_dict[resource_type] = 1
-
-        # Check if player has the resources
-        player_resources = get_player_resources(user.id)
-        for resource_type, amount in resources_dict.items():
-            if player_resources.get(resource_type, 0) < amount:
-                await update.message.reply_text(
-                    get_text("insufficient_resources", lang, resource_type=get_resource_name(resource_type, lang))
-                )
-                return
-
-        # Check if player has main actions left
-        actions = get_remaining_actions(user.id)
-        if actions['main'] <= 0:
-            await update.message.reply_text(get_text("no_main_actions", lang))
-            return
-
-        # Join the coordinated action
-        success, message = join_coordinated_action(user.id, action_id, resources_dict)
-        
-        if success:
-            # Deduct resources
-            for resource_type, amount in resources_dict.items():
-                update_player_resources(user.id, resource_type, -amount)
-
-            # Use action
-            use_action(user.id, True)
-
-            # Format resources for display
-            resources_display = []
-            for resource_type, amount in resources_dict.items():
-                resources_display.append(f"{amount} {get_resource_name(resource_type, lang)}")
-            resources_text = ", ".join(resources_display)
-
-            await update.message.reply_text(
-                get_text("action_joined", lang,
-                         action_type=get_action_name(action_type, lang),
-                         resources=resources_text)
-            )
+        # Get target name based on type
+        if target_type == "district":
+            from game.districts import get_district_by_id
+            target_info = get_district_by_id(target_id)
+            target_name = target_info['name'] if target_info else target_id
+        elif target_type == "politician":
+            from game.politicians import get_politician_by_id
+            target_info = get_politician_by_id(target_id)
+            target_name = target_info['name'] if target_info else target_id
         else:
-            await update.message.reply_text(message)
+            target_name = target_id
 
-    except ValueError:
-        await update.message.reply_text(get_text("invalid_arguments", lang))
-    except Exception as e:
-        logger.error(f"Error in join_command: {e}")
-        await update.message.reply_text(get_text("action_error", lang))
+        button_text = f"{action_type} - {target_name} (ID: {action_id})"
+        callback_data = f"join_action:{action_id}:{action_type_raw}:{target_type}:{target_id}"
+
+        # Limit the callback_data to avoid error (Telegram has 64-byte limit)
+        if len(callback_data) > 60:
+            callback_data = f"join_action:{action_id}"
+
+        keyboard.append([InlineKeyboardButton(button_text, callback_data=callback_data)])
+
+    # Add cancel button
+    keyboard.append([InlineKeyboardButton(get_text("action_cancel", lang), callback_data="action_cancel")])
+
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    await update.message.reply_text(
+        get_text("coordinated_actions_title", lang),
+        reply_markup=reply_markup
+    )
+
+
+async def exchange_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Interactive resource exchange system using buttons."""
+    user = update.effective_user
+    lang = get_player_language(user.id)
+
+    # Check if player is registered
+    player = get_player(user.id)
+    if not player:
+        await update.message.reply_text(get_text("not_registered", lang))
+        return
+
+    # Get player's current resources
+    resources = get_player_resources(user.id)
+    if not resources:
+        await update.message.reply_text(get_text("not_registered", lang))
+        return
+
+    # Create buttons for resource exchange options
+    keyboard = []
+
+    # Resources → Influence (2:1)
+    if resources['resources'] >= 2:
+        keyboard.append([
+            InlineKeyboardButton(
+                f"2 {get_resource_name('resources', lang)} → 1 {get_resource_name('influence', lang)}",
+                callback_data="exchange:resources:influence:1"
+            )
+        ])
+
+    # Resources → Information (2:1)
+    if resources['resources'] >= 2:
+        keyboard.append([
+            InlineKeyboardButton(
+                f"2 {get_resource_name('resources', lang)} → 1 {get_resource_name('information', lang)}",
+                callback_data="exchange:resources:information:1"
+            )
+        ])
+
+    # Resources → Force (2:1)
+    if resources['resources'] >= 2:
+        keyboard.append([
+            InlineKeyboardButton(
+                f"2 {get_resource_name('resources', lang)} → 1 {get_resource_name('force', lang)}",
+                callback_data="exchange:resources:force:1"
+            )
+        ])
+
+    # Add larger exchanges if the player has enough resources
+    if resources['resources'] >= 4:
+        keyboard.append([
+            InlineKeyboardButton(
+                f"4 {get_resource_name('resources', lang)} → 2 {get_resource_name('influence', lang)}",
+                callback_data="exchange:resources:influence:2"
+            )
+        ])
+
+    if resources['resources'] >= 6:
+        keyboard.append([
+            InlineKeyboardButton(
+                f"6 {get_resource_name('resources', lang)} → 3 {get_resource_name('force', lang)}",
+                callback_data="exchange:resources:force:3"
+            )
+        ])
+
+    # Add cancel button
+    keyboard.append([InlineKeyboardButton(get_text("action_cancel", lang), callback_data="action_cancel")])
+
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    resource_text = (
+        f"*{get_text('resources_title', lang)}*\n\n"
+        f"🔵 {get_resource_name('influence', lang)}: {resources['influence']}\n"
+        f"💰 {get_resource_name('resources', lang)}: {resources['resources']}\n"
+        f"🔍 {get_resource_name('information', lang)}: {resources['information']}\n"
+        f"👊 {get_resource_name('force', lang)}: {resources['force']}\n\n"
+        f"{get_text('exchange_instructions', lang, default='Select a resource exchange option:')}"
+    )
+
+    await update.message.reply_text(
+        resource_text,
+        parse_mode='Markdown',
+        reply_markup=reply_markup
+    )
 
 
 async def list_coordinated_actions_command(update: Update, context: ContextTypes.DEFAULT_TYPE):

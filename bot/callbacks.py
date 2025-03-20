@@ -2,7 +2,14 @@ import logging
 import sqlite3
 
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
-from telegram.ext import CallbackQueryHandler, ContextTypes
+from telegram.ext import CallbackQueryHandler, ContextTypes, CommandHandler, ConversationHandler, MessageHandler, \
+    filters
+
+from bot.commands import cancel_handler, set_name_handler, receive_info_content, start_command, help_command, \
+    status_command, map_command, time_command, news_command, action_command, quick_action_command, actions_left_command, \
+    cancel_action_command, join_command, list_coordinated_actions_command, view_district_command, politicians_command, \
+    politician_status_command, international_command, resources_command, convert_resource_command, check_income_command, \
+    exchange_command, language_command
 from languages import get_text, get_player_language, set_player_language, get_action_name, get_resource_name
 from db.queries import (
     get_player_resources, update_player_resources,
@@ -125,6 +132,153 @@ async def show_resource_selection(query, action_type, district_id):
         )
 
 
+async def exchange_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle resource exchange."""
+    query = update.callback_query
+    user = query.from_user
+    lang = get_player_language(user.id)
+
+    await query.answer()
+
+    # Parse callback data
+    parts = query.data.split(":")
+    from_resource = parts[1]
+    to_resource = parts[2]
+    amount = int(parts[3])
+
+    # Calculate required resources
+    required_amount = amount * 2  # 2:1 exchange rate
+
+    # Check if player has enough resources
+    resources = get_player_resources(user.id)
+    if resources[from_resource] < required_amount:
+        await query.edit_message_text(
+            get_text("not_enough_resources", lang,
+                     needed=required_amount,
+                     available=resources[from_resource])
+        )
+        return
+
+    # Perform the exchange
+    update_player_resources(user.id, from_resource, -required_amount)
+    update_player_resources(user.id, to_resource, amount)
+
+    # Get updated resources
+    updated_resources = get_player_resources(user.id)
+
+    # Format response
+    exchange_text = get_text("conversion_success", lang,
+                             resources_used=required_amount,
+                             amount=amount,
+                             resource_type=get_resource_name(to_resource, lang))
+
+    resource_text = (
+        f"*{get_text('resources_title', lang)}*\n\n"
+        f"🔵 {get_resource_name('influence', lang)}: {updated_resources['influence']}\n"
+        f"💰 {get_resource_name('resources', lang)}: {updated_resources['resources']}\n"
+        f"🔍 {get_resource_name('information', lang)}: {updated_resources['information']}\n"
+        f"👊 {get_resource_name('force', lang)}: {updated_resources['force']}\n\n"
+        f"{exchange_text}"
+    )
+
+    # Create buttons for another exchange
+    keyboard = []
+
+    # Only show options that the player can afford
+    if updated_resources['resources'] >= 2:
+        keyboard.append([
+            InlineKeyboardButton(
+                f"{get_text('exchange_again', lang, default='Exchange Again')}",
+                callback_data="exchange_again"
+            )
+        ])
+
+    await query.edit_message_text(
+        resource_text,
+        parse_mode='Markdown',
+        reply_markup=InlineKeyboardMarkup(keyboard) if keyboard else None
+    )
+
+
+async def exchange_again_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle request to make another exchange."""
+    query = update.callback_query
+    user = query.from_user
+    lang = get_player_language(user.id)
+
+    await query.answer()
+
+    # Get player's current resources
+    resources = get_player_resources(user.id)
+
+    # Create buttons for resource exchange options
+    keyboard = []
+
+    # Resources → Influence (2:1)
+    if resources['resources'] >= 2:
+        keyboard.append([
+            InlineKeyboardButton(
+                f"2 {get_resource_name('resources', lang)} → 1 {get_resource_name('influence', lang)}",
+                callback_data="exchange:resources:influence:1"
+            )
+        ])
+
+    # Resources → Information (2:1)
+    if resources['resources'] >= 2:
+        keyboard.append([
+            InlineKeyboardButton(
+                f"2 {get_resource_name('resources', lang)} → 1 {get_resource_name('information', lang)}",
+                callback_data="exchange:resources:information:1"
+            )
+        ])
+
+    # Resources → Force (2:1)
+    if resources['resources'] >= 2:
+        keyboard.append([
+            InlineKeyboardButton(
+                f"2 {get_resource_name('resources', lang)} → 1 {get_resource_name('force', lang)}",
+                callback_data="exchange:resources:force:1"
+            )
+        ])
+
+    # Add larger exchanges if the player has enough resources
+    if resources['resources'] >= 4:
+        keyboard.append([
+            InlineKeyboardButton(
+                f"4 {get_resource_name('resources', lang)} → 2 {get_resource_name('influence', lang)}",
+                callback_data="exchange:resources:influence:2"
+            )
+        ])
+
+    if resources['resources'] >= 6:
+        keyboard.append([
+            InlineKeyboardButton(
+                f"6 {get_resource_name('resources', lang)} → 3 {get_resource_name('force', lang)}",
+                callback_data="exchange:resources:force:3"
+            )
+        ])
+
+    # Add cancel button
+    keyboard.append([InlineKeyboardButton(get_text("action_cancel", lang), callback_data="action_cancel")])
+
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    resource_text = (
+        f"*{get_text('resources_title', lang)}*\n\n"
+        f"🔵 {get_resource_name('influence', lang)}: {resources['influence']}\n"
+        f"💰 {get_resource_name('resources', lang)}: {resources['resources']}\n"
+        f"🔍 {get_resource_name('information', lang)}: {resources['information']}\n"
+        f"👊 {get_resource_name('force', lang)}: {resources['force']}\n\n"
+        f"{get_text('exchange_instructions', lang, default='Select a resource exchange option:')}"
+    )
+
+    await query.edit_message_text(
+        resource_text,
+        parse_mode='Markdown',
+        reply_markup=reply_markup
+    )
+
+
 async def process_quick_action(query, action_type, target_type, target_id):
     """Process a quick action such as reconnaissance or support."""
     user = query.from_user
@@ -171,21 +325,21 @@ async def process_quick_action(query, action_type, target_type, target_id):
             update_player_resources(user.id, resource_type, -resource_amount)
 
         # Use one quick action
-        use_action(user.id, False)  # False means it's a quick action
+        use_action(user.id, False)  # False means it's a quick action, not a main action
 
         # Add the action to the database
         if resource_type:
             resources_used = {resource_type: resource_amount}
         else:
             resources_used = {}
-            
+
         add_action(user.id, action_type, target_type, target_id, resources_used)
 
         # Show confirmation message
         await query.edit_message_text(
             get_text("action_success", lang,
-                    type=get_text(f"action_{action_type}", lang),
-                    target=target_name)
+                     type=get_action_name(f"action_{action_type}", lang),
+                     target=target_name)
         )
 
     except Exception as e:
@@ -496,37 +650,48 @@ async def process_politician_undermine(query, politician_id):
         await query.edit_message_text(get_text("action_error", lang))
 
 
-def register_callbacks(application):
-    """Register callback query handlers."""
-    # Language callback
-    application.add_handler(CallbackQueryHandler(language_selection_callback, pattern="^language:"))
-    
-    # Action callbacks
-    application.add_handler(CallbackQueryHandler(select_action_type_callback, pattern="^action_type:"))
-    application.add_handler(CallbackQueryHandler(handle_action_mode_selection, pattern="^action_(regular|coordinated):"))
-    application.add_handler(CallbackQueryHandler(district_selection_callback, pattern="^district_select:"))
-    application.add_handler(CallbackQueryHandler(resource_selection_callback, pattern="^resource:"))
-    application.add_handler(CallbackQueryHandler(submit_action_callback, pattern="^submit:"))
-    application.add_handler(CallbackQueryHandler(cancel_action_callback, pattern="^action_cancel$"))
-    
-    # District view callbacks
-    application.add_handler(CallbackQueryHandler(view_district_callback, pattern="^view_district:"))
-    application.add_handler(CallbackQueryHandler(view_politician_callback, pattern="^view_politician:"))
-    
-    # Direct actions from district view
-    application.add_handler(CallbackQueryHandler(district_action_callback, pattern="^action_(influence|attack|defend):"))
-    application.add_handler(CallbackQueryHandler(district_action_callback, pattern="^quick_(recon|support):"))
-    
-    # Quick action callbacks
-    application.add_handler(CallbackQueryHandler(quick_action_type_callback, pattern="^quick_action_type:"))
-    application.add_handler(CallbackQueryHandler(quick_district_selection_callback, pattern="^quick_district:"))
-    
-    # Politician callbacks
-    application.add_handler(CallbackQueryHandler(pol_influence_callback, pattern="^pol_influence:"))
-    application.add_handler(CallbackQueryHandler(pol_info_callback, pattern="^pol_info:"))
-    application.add_handler(CallbackQueryHandler(pol_undermine_callback, pattern="^pol_undermine:"))
-    
-    logger.info("Callback handlers registered")
+def register_commands(application):
+    """Register all command handlers."""
+    # Create conversation handler for /start command
+    conv_handler = ConversationHandler(
+        entry_points=[CommandHandler("start", start_command)],
+        states={
+            "WAITING_NAME": [MessageHandler(filters.TEXT & ~filters.COMMAND, set_name_handler)],
+            "WAITING_INFO_CONTENT": [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_info_content)]
+        },
+        fallbacks=[CommandHandler("cancel", cancel_handler)]
+    )
+    application.add_handler(conv_handler)
+
+    # Add basic command handlers
+    application.add_handler(CommandHandler("help", help_command))
+    application.add_handler(CommandHandler("status", status_command))
+    application.add_handler(CommandHandler("map", map_command))
+    application.add_handler(CommandHandler("time", time_command))
+    application.add_handler(CommandHandler("news", news_command))
+
+    # Action handlers
+    application.add_handler(CommandHandler("action", action_command))
+    application.add_handler(CommandHandler("quick_action", quick_action_command))
+    application.add_handler(CommandHandler("cancel_action", cancel_action_command))
+    application.add_handler(CommandHandler("actions_left", actions_left_command))
+    application.add_handler(CommandHandler("join", join_command))
+    application.add_handler(CommandHandler("coordinated_actions", list_coordinated_actions_command))
+
+    # District and politician handlers
+    application.add_handler(CommandHandler("view_district", view_district_command))
+    application.add_handler(CommandHandler("politicians", politicians_command))
+    application.add_handler(CommandHandler("politician_status", politician_status_command))
+    application.add_handler(CommandHandler("international", international_command))
+
+    # Resource handlers
+    application.add_handler(CommandHandler("resources", resources_command))
+    application.add_handler(CommandHandler("convert_resource", convert_resource_command))
+    application.add_handler(CommandHandler("check_income", check_income_command))
+    application.add_handler(CommandHandler("exchange", exchange_command))
+
+    # Language handler
+    application.add_handler(CommandHandler("language", language_command))
 
 
 async def select_action_type_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -558,6 +723,72 @@ async def select_action_type_callback(update: Update, context: ContextTypes.DEFA
     # For influence, proceed as normal
     message_text = get_text("select_district", lang)
     await show_district_selection(query, message_text)
+
+
+async def action_join_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle selection of 'Join' action type."""
+    query = update.callback_query
+    user = query.from_user
+    lang = get_player_language(user.id)
+
+    await query.answer()
+
+    # Store the fact that the user chose the "Join" action
+    if not hasattr(context, 'user_data'):
+        context.user_data = {}
+    if user.id not in context.user_data:
+        context.user_data[user.id] = {}
+
+    context.user_data[user.id]['action_type'] = "join"
+
+    # Show the list of available coordinated actions to join
+    # Get all open coordinated actions
+    open_actions = get_open_coordinated_actions()
+
+    if not open_actions:
+        await query.edit_message_text(get_text("no_coordinated_actions", lang))
+        return
+
+    # Create buttons for each coordinated action
+    keyboard = []
+
+    for action in open_actions:
+        action_id = action[0]
+        action_type_raw = action[2]
+        action_type = get_action_name(action_type_raw, lang)
+        target_type = action[3]
+        target_id = action[4]
+
+        # Get target name based on type
+        if target_type == "district":
+            from game.districts import get_district_by_id
+            target_info = get_district_by_id(target_id)
+            target_name = target_info['name'] if target_info else target_id
+        elif target_type == "politician":
+            from game.politicians import get_politician_by_id
+            target_info = get_politician_by_id(target_id)
+            target_name = target_info['name'] if target_info else target_id
+        else:
+            target_name = target_id
+
+        button_text = f"{action_type} - {target_name} (ID: {action_id})"
+        callback_data = f"join_action:{action_id}:{action_type_raw}:{target_type}:{target_id}"
+
+        # Limit the callback_data to avoid error (Telegram has 64-byte limit)
+        if len(callback_data) > 60:
+            callback_data = f"join_action:{action_id}"
+
+        keyboard.append([InlineKeyboardButton(button_text, callback_data=callback_data)])
+
+    # Add cancel button
+    keyboard.append([InlineKeyboardButton(get_text("action_cancel", lang), callback_data="action_cancel")])
+
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    await query.edit_message_text(
+        get_text("coordinated_actions_title", lang),
+        reply_markup=reply_markup
+    )
 
 
 async def submit_action_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -921,6 +1152,270 @@ async def view_politician_callback(update: Update, context: ContextTypes.DEFAULT
     politician_id = int(query.data.split(":")[1])
     await show_politician_info(query, politician_id)
 
+
+# In bot/callbacks.py - Add these functions
+
+async def join_action_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle selecting a coordinated action to join."""
+    query = update.callback_query
+    user = query.from_user
+    lang = get_player_language(user.id)
+
+    await query.answer()
+
+    # Parse callback data
+    parts = query.data.split(":")
+    action_id = int(parts[1])
+
+    # Get coordinated action details
+    from db.queries import get_coordinated_action_details
+    action = get_coordinated_action_details(action_id)
+
+    if not action:
+        await query.edit_message_text(get_text("action_not_found", lang, default="Action not found or expired."))
+        return
+
+    action_type = action['action_type']
+    target_type = action['target_type']
+    target_id = action['target_id']
+
+    # Get target name
+    if target_type == "district":
+        from game.districts import get_district_by_id
+        target_info = get_district_by_id(target_id)
+        target_name = target_info['name'] if target_info else target_id
+    elif target_type == "politician":
+        from game.politicians import get_politician_by_id
+        target_info = get_politician_by_id(target_id)
+        target_name = target_info['name'] if target_info else target_id
+    else:
+        target_name = target_id
+
+    # Store action details in user_data
+    if not hasattr(context, 'user_data'):
+        context.user_data = {}
+    if user.id not in context.user_data:
+        context.user_data[user.id] = {}
+
+    context.user_data[user.id]['joining_action'] = {
+        'action_id': action_id,
+        'action_type': action_type,
+        'target_type': target_type,
+        'target_id': target_id,
+        'target_name': target_name
+    }
+
+    # Show resource selection
+    await show_join_resource_selection(query, action_type, target_name, lang)
+
+
+async def show_join_resource_selection(query, action_type, target_name, lang):
+    """Show resource selection buttons for joining an action."""
+    # Prepare resource selection keyboard
+    keyboard = [
+        [
+            InlineKeyboardButton("Influence", callback_data=f"join_resource:influence"),
+            InlineKeyboardButton("Resources", callback_data=f"join_resource:resources")
+        ],
+        [
+            InlineKeyboardButton("Information", callback_data=f"join_resource:information"),
+            InlineKeyboardButton("Force", callback_data=f"join_resource:force")
+        ],
+        [
+            InlineKeyboardButton(get_text("action_submit", lang), callback_data=f"join_submit")
+        ],
+        [
+            InlineKeyboardButton(get_text("action_cancel", lang), callback_data="action_cancel")
+        ]
+    ]
+
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    message_text = get_text("select_resources_join", lang,
+                            action_type=get_action_name(action_type, lang),
+                            target_name=target_name,
+                            default=f"Select resources to use for joining {action_type} action on {target_name}:")
+
+    await query.edit_message_text(
+        text=message_text,
+        reply_markup=reply_markup
+    )
+
+
+async def join_resource_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle resource selection for joining actions."""
+    query = update.callback_query
+    user = query.from_user
+    lang = get_player_language(user.id)
+
+    await query.answer()
+
+    # Parse callback data
+    resource_type = query.data.split(":")[1]
+
+    # Get user data
+    if not hasattr(context, 'user_data') or user.id not in context.user_data or 'joining_action' not in \
+            context.user_data[user.id]:
+        await query.edit_message_text(get_text("action_error", lang))
+        return
+
+    joining_action = context.user_data[user.id]['joining_action']
+    action_type = joining_action['action_type']
+    target_name = joining_action['target_name']
+
+    # Initialize selected resources if not present
+    if 'selected_resources' not in context.user_data[user.id]:
+        context.user_data[user.id]['selected_resources'] = []
+
+    # Add the selected resource
+    context.user_data[user.id]['selected_resources'].append(resource_type)
+
+    # Limit to max 2 resources
+    if len(context.user_data[user.id]['selected_resources']) > 2:
+        context.user_data[user.id]['selected_resources'] = context.user_data[user.id]['selected_resources'][-2:]
+
+    # Get resources count
+    resource_counts = {}
+    for res in context.user_data[user.id]['selected_resources']:
+        if res in resource_counts:
+            resource_counts[res] += 1
+        else:
+            resource_counts[res] = 1
+
+    # Format selected resources for display
+    selected_text = []
+    for res_type, count in resource_counts.items():
+        selected_text.append(f"{count} {get_resource_name(res_type, lang)}")
+
+    selected_resources_text = ", ".join(selected_text)
+
+    # Check if player has the resources
+    player_resources = get_player_resources(user.id)
+    can_submit = True
+
+    for res_type, count in resource_counts.items():
+        if player_resources.get(res_type, 0) < count:
+            can_submit = False
+            break
+
+    # Prepare resource selection keyboard
+    keyboard = [
+        [
+            InlineKeyboardButton("Influence", callback_data=f"join_resource:influence"),
+            InlineKeyboardButton("Resources", callback_data=f"join_resource:resources")
+        ],
+        [
+            InlineKeyboardButton("Information", callback_data=f"join_resource:information"),
+            InlineKeyboardButton("Force", callback_data=f"join_resource:force")
+        ]
+    ]
+
+    # Add submit button if resources are selected and player has them
+    if context.user_data[user.id]['selected_resources'] and can_submit:
+        keyboard.append([
+            InlineKeyboardButton(get_text("action_submit", lang), callback_data=f"join_submit")
+        ])
+
+    # Add cancel button
+    keyboard.append([
+        InlineKeyboardButton(get_text("action_cancel", lang), callback_data="action_cancel")
+    ])
+
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    # Update message with selected resources
+    message_text = get_text("select_resources_join", lang,
+                            action_type=get_action_name(action_type, lang),
+                            target_name=target_name,
+                            default=f"Select resources to join {action_type} action on {target_name}:")
+
+    if selected_resources_text:
+        message_text += f"\n\n{get_text('selected', lang, default='Selected')}: {selected_resources_text}"
+
+    await query.edit_message_text(
+        text=message_text,
+        reply_markup=reply_markup
+    )
+
+
+async def join_submit_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle submission of joining a coordinated action."""
+    query = update.callback_query
+    user = query.from_user
+    lang = get_player_language(user.id)
+
+    await query.answer()
+
+    # Get user data
+    if not hasattr(context, 'user_data') or user.id not in context.user_data:
+        await query.edit_message_text(get_text("action_error", lang))
+        return
+
+    user_data = context.user_data[user.id]
+
+    if 'joining_action' not in user_data or 'selected_resources' not in user_data or not user_data[
+        'selected_resources']:
+        await query.edit_message_text(get_text("no_resources_selected", lang))
+        return
+
+    joining_action = user_data['joining_action']
+    action_id = joining_action['action_id']
+    action_type = joining_action['action_type']
+    target_name = joining_action['target_name']
+
+    # Parse resources
+    resources_list = user_data['selected_resources']
+    resources_dict = {}
+    for resource_type in resources_list:
+        if resource_type in resources_dict:
+            resources_dict[resource_type] += 1
+        else:
+            resources_dict[resource_type] = 1
+
+    # Check if player has the resources
+    player_resources = get_player_resources(user.id)
+    for resource_type, amount in resources_dict.items():
+        if player_resources.get(resource_type, 0) < amount:
+            await query.edit_message_text(
+                get_text("insufficient_resources", lang, resource_type=get_resource_name(resource_type, lang))
+            )
+            return
+
+    # Check if player has main actions left
+    actions = get_remaining_actions(user.id)
+    if actions['main'] <= 0:
+        await query.edit_message_text(get_text("no_main_actions", lang))
+        return
+
+    # Join the coordinated action
+    from db.queries import join_coordinated_action
+    success, message = join_coordinated_action(user.id, action_id, resources_dict)
+
+    if success:
+        # Deduct resources
+        for resource_type, amount in resources_dict.items():
+            update_player_resources(user.id, resource_type, -amount)
+
+        # Use action
+        use_action(user.id, True)
+
+        # Format resources for display
+        resources_display = []
+        for resource_type, amount in resources_dict.items():
+            resources_display.append(f"{amount} {get_resource_name(resource_type, lang)}")
+        resources_text = ", ".join(resources_display)
+
+        await query.edit_message_text(
+            get_text("action_joined", lang,
+                     action_type=get_action_name(action_type, lang),
+                     resources=resources_text,
+                     target=target_name)
+        )
+    else:
+        await query.edit_message_text(message)
+
+    # Clear user data
+    context.user_data[user.id] = {}
 
 async def district_action_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle direct actions from district view."""

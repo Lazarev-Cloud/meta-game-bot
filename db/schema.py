@@ -241,3 +241,30 @@ def setup_database():
     finally:
         if conn:
             conn.close()
+
+def ensure_player_has_base_resources(player_id):
+    """Ensure that a player has the base starting resources."""
+    try:
+        conn = sqlite3.connect('belgrade_game.db')
+        cursor = conn.cursor()
+        
+        # Check if player has resources
+        cursor.execute("SELECT player_id FROM resources WHERE player_id = ?", (player_id,))
+        player_resources = cursor.fetchone()
+        
+        if not player_resources:
+            # Initialize resources with base amounts
+            cursor.execute(
+                "INSERT INTO resources (player_id, influence, resources, information, force) VALUES (?, 5, 5, 5, 5)",
+                (player_id,)
+            )
+            conn.commit()
+            logger.info(f"Base resources added for player {player_id}")
+        
+        conn.close()
+        return True
+    except Exception as e:
+        logger.error(f"Error ensuring base resources for player {player_id}: {e}")
+        return False
+
+

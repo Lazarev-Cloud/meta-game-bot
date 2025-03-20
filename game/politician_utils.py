@@ -622,6 +622,7 @@ def process_international_action(pol_id: int, name: str, role: str, ideology: in
             "news_content": f"International event by {name} ({role})"
         }
 
+# Fix for game/politician_utils.py - In the generate_politician_influence_report function
 
 def generate_politician_influence_report(lang="en"):
     """
@@ -633,6 +634,7 @@ def generate_politician_influence_report(lang="en"):
     Returns:
         str: Formatted politician influence report
     """
+    from languages import get_text, format_ideology
 
     try:
         conn = sqlite3.connect('belgrade_game.db')

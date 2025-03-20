@@ -68,6 +68,11 @@ TRANSLATIONS = {
         "status_districts": "*Controlled Districts:*",
         "status_no_districts": "*Controlled Districts:* None",
 
+        "select_resources_join": "Select resources to use for joining {action_type} action targeting {target_name}:",
+        "action_not_found": "Action not found or has expired.",
+        "exchange_instructions": "Select a resource exchange option:",
+        "exchange_again": "Exchange Again",
+
         # Map and districts
         "map_title": "Current Control Map of Belgrade",
         "map_legend": "Legend:\n🔒 Strong control (80+ points)\n✅ Controlled (60-79 points)\n⚠️ Contested (20-59 points)\n❌ Weak presence (<20 points)",
@@ -90,7 +95,6 @@ TRANSLATIONS = {
         "no_news": "There is no news to report at this time.",
 
         # Actions
-        "no_main_actions": "You have no main actions left. Please wait for the next cycle.",
         "no_quick_actions": "You have no quick actions left. Actions refresh every 3 hours or at the start of a new cycle.",
         "select_action_type": "Select the type of main action you want to perform:",
         "select_quick_action": "Select the type of quick action you want to perform:",
@@ -254,7 +258,11 @@ TRANSLATIONS = {
         "action_joined": "Вы присоединились к действию {action_type}, используя {resources}.",
         "invalid_action_type": "Неверный тип действия. Используйте 'attack' или 'defense'.",
         "invalid_arguments": "Неверные аргументы. Проверьте синтаксис команды и попробуйте еще раз.",
-        
+
+        "exchange_instructions": "Выберите вариант обмена ресурсов:",
+        "exchange_again": "Обменять снова",
+
+
         # Coordinated actions
         "coordinated_actions_title": "Открытые координированные действия",
         "no_coordinated_actions": "В данный момент нет открытых координированных действий для присоединения.",
@@ -389,7 +397,8 @@ TRANSLATIONS = {
         "action_info": "Распространение информации",
         "action_support": "Поддержка",
         "action_cancel": "Отмена",
-
+        "select_resources_join": "Выберите ресурсы для присоединения к действию {action_type} нацеленному на {target_name}:",
+        "action_not_found": "Действие не найдено или срок его действия истек.",
         # Resources used in actions
         "select_resources": "Выберите ресурсы для {action_type} действия в районе {district_name}:",
         "selected": "Выбрано",
@@ -397,7 +406,6 @@ TRANSLATIONS = {
         "action_submitted": "Ваше действие {action_type} в {target_name} было подано с использованием {resources}. Результаты будут обработаны в конце цикла.",
         "action_success": "Ваше действие {type} в {target} было отправлено. Результаты будут обработаны в конце цикла.",
         "action_coordinated_created": "Вы создали координированное действие {type} нацеленное на {target}. ID действия: {id}. Другие игроки могут присоединиться, используя /join.",
-        "no_main_actions": "У вас не осталось основных действий. Пожалуйста, дождитесь следующего цикла.",
         "info_spreading": "Ваша информация распространена через новостную сеть. Она появится в следующем новостном цикле.",
         "enter_info_content": "Какую информацию вы хотите распространить? Пожалуйста, напишите сообщение:",
         "invalid_info_content": "Пожалуйста, предоставьте корректное содержание информации.",
