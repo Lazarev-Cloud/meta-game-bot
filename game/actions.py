@@ -503,7 +503,7 @@ def process_international_politician_action(politician_id: int) -> Optional[Dict
         return None
 
 
-def schedule_jobs(context):
+async def schedule_jobs(context):
     """Set up scheduled jobs for game cycle processing."""
     job_queue = context.job_queue
 
@@ -706,7 +706,6 @@ async def refresh_actions_job(context):
         logger.info("Actions refreshed for all players")
     except Exception as e:
         logger.error(f"Error in refresh_actions_job: {e}")
-
 
 def get_current_cycle():
     """Return the current game cycle (morning or evening)."""
