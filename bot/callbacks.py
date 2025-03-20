@@ -3,9 +3,11 @@ import sqlite3
 
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import Application, CallbackQueryHandler, ContextTypes
+from telegram.ext._utils import asyncio
+
 from config import TOKEN
 from db.schema import setup_database
-from bot.commands import register_commands
+from bot.commands import register_commands, executor
 from game.actions import schedule_jobs
 from languages import get_text, get_player_language, set_player_language, get_action_name, get_resource_name
 from db.queries import (
