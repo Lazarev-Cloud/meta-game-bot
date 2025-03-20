@@ -10,9 +10,12 @@ from game.actions import ACTION_ATTACK, ACTION_DEFENSE
 logger = logging.getLogger(__name__)
 
 
-# Database connection decorator for safe handling
-# Improved database connection decorator with retry mechanism
 def db_transaction(func):
+    """
+    Decorator to handle database transactions with proper error handling and concurrency management.
+    Implements connection pooling, retries, and transaction isolation.
+    """
+
     @wraps(func)
     def wrapper(*args, **kwargs):
         conn = None
@@ -21,27 +24,66 @@ def db_transaction(func):
 
         for attempt in range(max_retries):
             try:
-                conn = sqlite3.connect('belgrade_game.db', timeout=20.0)  # Increased timeout
-                # Enable WAL mode for better concurrency
+                # Use WAL mode and set a timeout to handle concurrency better
+                conn = sqlite3.connect('belgrade_game.db', timeout=20.0)
                 conn.execute('PRAGMA journal_mode=WAL')
-                result = func(conn, *args, **kwargs)
-                conn.commit()
-                return result
-            except sqlite3.Error as e:
-                if conn:
-                    conn.rollback()
+                conn.execute('PRAGMA synchronous=NORMAL')  # Faster with reasonable safety
+                conn.execute('PRAGMA busy_timeout=5000')  # Wait up to 5 seconds when db is locked
 
-                if "database is locked" in str(e) and attempt < max_retries - 1:
+                # Set isolation level - needed for concurrent writes
+                conn.isolation_level = None  # This allows explicit transaction control
+                conn.execute('BEGIN IMMEDIATE')  # Acquire write lock immediately
+
+                # Call the function with the connection as first arg
+                result = func(conn, *args, **kwargs)
+
+                # Commit changes
+                conn.execute('COMMIT')
+                return result
+
+            except sqlite3.OperationalError as e:
+                if conn:
+                    try:
+                        conn.execute('ROLLBACK')
+                    except:
+                        pass  # Ignore rollback errors
+
+                error_msg = str(e).lower()
+                if ("database is locked" in error_msg or "busy" in error_msg) and attempt < max_retries - 1:
                     logger.warning(f"Database locked, retrying in {retry_delay}s (attempt {attempt + 1}/{max_retries})")
                     time.sleep(retry_delay)
                     retry_delay *= 2  # Exponential backoff
                     continue
 
+                logger.error(f"Database operational error in {func.__name__}: {e}")
+                return None
+
+            except sqlite3.Error as e:
+                if conn:
+                    try:
+                        conn.execute('ROLLBACK')
+                    except:
+                        pass
+
                 logger.error(f"Database error in {func.__name__}: {e}")
-                return None  # Return None instead of raising to avoid crashes
+                return None
+
+            except Exception as e:
+                if conn:
+                    try:
+                        conn.execute('ROLLBACK')
+                    except:
+                        pass
+
+                logger.error(f"Unexpected error in {func.__name__}: {e}")
+                return None
+
             finally:
                 if conn:
-                    conn.close()
+                    try:
+                        conn.close()
+                    except:
+                        pass
 
     return wrapper
 
@@ -434,55 +476,60 @@ def use_action(conn, player_id, is_main_action):
     """Decrement action count when player uses an action."""
     cursor = conn.cursor()
 
-    # Log what kind of action is being used
-    logger.info(f"Player {player_id} using {'main' if is_main_action else 'quick'} action")
+    field = "main_actions_left" if is_main_action else "quick_actions_left"
 
-    if is_main_action:
-        # First check if player has main actions left
-        cursor.execute(
-            "SELECT main_actions_left FROM players WHERE player_id = ?",
-            (player_id,)
-        )
-        actions_left = cursor.fetchone()
-        if not actions_left or actions_left[0] <= 0:
-            logger.warning(f"Player {player_id} has no main actions left")
-            return False
+    # Check if player has actions left
+    cursor.execute(
+        f"SELECT {field} FROM players WHERE player_id = ?",
+        (player_id,)
+    )
+    actions_left = cursor.fetchone()
 
-        cursor.execute(
-            "UPDATE players SET main_actions_left = main_actions_left - 1 WHERE player_id = ? AND main_actions_left > 0",
-            (player_id,)
-        )
-    else:
-        # First check if player has quick actions left
-        cursor.execute(
-            "SELECT quick_actions_left FROM players WHERE player_id = ?",
-            (player_id,)
-        )
-        actions_left = cursor.fetchone()
-        if not actions_left or actions_left[0] <= 0:
-            logger.warning(f"Player {player_id} has no quick actions left")
-            return False
+    if not actions_left or actions_left[0] <= 0:
+        logger.warning(f"Player {player_id} has no {'main' if is_main_action else 'quick'} actions left")
+        return False
 
-        cursor.execute(
-            "UPDATE players SET quick_actions_left = quick_actions_left - 1 WHERE player_id = ? AND quick_actions_left > 0",
-            (player_id,)
-        )
+    # Update the appropriate action count
+    cursor.execute(
+        f"UPDATE players SET {field} = {field} - 1 WHERE player_id = ? AND {field} > 0",
+        (player_id,)
+    )
 
-    # Log the result
     result = cursor.rowcount > 0
-    logger.info(f"Action usage result for player {player_id}: {result}")
+    logger.info(f"{'Main' if is_main_action else 'Quick'} action usage result for player {player_id}: {result}")
 
     return result
+
 
 @db_transaction
 def refresh_player_actions(conn, player_id):
     """Reset action counts and update refresh timestamp."""
     cursor = conn.cursor()
     now = datetime.datetime.now().isoformat()
+
+    # Check current action counts first
+    cursor.execute(
+        "SELECT main_actions_left, quick_actions_left, last_action_refresh FROM players WHERE player_id = ?",
+        (player_id,)
+    )
+    result = cursor.fetchone()
+
+    if not result:
+        return False
+
+    current_main, current_quick, last_refresh = result
+
+    # If already at max, don't refresh
+    if current_main >= 1 and current_quick >= 2:
+        return False
+
+    # Update to max values
     cursor.execute(
         "UPDATE players SET main_actions_left = 1, quick_actions_left = 2, last_action_refresh = ? WHERE player_id = ?",
         (now, player_id)
     )
+
+    # Return True only if values were actually updated
     return cursor.rowcount > 0
 
 
@@ -510,6 +557,61 @@ def update_action_counts(conn, player_id):
         )
         return True
     return False
+
+
+@db_transaction
+def cleanup_expired_actions(conn):
+    """Clean up expired actions and handle any orphaned data."""
+    cursor = conn.cursor()
+    now = datetime.datetime.now()
+
+    # Clean up expired coordinated actions
+    cursor.execute(
+        "SELECT action_id FROM coordinated_actions WHERE status = 'open' AND expires_at < ?",
+        (now.isoformat(),)
+    )
+    expired_actions = cursor.fetchall()
+
+    # Process each expired action
+    for (action_id,) in expired_actions:
+        # Close the action
+        cursor.execute(
+            "UPDATE coordinated_actions SET status = 'expired' WHERE action_id = ?",
+            (action_id,)
+        )
+
+        # Optionally refund resources for expired actions
+        # (Uncomment if you want to implement this feature)
+        """
+        cursor.execute(
+            "SELECT player_id, resources_used FROM coordinated_action_participants WHERE action_id = ?",
+            (action_id,)
+        )
+        participants = cursor.fetchall()
+
+        for player_id, resources_json in participants:
+            resources = json.loads(resources_json)
+            for resource_type, amount in resources.items():
+                cursor.execute(
+                    f"UPDATE resources SET {resource_type} = {resource_type} + ? WHERE player_id = ?",
+                    (amount, player_id)
+                )
+        """
+
+    # Add a cleanup for really old actions to prevent database bloat
+    one_week_ago = (now - datetime.timedelta(days=7)).isoformat()
+
+    # Archive or delete very old actions
+    cursor.execute(
+        "DELETE FROM coordinated_action_participants WHERE action_id IN (SELECT action_id FROM coordinated_actions WHERE timestamp < ?)",
+        (one_week_ago,)
+    )
+    cursor.execute(
+        "DELETE FROM coordinated_actions WHERE timestamp < ?",
+        (one_week_ago,)
+    )
+
+    return len(expired_actions)
 
 
 # News-related queries
@@ -578,6 +680,7 @@ def distribute_district_resources(conn):
         if force > 0:
             update_player_resources_internal(conn, player_id, "force", force)
 
+
 @db_transaction
 def create_coordinated_action(conn, initiator_id, action_type, target_type, target_id, resources_used):
     """Create a new coordinated action."""
@@ -597,13 +700,16 @@ def create_coordinated_action(conn, initiator_id, action_type, target_type, targ
         logger.warning(f"Attempt to create coordinated action with invalid type: {action_type}")
         return None
 
+    # Convert resources dictionary to JSON string
+    resources_json = json.dumps(resources_used)
+
     cursor.execute(
         """
         INSERT INTO coordinated_actions 
         (initiator_id, action_type, target_type, target_id, resources_used, timestamp, cycle, expires_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         """,
-        (initiator_id, action_type, target_type, target_id, json.dumps(resources_used), 
+        (initiator_id, action_type, target_type, target_id, resources_json,
          now.isoformat(), cycle, expires_at.isoformat())
     )
     action_id = cursor.lastrowid
@@ -615,7 +721,7 @@ def create_coordinated_action(conn, initiator_id, action_type, target_type, targ
         (action_id, player_id, resources_used, joined_at)
         VALUES (?, ?, ?, ?)
         """,
-        (action_id, initiator_id, json.dumps(resources_used), now.isoformat())
+        (action_id, initiator_id, resources_json, now.isoformat())
     )
 
     return action_id

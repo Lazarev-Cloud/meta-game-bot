@@ -279,6 +279,85 @@ async def exchange_again_callback(update: Update, context: ContextTypes.DEFAULT_
     )
 
 
+async def join_resource_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle resource selection for joining a coordinated action."""
+    query = update.callback_query
+    user = query.from_user
+    lang = get_player_language(user.id)
+
+    await query.answer()
+
+    try:
+        # Parse callback data
+        parts = query.data.split(":")
+        if len(parts) < 4:
+            await query.edit_message_text(get_text("action_error", lang))
+            return
+
+        action_id = int(parts[1])
+        resource_type = parts[2]
+        resource_amount = int(parts[3])
+
+        # Get action details
+        action_details = get_coordinated_action_details(action_id)
+        if not action_details:
+            await query.edit_message_text(get_text("action_not_found", lang))
+            return
+
+        action_type = action_details['action_type']
+        target_type = action_details['target_type']
+        target_id = action_details['target_id']
+
+        # Get target name
+        if target_type == "district":
+            from game.districts import get_district_by_id
+            target_info = get_district_by_id(target_id)
+            target_name = target_info['name'] if target_info else target_id
+        elif target_type == "politician":
+            from game.politicians import get_politician_by_id
+            target_info = get_politician_by_id(target_id)
+            target_name = target_info['name'] if target_info else target_id
+        else:
+            target_name = target_id
+
+        # Validate resources
+        player_resources = get_player_resources(user.id)
+        if player_resources.get(resource_type, 0) < resource_amount:
+            await query.edit_message_text(
+                get_text("insufficient_resources", lang, resource_type=get_resource_name(resource_type, lang))
+            )
+            return
+
+        # Create resource dictionary
+        resources_dict = {resource_type: resource_amount}
+
+        # Join the action
+        success, message = join_coordinated_action(user.id, action_id, resources_dict)
+
+        if success:
+            # Deduct resources
+            update_player_resources(user.id, resource_type, -resource_amount)
+
+            # Use a main action
+            use_action(user.id, True)  # True for main action
+
+            # Format response
+            resources_display = f"{resource_amount} {get_resource_name(resource_type, lang)}"
+
+            await query.edit_message_text(
+                get_text("joined_coordinated_action", lang,
+                         action_type=get_action_name(action_type, lang),
+                         target=target_name,
+                         resources=resources_display)
+            )
+        else:
+            await query.edit_message_text(message)
+
+    except Exception as e:
+        logger.error(f"Error in join_resource_callback: {e}")
+        await query.edit_message_text(get_text("action_error", lang))
+
+
 async def process_quick_action(query, action_type, target_type, target_id):
     """Process a quick action such as reconnaissance or support."""
     user = query.from_user
@@ -328,7 +407,7 @@ async def process_quick_action(query, action_type, target_type, target_id):
                 return
             update_player_resources(user.id, resource_type, -resource_amount)
 
-        # Use one quick action - IMPORTANT: False for quick action
+        # Use one quick action - IMPORTANT: Pass False for quick action
         if not use_action(user.id, False):  # False means it's a quick action, not a main action
             await query.edit_message_text(get_text("no_quick_actions", lang))
             return
@@ -1093,14 +1172,14 @@ async def quick_action_type_callback(update: Update, context: ContextTypes.DEFAU
     await query.answer()
 
     action_type = query.data.split(":")[1]
-    
+
     # Initialize user data if not present
     if not hasattr(context, 'user_data'):
         context.user_data = {}
-    
+
     if user.id not in context.user_data:
         context.user_data[user.id] = {}
-    
+
     context.user_data[user.id]['quick_action_type'] = action_type
 
     # Different targets based on quick action type
@@ -1108,10 +1187,13 @@ async def quick_action_type_callback(update: Update, context: ContextTypes.DEFAU
         message_text = get_text("select_district", lang)
         await show_district_selection(query, message_text)
     elif action_type == QUICK_ACTION_INFO:
+        # Enter conversation state for text input
+        from telegram.ext import ConversationHandler
+        context.user_data[user.id]['conversation_state'] = "WAITING_INFO_CONTENT"
         await query.edit_message_text(
             get_text("enter_info_content", lang)
         )
-        return
+        return ConversationHandler.END  # Exit the callback to enter the conversation
 
 
 async def quick_district_selection_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):

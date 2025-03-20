@@ -35,18 +35,9 @@ def main() -> None:
     logger.info("Starting Belgrade Game Bot...")
 
     try:
-        # Set up the database
-        logger.info("Setting up database...")
-        setup_database()
-
-        # Initialize language support
-        logger.info("Initializing language support...")
-        init_language_support()
-
-        # Initialize admin language support
-        logger.info("Initializing admin language support...")
-        from languages_update import init_admin_language_support
-        init_admin_language_support()
+        # Perform startup checks
+        if not perform_startup_checks():
+            logger.warning("Some startup checks failed, but continuing anyway")
 
         # Create the Application
         logger.info("Initializing Telegram bot...")
@@ -73,10 +64,6 @@ def main() -> None:
         logger.info("Setting up error handler...")
         application.add_error_handler(error_handler)
 
-        # Perform validation checks
-        logger.info("Performing validation checks...")
-        validate_system()
-
         # Start the Bot
         logger.info("Bot starting up - Press Ctrl+C to stop")
         application.run_polling(allowed_updates=Update.ALL_TYPES)
@@ -87,6 +74,7 @@ def main() -> None:
         tb_string = ''.join(tb_list)
         logger.critical(f"Initialization error traceback:\n{tb_string}")
         sys.exit(1)
+
 
 
 def validate_system():
@@ -175,6 +163,131 @@ def error_handler(update, context):
                 context.bot.send_message(chat_id=admin_id, text=error_message)
     except Exception as e:
         logger.error(f"Error notifying admins: {e}")
+
+
+def validate_and_fix_database_schema():
+    """Check database schema and fix any issues."""
+    try:
+        conn = sqlite3.connect('belgrade_game.db')
+        cursor = conn.cursor()
+
+        # Check for all required tables
+        required_tables = [
+            'players', 'resources', 'districts', 'district_control',
+            'politicians', 'actions', 'news', 'politician_relationships',
+            'coordinated_actions', 'coordinated_action_participants'
+        ]
+
+        missing_tables = []
+        for table in required_tables:
+            cursor.execute(f"SELECT name FROM sqlite_master WHERE type='table' AND name='{table}'")
+            if not cursor.fetchone():
+                missing_tables.append(table)
+
+        if missing_tables:
+            logger.warning(f"Missing tables found: {missing_tables}")
+
+            # If there are missing tables, run the full setup
+            from db.schema import setup_database
+            setup_database()
+            logger.info("Database schema has been fixed")
+
+        # Check for newer tables that might be missing
+        newer_tables = ['player_presence', 'district_defense']
+
+        for table in newer_tables:
+            cursor.execute(f"SELECT name FROM sqlite_master WHERE type='table' AND name='{table}'")
+            if not cursor.fetchone():
+                # Create the missing tables
+                if table == 'player_presence':
+                    cursor.execute('''
+                    CREATE TABLE IF NOT EXISTS player_presence (
+                        player_id INTEGER,
+                        district_id TEXT,
+                        timestamp TEXT,
+                        is_present BOOLEAN DEFAULT 1,
+                        PRIMARY KEY (player_id, district_id),
+                        FOREIGN KEY (player_id) REFERENCES players (player_id),
+                        FOREIGN KEY (district_id) REFERENCES districts (district_id)
+                    )
+                    ''')
+                elif table == 'district_defense':
+                    cursor.execute('''
+                    CREATE TABLE IF NOT EXISTS district_defense (
+                        district_id TEXT,
+                        player_id INTEGER,
+                        defense_bonus INTEGER DEFAULT 0,
+                        expires_at TEXT,
+                        PRIMARY KEY (district_id, player_id),
+                        FOREIGN KEY (district_id) REFERENCES districts (district_id),
+                        FOREIGN KEY (player_id) REFERENCES players (player_id)
+                    )
+                    ''')
+                logger.info(f"Created missing table: {table}")
+
+        # Check and fix columns in tables
+        # Example: Check if the 'coordinated_actions' table has the 'expires_at' column
+        try:
+            cursor.execute("SELECT expires_at FROM coordinated_actions LIMIT 1")
+        except sqlite3.OperationalError:
+            # Column doesn't exist, add it
+            cursor.execute("ALTER TABLE coordinated_actions ADD COLUMN expires_at TEXT")
+            logger.info("Added missing 'expires_at' column to coordinated_actions table")
+
+        conn.commit()
+        conn.close()
+        return True
+    except Exception as e:
+        logger.error(f"Error validating database schema: {e}")
+        return False
+
+
+def perform_startup_checks():
+    """Perform various checks and fixes at application startup."""
+    logger.info("Performing startup checks...")
+
+    # Validate and fix database schema
+    if not validate_and_fix_database_schema():
+        logger.error("Failed to validate/fix database schema")
+        return False
+
+    # Check for expired coordinated actions and close them
+    try:
+        from db.queries import cleanup_expired_actions
+        cleaned_count = cleanup_expired_actions()
+        logger.info(f"Cleaned up {cleaned_count} expired coordinated actions")
+    except Exception as e:
+        logger.error(f"Error cleaning up expired actions: {e}")
+
+    # Check if all player resources are initialized
+    try:
+        conn = sqlite3.connect('belgrade_game.db')
+        cursor = conn.cursor()
+
+        # Find players without resources
+        cursor.execute('''
+        SELECT p.player_id FROM players p
+        LEFT JOIN resources r ON p.player_id = r.player_id
+        WHERE r.player_id IS NULL
+        ''')
+
+        players_without_resources = cursor.fetchall()
+
+        for (player_id,) in players_without_resources:
+            # Initialize resources for this player
+            cursor.execute(
+                "INSERT INTO resources (player_id, influence, resources, information, force) VALUES (?, 5, 5, 5, 5)",
+                (player_id,)
+            )
+            logger.info(f"Initialized resources for player {player_id}")
+
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        logger.error(f"Error checking player resources: {e}")
+
+    logger.info("Startup checks completed")
+    return True
 
 
 if __name__ == "__main__":

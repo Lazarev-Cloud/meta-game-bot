@@ -13,15 +13,86 @@ from languages import get_text, get_cycle_name
 
 logger = logging.getLogger(__name__)
 
-# Main actions
+# Main actions (strategic, major impact)
 ACTION_INFLUENCE = "influence"
 ACTION_ATTACK = "attack"
 ACTION_DEFENSE = "defense"
 
-# Quick actions
+# Quick actions (tactical, minor impact)
 QUICK_ACTION_RECON = "recon"
 QUICK_ACTION_INFO = "info"
 QUICK_ACTION_SUPPORT = "support"
+
+# Action cost definitions - Map each action type to its typical resource costs
+ACTION_COSTS = {
+    # Main actions typically cost 2-3 resources
+    ACTION_INFLUENCE: {
+        "default": {"influence": 2},
+        "alternatives": [
+            {"influence": 1, "resources": 1},
+            {"influence": 1, "information": 1}
+        ]
+    },
+    ACTION_ATTACK: {
+        "default": {"force": 2},
+        "alternatives": [
+            {"force": 1, "influence": 1},
+            {"force": 1, "information": 1}
+        ]
+    },
+    ACTION_DEFENSE: {
+        "default": {"force": 2},
+        "alternatives": [
+            {"force": 1, "resources": 1},
+            {"influence": 1, "force": 1}
+        ]
+    },
+
+    # Quick actions typically cost 1 resource
+    QUICK_ACTION_RECON: {
+        "default": {"information": 1},
+        "alternatives": []
+    },
+    QUICK_ACTION_INFO: {
+        "default": {"information": 1},
+        "alternatives": []
+    },
+    QUICK_ACTION_SUPPORT: {
+        "default": {"influence": 1},
+        "alternatives": []
+    }
+}
+
+# Action effects - Define the possible outcomes for each action type
+ACTION_EFFECTS = {
+    # Main actions have significant effects
+    ACTION_INFLUENCE: {
+        "success": {"control_change": 10, "message": "influence_success"},
+        "partial": {"control_change": 5, "message": "influence_partial"},
+        "failure": {"control_change": 0, "message": "influence_failure"}
+    },
+    ACTION_ATTACK: {
+        "success": {"target_control_change": -10, "attacker_control_change": 10, "message": "attack_success"},
+        "partial": {"target_control_change": -5, "attacker_control_change": 5, "message": "attack_partial"},
+        "failure": {"target_control_change": 0, "attacker_control_change": 0, "message": "attack_failure"}
+    },
+    ACTION_DEFENSE: {
+        "success": {"defense_bonus": 10, "message": "defense_success"},
+        "partial": {"defense_bonus": 5, "message": "defense_partial"},
+        "failure": {"defense_bonus": 0, "message": "defense_failure"}
+    },
+
+    # Quick actions have limited effects
+    QUICK_ACTION_RECON: {
+        "success": {"message": "recon_success", "reveals_control": True, "reveals_plans": True}
+    },
+    QUICK_ACTION_INFO: {
+        "success": {"message": "info_success", "news_published": True}
+    },
+    QUICK_ACTION_SUPPORT: {
+        "success": {"control_change": 5, "message": "support_success"}
+    }
+}
 
 # Game cycle times
 MORNING_CYCLE_START = datetime.time(6, 0)  # 6:00 AM
@@ -163,22 +234,35 @@ def process_action(action_id, player_id, action_type, target_type, target_id):
     result = {}
 
     try:
+        # Determine if this is a main or quick action
+        is_main_action = action_type in [ACTION_INFLUENCE, ACTION_ATTACK, ACTION_DEFENSE]
+
         if target_type == "district":
             if action_type == ACTION_INFLUENCE:
                 # Process influence action on district
                 success_roll = random.randint(1, 100)
 
-                if success_roll > 70:  # Success
+                # Main actions have more significant outcomes with possible failures
+                if success_roll > 70:  # Success (30% chance)
                     update_district_control(player_id, target_id, 10)
-                    result = {"status": "success", "message": f"Successfully increased influence in {target_id}",
-                              "control_change": 10}
-                elif success_roll > 30:  # Partial success
+                    result = {
+                        "status": "success",
+                        "message": f"Successfully increased influence in {target_id}",
+                        "control_change": 10
+                    }
+                elif success_roll > 30:  # Partial success (40% chance)
                     update_district_control(player_id, target_id, 5)
-                    result = {"status": "partial", "message": f"Partially increased influence in {target_id}",
-                              "control_change": 5}
-                else:  # Failure
-                    result = {"status": "failure", "message": f"Failed to increase influence in {target_id}",
-                              "control_change": 0}
+                    result = {
+                        "status": "partial",
+                        "message": f"Partially increased influence in {target_id}",
+                        "control_change": 5
+                    }
+                else:  # Failure (30% chance)
+                    result = {
+                        "status": "failure",
+                        "message": f"Failed to increase influence in {target_id}",
+                        "control_change": 0
+                    }
 
             elif action_type == ACTION_ATTACK:
                 # Process attack action on district
@@ -230,29 +314,65 @@ def process_action(action_id, player_id, action_type, target_type, target_id):
                     }
 
             elif action_type == ACTION_DEFENSE:
-                # Process defense action - will be used to reduce impact of attacks
+                # Process defense action - will block future attacks
                 result = {"status": "active", "message": f"Defensive measures in place for {target_id}"}
 
+                # Store the defense bonus in the district_control table or another appropriate place
+                conn = sqlite3.connect('belgrade_game.db')
+                cursor = conn.cursor()
+                now = datetime.datetime.now().isoformat()
+
+                # Add a defense bonus that expires at the end of the cycle
+                cursor.execute(
+                    """
+                    INSERT OR REPLACE INTO district_defense 
+                    (district_id, player_id, defense_bonus, expires_at)
+                    VALUES (?, ?, 10, ?)
+                    """,
+                    (target_id, player_id, now)  # Use appropriate expiration time based on cycle
+                )
+                conn.commit()
+                conn.close()
+
             elif action_type == QUICK_ACTION_RECON:
-                # Process reconnaissance action
+                # Process reconnaissance action - always succeeds
                 control_data = get_district_control(target_id)
                 district_info = get_district_info(target_id)
+
+                # Get pending actions targeting this district
+                conn = sqlite3.connect('belgrade_game.db')
+                cursor = conn.cursor()
+                cursor.execute(
+                    """
+                    SELECT a.action_type, p.character_name
+                    FROM actions a
+                    JOIN players p ON a.player_id = p.player_id
+                    WHERE a.target_type = 'district' AND a.target_id = ? AND a.status = 'pending'
+                    """,
+                    (target_id,)
+                )
+                pending_actions = cursor.fetchall()
+                conn.close()
 
                 result = {
                     "status": "success",
                     "message": f"Reconnaissance of {target_id} complete",
                     "control_data": control_data,
-                    "district_info": district_info
+                    "district_info": district_info,
+                    "pending_actions": pending_actions if pending_actions else []
                 }
 
             elif action_type == QUICK_ACTION_SUPPORT:
-                # Process support action (small influence gain)
+                # Process support action (small influence gain) - always succeeds
                 update_district_control(player_id, target_id, 5)
-                result = {"status": "success", "message": f"Support action in {target_id} complete",
-                          "control_change": 5}
+                result = {
+                    "status": "success",
+                    "message": f"Support action in {target_id} complete",
+                    "control_change": 5
+                }
 
             elif action_type == QUICK_ACTION_INFO:
-                # Process information spreading
+                # Process information spreading - always succeeds
                 result = {
                     "status": "success",
                     "message": f"Information has been spread about {target_id}",
@@ -281,7 +401,7 @@ def process_action(action_id, player_id, action_type, target_type, target_id):
                         "politician_id": politician['politician_id']
                     }
             elif action_type == "info":
-                # Process info gathering on politician
+                # Process info gathering on politician - quick action
                 from game.politicians import get_politician_by_id
                 politician = get_politician_by_id(target_id)
                 if politician:
@@ -297,6 +417,51 @@ def process_action(action_id, player_id, action_type, target_type, target_id):
         result = {"status": "error", "message": f"An error occurred: {str(e)}"}
 
     return result
+
+
+def apply_physical_presence_bonus(player_id, district_id, action_type):
+    """
+    Apply a bonus for physically being present in a district during an action.
+    This gives +20 Control Points to the action if it's a main action.
+
+    Args:
+        player_id: The player ID
+        district_id: The district ID
+        action_type: The type of action
+
+    Returns:
+        dict: Bonus information
+    """
+    # Check if this is a main action
+    if action_type not in [ACTION_INFLUENCE, ACTION_ATTACK, ACTION_DEFENSE]:
+        return {"applied": False, "bonus": 0}
+
+    # In a real implementation, you would check if the player is physically present
+    # For now, we'll use a placeholder check based on the player's recent activity
+    try:
+        conn = sqlite3.connect('belgrade_game.db')
+        cursor = conn.cursor()
+
+        # Check for a record of physical presence
+        cursor.execute(
+            """
+            SELECT is_present FROM player_presence 
+            WHERE player_id = ? AND district_id = ? AND timestamp > ?
+            """,
+            (player_id, district_id, (datetime.datetime.now() - datetime.timedelta(hours=6)).isoformat())
+        )
+        presence = cursor.fetchone()
+
+        conn.close()
+
+        if presence and presence[0]:
+            # Apply +20 CP bonus
+            return {"applied": True, "bonus": 20}
+
+    except Exception as e:
+        logger.error(f"Error checking physical presence: {e}")
+
+    return {"applied": False, "bonus": 0}
 
 
 def process_international_politicians():
@@ -343,36 +508,34 @@ async def schedule_jobs(application):
 
 async def refresh_actions(context):
     """Refresh actions for all players every 3 hours."""
-    conn = sqlite3.connect('belgrade_game.db')
-    cursor = conn.cursor()
+    try:
+        # Get all active players
+        conn = sqlite3.connect('belgrade_game.db')
+        cursor = conn.cursor()
+        cursor.execute("SELECT player_id FROM players")
+        players = cursor.fetchall()
+        conn.close()
 
-    # Get all active players
-    cursor.execute("SELECT player_id FROM players")
-    players = cursor.fetchall()
+        for player_id_tuple in players:
+            player_id = player_id_tuple[0]
 
-    for player_id_tuple in players:
-        player_id = player_id_tuple[0]
+            # Refresh their actions
+            refreshed = refresh_player_actions(player_id)
 
-        # Refresh their actions
-        cursor.execute(
-            "UPDATE players SET main_actions_left = 1, quick_actions_left = 2, last_action_refresh = ? WHERE player_id = ?",
-            (datetime.datetime.now().isoformat(), player_id)
-        )
+            # Only notify the player if actions were actually refreshed
+            if refreshed:
+                try:
+                    lang = get_player_language(player_id)
+                    await context.bot.send_message(
+                        chat_id=player_id,
+                        text=get_text("actions_refreshed_notification", lang)
+                    )
+                except Exception as e:
+                    logger.error(f"Failed to notify player {player_id} about action refresh: {e}")
 
-        # Notify the player
-        try:
-            lang = get_player_language(player_id)
-            await context.bot.send_message(
-                chat_id=player_id,
-                text=get_text("actions_refreshed_notification", lang)
-            )
-        except Exception as e:
-            logger.error(f"Failed to notify player {player_id} about action refresh: {e}")
-
-    conn.commit()
-    conn.close()
-
-    logger.info("Actions refreshed for all players")
+        logger.info("Actions refreshed for all players")
+    except Exception as e:
+        logger.error(f"Error in refresh_actions: {e}")
 
 
 def process_international_politician_action(politician_id):
@@ -704,96 +867,306 @@ def get_cycle_results_time():
         return EVENING_CYCLE_RESULTS
 
 
-def process_coordinated_action(action_id, player_id, action_type, target_type, target_id, resources_used):
+def process_coordinated_action(action_id):
     """Process a coordinated action with combined resources from all participants."""
     try:
-        # Get all participants
-        from db.queries import get_coordinated_action_participants
-        participants = get_coordinated_action_participants(action_id)
+        # Get the coordinated action
+        conn = sqlite3.connect('belgrade_game.db')
+        cursor = conn.cursor()
 
+        cursor.execute(
+            """
+            SELECT action_type, target_type, target_id, initiator_id
+            FROM coordinated_actions
+            WHERE action_id = ?
+            """,
+            (action_id,)
+        )
+
+        action = cursor.fetchone()
+        if not action:
+            return False, "Action not found"
+
+        action_type, target_type, target_id, initiator_id = action
+
+        # Get all participants' resources
+        cursor.execute(
+            """
+            SELECT player_id, resources_used
+            FROM coordinated_action_participants
+            WHERE action_id = ?
+            """,
+            (action_id,)
+        )
+
+        participants = cursor.fetchall()
         if not participants:
-            logger.error(f"No participants found for coordinated action {action_id}")
-            return {"success": False, "message": "No participants found"}
+            return False, "No participants"
 
         # Calculate total resources
         total_resources = {}
-        for participant in participants:
-            participant_id, resources_json, joined_at, participant_name = participant
-
-            # Parse resources
-            participant_resources = json.loads(resources_json)
-
-            # Add participant resources to total
-            for resource_type, amount in participant_resources.items():
+        for player_id, resources_json in participants:
+            resources = json.loads(resources_json)
+            for resource_type, amount in resources.items():
                 if resource_type in total_resources:
                     total_resources[resource_type] += amount
                 else:
                     total_resources[resource_type] = amount
 
-        logger.info(f"Processing coordinated action {action_id} with total resources: {total_resources}")
+        # Calculate total power based on resources
+        power = calculate_coordinated_power(total_resources, action_type)
 
-        # Get the target details
-        if target_type == "district":
-            # Process district-targeted action
-            from game.districts import get_district_by_id
-            district = get_district_by_id(target_id)
-            target_name = district['name'] if district else target_id
-
-            # Calculate resource power
-            action_power = calculate_coordinated_power(total_resources, action_type)
-
-            # Apply action effect based on type
-            if action_type == ACTION_ATTACK:
-                result = process_coordinated_attack(target_id, action_power, player_id, participants)
-            elif action_type == ACTION_DEFENSE:
-                result = process_coordinated_defense(target_id, action_power, player_id, participants)
-            else:
-                return {"success": False, "message": "Invalid action type"}
-
-            # Close the coordinated action
-            from db.queries import close_coordinated_action
-            close_coordinated_action(action_id)
-
-            return result
+        # Apply the coordinated action effect
+        if action_type == ACTION_ATTACK:
+            result = process_coordinated_attack(target_id, power, initiator_id, participants)
+        elif action_type == ACTION_DEFENSE:
+            result = process_coordinated_defense(target_id, power, initiator_id, participants)
         else:
-            # For non-district targets
-            return {"success": False, "message": "Unsupported target type for coordinated actions"}
+            return False, "Invalid action type"
+
+        # Close the coordinated action
+        cursor.execute(
+            "UPDATE coordinated_actions SET status = 'closed' WHERE action_id = ?",
+            (action_id,)
+        )
+
+        conn.commit()
+        conn.close()
+
+        return True, result
 
     except Exception as e:
         logger.error(f"Error processing coordinated action {action_id}: {e}")
-        return {"success": False, "message": str(e)}
+        return False, str(e)
 
 
-def calculate_coordinated_power(resources, action_type):
-    """Calculate the power of a coordinated action based on resources contributed."""
-    total_power = 0
+def calculate_coordinated_power(resources_list, action_type):
+    """
+    Calculate the combined power of a coordinated action based on all participants' resources.
 
-    # Apply different weights based on action type
+    Args:
+        resources_list: List of resource dictionaries from all participants
+        action_type: Type of action (attack, defense, etc.)
+
+    Returns:
+        int: Total power value
+    """
+    # Combine all resources
+    total_resources = {}
+    for resources in resources_list:
+        for resource_type, amount in resources.items():
+            if resource_type in total_resources:
+                total_resources[resource_type] += amount
+            else:
+                total_resources[resource_type] = amount
+
+    # Calculate base power from combined resources
+    base_power = 0
+    for resource_type, amount in total_resources.items():
+        if action_type == ACTION_ATTACK:
+            if resource_type == "force":
+                base_power += amount * 2
+            elif resource_type == "influence":
+                base_power += amount * 1.5
+            else:
+                base_power += amount
+        elif action_type == ACTION_DEFENSE:
+            if resource_type == "influence":
+                base_power += amount * 2
+            elif resource_type == "force":
+                base_power += amount * 1.5
+            else:
+                base_power += amount
+        else:
+            base_power += amount
+
+    # Apply synergy bonus based on number of participants
+    participant_count = len(resources_list)
+    if participant_count >= 4:
+        synergy_multiplier = 1.3  # 30% bonus for 4+ participants
+    elif participant_count >= 3:
+        synergy_multiplier = 1.2  # 20% bonus for 3 participants
+    elif participant_count >= 2:
+        synergy_multiplier = 1.1  # 10% bonus for 2 participants
+    else:
+        synergy_multiplier = 1.0  # No bonus for solo actions
+
+    # Apply diversity bonus based on resource types
+    resource_types_used = set()
+    for resources in resources_list:
+        resource_types_used.update(resources.keys())
+
+    if len(resource_types_used) >= 4:
+        diversity_multiplier = 1.2  # 20% bonus for using all 4 resource types
+    elif len(resource_types_used) >= 3:
+        diversity_multiplier = 1.1  # 10% bonus for using 3 resource types
+    else:
+        diversity_multiplier = 1.0  # No bonus for less diversity
+
+    # Final power calculation
+    final_power = round(base_power * synergy_multiplier * diversity_multiplier)
+
+    # Log the calculation for debugging
+    logger.info(
+        f"Coordinated {action_type} power: {final_power} (base: {base_power}, participants: {participant_count}, resources: {total_resources})")
+
+    return final_power
+
+
+def process_join_with_resources(player_id, action_id, resources_dict):
+    """
+    Process a player joining a coordinated action with specified resources.
+
+    Args:
+        player_id: Player ID
+        action_id: Coordinated action ID
+        resources_dict: Dictionary of resources {resource_type: amount}
+
+    Returns:
+        tuple: (success, message)
+    """
+    try:
+        # Get action details
+        conn = sqlite3.connect('belgrade_game.db')
+        cursor = conn.cursor()
+
+        # Check if action exists and is still open
+        cursor.execute(
+            """
+            SELECT action_id, action_type, target_type, target_id, expires_at, status, initiator_id
+            FROM coordinated_actions 
+            WHERE action_id = ?
+            """,
+            (action_id,)
+        )
+        action = cursor.fetchone()
+
+        if not action:
+            conn.close()
+            return False, "Action not found"
+
+        action_id, action_type, target_type, target_id, expires_at_str, status, initiator_id = action
+
+        # Don't allow initiator to join their own action again
+        if player_id == initiator_id:
+            conn.close()
+            return False, "You cannot join your own action again"
+
+        # Check if player already joined this action
+        cursor.execute(
+            """
+            SELECT player_id
+            FROM coordinated_action_participants
+            WHERE action_id = ? AND player_id = ?
+            """,
+            (action_id, player_id)
+        )
+        if cursor.fetchone():
+            conn.close()
+            return False, "You have already joined this action"
+
+        if status != 'open':
+            conn.close()
+            return False, "Action is no longer open"
+
+        # Check if action has expired
+        expires_at = datetime.datetime.fromisoformat(expires_at_str)
+        if datetime.datetime.now() > expires_at:
+            # Update status to expired
+            cursor.execute("UPDATE coordinated_actions SET status = 'expired' WHERE action_id = ?", (action_id,))
+            conn.commit()
+            conn.close()
+            return False, "Action has expired"
+
+        # Check if player has sufficient resources
+        cursor.execute(
+            """
+            SELECT influence, resources, information, force
+            FROM resources
+            WHERE player_id = ?
+            """,
+            (player_id,)
+        )
+        player_resources = cursor.fetchone()
+
+        if not player_resources:
+            conn.close()
+            return False, "Player resources not found"
+
+        # Convert tuple to dict for easier checks
+        available_resources = {
+            "influence": player_resources[0],
+            "resources": player_resources[1],
+            "information": player_resources[2],
+            "force": player_resources[3]
+        }
+
+        # Verify resources are available
+        for resource_type, amount in resources_dict.items():
+            if available_resources.get(resource_type, 0) < amount:
+                conn.close()
+                return False, f"Insufficient {resource_type} resources"
+
+        # Deduct resources
+        for resource_type, amount in resources_dict.items():
+            cursor.execute(
+                f"UPDATE resources SET {resource_type} = {resource_type} - ? WHERE player_id = ?",
+                (amount, player_id)
+            )
+
+        # Add participant
+        cursor.execute(
+            """
+            INSERT INTO coordinated_action_participants 
+            (action_id, player_id, resources_used, joined_at)
+            VALUES (?, ?, ?, ?)
+            """,
+            (action_id, player_id, json.dumps(resources_dict), datetime.datetime.now().isoformat())
+        )
+
+        conn.commit()
+        conn.close()
+
+        return True, "Successfully joined action"
+
+    except Exception as e:
+        logger.error(f"Error processing join with resources: {e}")
+        return False, f"Error: {str(e)}"
+
+
+def calculate_participant_power(resources, action_type):
+    """
+    Calculate a participant's power contribution based on resources.
+
+    Args:
+        resources: Dictionary of resources {resource_type: amount}
+        action_type: Type of action (attack, defense, etc.)
+
+    Returns:
+        int: Power contribution value
+    """
+    base_power = 0
+
     for resource_type, amount in resources.items():
         if action_type == ACTION_ATTACK:
             if resource_type == "force":
-                total_power += amount * 2.0  # Force is most effective for attacks
+                base_power += amount * 2  # Force is most effective for attacks
             elif resource_type == "influence":
-                total_power += amount * 1.5  # Influence is moderately effective
+                base_power += amount * 1.5  # Influence is moderately effective
             else:
-                total_power += amount * 1.0  # Other resources still help
+                base_power += amount  # Other resources contribute base value
         elif action_type == ACTION_DEFENSE:
             if resource_type == "influence":
-                total_power += amount * 2.0  # Influence is most effective for defense
+                base_power += amount * 2  # Influence is most effective for defense
             elif resource_type == "force":
-                total_power += amount * 1.5  # Force is moderately effective
+                base_power += amount * 1.5  # Force is moderately effective
             else:
-                total_power += amount * 1.0  # Other resources still help
+                base_power += amount  # Other resources contribute base value
+        else:
+            # Default contribution for other action types
+            base_power += amount
 
-    # Apply a bonus for coordinated actions based on number of resources
-    total_resources = sum(resources.values())
-    if total_resources >= 6:
-        total_power *= 1.2  # 20% bonus for large coordinated actions
-    elif total_resources >= 4:
-        total_power *= 1.1  # 10% bonus for medium coordinated actions
-
-    # Round to nearest integer
-    return round(total_power)
+    return round(base_power)
 
 
 def process_coordinated_attack(district_id, attack_power, initiator_id, participants):
@@ -809,13 +1182,19 @@ def process_coordinated_attack(district_id, attack_power, initiator_id, particip
         district_name = district['name'] if district else district_id
 
         # Get participant names for messages
-        participant_names = [p[3] for p in participants]
+        participant_names = []
+        for p in participants:
+            # Participant tuple structure: (player_id, resources_json, joined_at, character_name)
+            if len(p) >= 4:
+                participant_names.append(p[3])
+            else:
+                participant_names.append(f"Player {p[0]}")
 
         if not control_data:
             # No one controls the district, so attackers gain control
             # Distribute control points proportionally among participants
             for participant in participants:
-                participant_id, resources_json, joined_at, participant_name = participant
+                participant_id = participant[0]  # First element is player_id
 
                 # Give each participant a share of the control points
                 participant_share = round(attack_power / len(participants))
@@ -832,32 +1211,67 @@ def process_coordinated_attack(district_id, attack_power, initiator_id, particip
         # Find the player with the most control points (the defender)
         defender_id, defender_control, defender_name = max(control_data, key=lambda x: x[1])
 
-        # Don't attack yourself
-        if defender_id == initiator_id:
-            # Find the next highest controller
-            control_data = [c for c in control_data if c[0] != initiator_id]
-            if not control_data:
+        # Don't attack yourself or other participants
+        participant_ids = [p[0] for p in participants]
+        if defender_id in participant_ids:
+            # Find the next highest controller not in participants
+            filtered_control_data = [c for c in control_data if c[0] not in participant_ids]
+            if not filtered_control_data:
                 return {
                     "success": False,
-                    "message": f"You already control {district_name}. No other players to attack.",
+                    "message": f"No suitable target found in {district_name}.",
                     "participants": participant_names
                 }
-            defender_id, defender_control, defender_name = max(control_data, key=lambda x: x[1])
+            defender_id, defender_control, defender_name = max(filtered_control_data, key=lambda x: x[1])
 
-        # Calculate attack effect - reduce defender control
-        defender_new_control = max(0, defender_control - attack_power)
+        # Check if the defender has active defense
+        conn = sqlite3.connect('belgrade_game.db')
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT defense_bonus FROM district_defense 
+            WHERE district_id = ? AND player_id = ? AND expires_at > ?
+            """,
+            (district_id, defender_id, datetime.datetime.now().isoformat())
+        )
+        defense_result = cursor.fetchone()
+        conn.close()
+
+        defense_bonus = defense_result[0] if defense_result else 0
+
+        # Calculate effect of attack vs defense
+        net_attack = max(0, attack_power - defense_bonus)
+
+        # Reduce defender control
+        defender_new_control = max(0, defender_control - net_attack)
         defender_loss = defender_control - defender_new_control
 
         # Update defender control
         from db.queries import update_district_control
         update_district_control(defender_id, district_id, -defender_loss)
 
+        # If defense completely blocked the attack
+        if defender_loss == 0:
+            return {
+                "success": False,
+                "message": f"Attack on {district_name} was blocked by {defender_name}'s defenses.",
+                "participants": participant_names,
+                "target_player": defender_name,
+                "defense_bonus": defense_bonus
+            }
+
         # Distribute gained control among participants proportionally
         for participant in participants:
-            participant_id, resources_json, joined_at, participant_name = participant
+            participant_id = participant[0]
 
-            # Give each participant a share of the control points
-            participant_share = round(defender_loss / len(participants))
+            # Calculate participant's contribution to the attack
+            participant_resources = json.loads(participant[1])  # Parse resource JSON
+            participant_power = calculate_participant_power(participant_resources, ACTION_ATTACK)
+
+            # Share of gained control based on contribution
+            contribution_ratio = participant_power / max(1, attack_power)
+            participant_share = round(defender_loss * contribution_ratio)
+
             update_district_control(participant_id, district_id, participant_share)
 
         # Add a news item about the attack
@@ -871,7 +1285,8 @@ def process_coordinated_attack(district_id, attack_power, initiator_id, particip
             "message": f"Coordinated attack successful against {defender_name} in {district_name}",
             "participants": participant_names,
             "defender": defender_name,
-            "control_taken": defender_loss
+            "control_taken": defender_loss,
+            "defense_blocked": defense_bonus
         }
 
     except Exception as e:
@@ -888,33 +1303,68 @@ def process_coordinated_defense(district_id, defense_power, initiator_id, partic
         district_name = district['name'] if district else district_id
 
         # Get participant names for messages
-        participant_names = [p[3] for p in participants]
+        participant_names = []
+        for p in participants:
+            if len(p) >= 4:
+                participant_names.append(p[3])
+            else:
+                participant_names.append(f"Player {p[0]}")
 
-        # Increase control for each participant
+        # Set up the defense to last until the end of the cycle
+        now = datetime.datetime.now()
+
+        # Determine cycle end time based on current time
+        if now.hour < 13:  # Morning cycle
+            expires_at = datetime.datetime.combine(now.date(), datetime.time(13, 0))
+        else:  # Evening cycle
+            if now.hour < 19:
+                expires_at = datetime.datetime.combine(now.date(), datetime.time(19, 0))
+            else:
+                # If it's after 19:00, set to 13:00 next day
+                tomorrow = now.date() + datetime.timedelta(days=1)
+                expires_at = datetime.datetime.combine(tomorrow, datetime.time(13, 0))
+
+        # Record defense bonuses for each participant
+        conn = sqlite3.connect('belgrade_game.db')
+        cursor = conn.cursor()
+
         for participant in participants:
-            participant_id, resources_json, joined_at, participant_name = participant
+            participant_id = participant[0]
 
-            # Calculate this participant's share of the defense power
-            participant_share = round(defense_power / len(participants))
+            # Calculate participant's individual defense contribution
+            participant_resources = json.loads(participant[1])
+            participant_power = calculate_participant_power(participant_resources, ACTION_DEFENSE)
 
-            # Update participant's control
+            # Insert or update defense bonus
+            cursor.execute(
+                """
+                INSERT OR REPLACE INTO district_defense
+                (district_id, player_id, defense_bonus, expires_at)
+                VALUES (?, ?, ?, ?)
+                """,
+                (district_id, participant_id, participant_power, expires_at.isoformat())
+            )
+
+            # Also increment control points for the district (reinforcement)
             from db.queries import update_district_control
-            update_district_control(participant_id, district_id, participant_share)
+            control_increase = round(participant_power / 2)  # Half of defense power translates to control
+            update_district_control(participant_id, district_id, control_increase)
 
-        # Add a defense effect to the district that will reduce impact of future attacks
-        # (This would require additional logic to implement effectively)
+        conn.commit()
+        conn.close()
 
         # Add a news item about the defense
         from db.queries import add_news
         news_title = f"Coordinated Defense of {district_name}"
-        news_content = f"A coordinated defense led by {participant_names[0]} with {len(participants)} participants fortified their control by {defense_power} points."
+        news_content = f"A coordinated defense led by {participant_names[0]} with {len(participants)} participants has fortified their positions in {district_name}."
         add_news(news_title, news_content)
 
         return {
             "success": True,
             "message": f"Coordinated defense successful in {district_name}",
             "participants": participant_names,
-            "control_gained": defense_power
+            "defense_power": defense_power,
+            "expires_at": expires_at.isoformat()
         }
 
     except Exception as e:

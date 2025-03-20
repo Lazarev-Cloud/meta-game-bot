@@ -104,7 +104,29 @@ def setup_database():
             FOREIGN KEY (player_id) REFERENCES players (player_id)
         )
         ''')
+        cursor.execute("""
+        -- Add table for tracking physical presence
+        CREATE TABLE IF NOT EXISTS player_presence (
+            player_id INTEGER,
+            district_id TEXT,
+            timestamp TEXT,
+            is_present BOOLEAN DEFAULT 1,
+            PRIMARY KEY (player_id, district_id),
+            FOREIGN KEY (player_id) REFERENCES players (player_id),
+            FOREIGN KEY (district_id) REFERENCES districts (district_id)
+        );
 
+        -- Add table for district defense
+        CREATE TABLE IF NOT EXISTS district_defense (
+            district_id TEXT,
+            player_id INTEGER,
+            defense_bonus INTEGER DEFAULT 0,
+            expires_at TEXT,
+            PRIMARY KEY (district_id, player_id),
+            FOREIGN KEY (district_id) REFERENCES districts (district_id),
+            FOREIGN KEY (player_id) REFERENCES players (player_id)
+        );
+        """)
         # Create Politicians table
         cursor.execute('''
         CREATE TABLE IF NOT EXISTS politicians (
@@ -162,6 +184,35 @@ def setup_database():
             interaction_count INTEGER DEFAULT 0,
             PRIMARY KEY (politician_id, player_id),
             FOREIGN KEY (politician_id) REFERENCES politicians (politician_id),
+            FOREIGN KEY (player_id) REFERENCES players (player_id)
+        )
+        ''')
+
+        # Create CoordinatedActions table
+        cursor.execute('''
+        CREATE TABLE IF NOT EXISTS coordinated_actions (
+            action_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            initiator_id INTEGER,
+            action_type TEXT,
+            target_type TEXT,
+            target_id TEXT,
+            resources_used TEXT,
+            timestamp TEXT,
+            cycle TEXT,
+            status TEXT DEFAULT 'open',
+            expires_at TEXT,
+            FOREIGN KEY (initiator_id) REFERENCES players (player_id)
+        )
+        ''')
+
+        # Create CoordinatedActionParticipants table
+        cursor.execute('''
+        CREATE TABLE IF NOT EXISTS coordinated_action_participants (
+            action_id INTEGER,
+            player_id INTEGER,
+            resources_used TEXT,
+            joined_at TEXT,
+            FOREIGN KEY (action_id) REFERENCES coordinated_actions (action_id),
             FOREIGN KEY (player_id) REFERENCES players (player_id)
         )
         ''')
@@ -242,16 +293,17 @@ def setup_database():
         if conn:
             conn.close()
 
+
 def ensure_player_has_base_resources(player_id):
     """Ensure that a player has the base starting resources."""
     try:
         conn = sqlite3.connect('belgrade_game.db')
         cursor = conn.cursor()
-        
+
         # Check if player has resources
         cursor.execute("SELECT player_id FROM resources WHERE player_id = ?", (player_id,))
         player_resources = cursor.fetchone()
-        
+
         if not player_resources:
             # Initialize resources with base amounts
             cursor.execute(
@@ -260,11 +312,10 @@ def ensure_player_has_base_resources(player_id):
             )
             conn.commit()
             logger.info(f"Base resources added for player {player_id}")
-        
+
         conn.close()
         return True
     except Exception as e:
         logger.error(f"Error ensuring base resources for player {player_id}: {e}")
         return False
-
 

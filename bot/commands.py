@@ -14,7 +14,7 @@ from db.queries import (
     get_remaining_actions, update_action_counts, get_news,
     get_player_districts, add_news, use_action, get_district_info,
     join_coordinated_action, get_open_coordinated_actions,
-    get_coordinated_action_participants
+    get_coordinated_action_participants, get_coordinated_action_details
 )
 from game.districts import (
     generate_text_map, format_district_info, get_district_by_name
@@ -1157,9 +1157,10 @@ async def admin_process_cycle(update: Update, context: ContextTypes.DEFAULT_TYPE
 
 
 async def join_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Show available coordinated actions to join via buttons."""
+    """Join a coordinated action with specified action ID and resources."""
     user = update.effective_user
     lang = get_player_language(user.id)
+    args = context.args
 
     # Check if player is registered
     player = get_player(user.id)
@@ -1167,24 +1168,33 @@ async def join_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(get_text("not_registered", lang))
         return
 
-    # Get all open coordinated actions
-    open_actions = get_open_coordinated_actions()
-
-    if not open_actions:
-        await update.message.reply_text(get_text("no_coordinated_actions", lang))
+    # Check if player has main actions left (coordinated actions use main actions)
+    actions = get_remaining_actions(user.id)
+    if actions['main'] <= 0:
+        await update.message.reply_text(get_text("no_main_actions", lang))
         return
 
-    # Create buttons for each coordinated action
-    keyboard = []
+    # If no arguments provided, show available actions
+    if not args:
+        await list_coordinated_actions_command(update, context)
+        return
 
-    for action in open_actions:
-        action_id = action[0]
-        action_type_raw = action[2]
-        action_type = get_action_name(action_type_raw, lang)
-        target_type = action[3]
-        target_id = action[4]
+    # Process with arguments (action_id, resource types...)
+    try:
+        action_id = int(args[0])
 
-        # Get target name based on type
+        # Get action details to show in confirmation
+        action_details = get_coordinated_action_details(action_id)
+
+        if not action_details:
+            await update.message.reply_text(get_text("action_not_found", lang))
+            return
+
+        action_type = action_details['action_type']
+        target_type = action_details['target_type']
+        target_id = action_details['target_id']
+
+        # Get target name
         if target_type == "district":
             from game.districts import get_district_by_id
             target_info = get_district_by_id(target_id)
@@ -1196,24 +1206,91 @@ async def join_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             target_name = target_id
 
-        button_text = f"{action_type} - {target_name} (ID: {action_id})"
-        callback_data = f"join_action:{action_id}:{action_type_raw}:{target_type}:{target_id}"
+        # Parse resource arguments if provided
+        resources_dict = {}
+        if len(args) > 1:
+            for resource_type in args[1:]:
+                resource_type = resource_type.lower()
+                if resource_type in ["influence", "resources", "information", "force"]:
+                    if resource_type in resources_dict:
+                        resources_dict[resource_type] += 1
+                    else:
+                        resources_dict[resource_type] = 1
 
-        # Limit the callback_data to avoid error (Telegram has 64-byte limit)
-        if len(callback_data) > 60:
-            callback_data = f"join_action:{action_id}"
+        # If resources are provided, process the join directly
+        if resources_dict:
+            # Validate resources
+            player_resources = get_player_resources(user.id)
+            for resource_type, amount in resources_dict.items():
+                if player_resources.get(resource_type, 0) < amount:
+                    await update.message.reply_text(
+                        get_text("insufficient_resources", lang, resource_type=get_resource_name(resource_type, lang))
+                    )
+                    return
 
-        keyboard.append([InlineKeyboardButton(button_text, callback_data=callback_data)])
+            # Join the action
+            success, message = join_coordinated_action(user.id, action_id, resources_dict)
 
-    # Add cancel button
-    keyboard.append([InlineKeyboardButton(get_text("action_cancel", lang), callback_data="action_cancel")])
+            if success:
+                # Deduct resources
+                for resource_type, amount in resources_dict.items():
+                    update_player_resources(user.id, resource_type, -amount)
 
-    reply_markup = InlineKeyboardMarkup(keyboard)
+                # Use a main action
+                use_action(user.id, True)  # True for main action
 
-    await update.message.reply_text(
-        get_text("coordinated_actions_title", lang),
-        reply_markup=reply_markup
-    )
+                # Format resources for display
+                resources_text = []
+                for resource_type, amount in resources_dict.items():
+                    resources_text.append(f"{amount} {get_resource_name(resource_type, lang)}")
+
+                resources_display = ", ".join(resources_text)
+
+                await update.message.reply_text(
+                    get_text("joined_coordinated_action", lang,
+                             action_type=get_action_name(action_type, lang),
+                             target=target_name,
+                             resources=resources_display)
+                )
+            else:
+                await update.message.reply_text(message)
+
+            return
+
+        # Otherwise, show interactive resource selection
+        # Create buttons to select resources
+        keyboard = [
+            [
+                InlineKeyboardButton("1 Influence", callback_data=f"join_resource:{action_id}:influence:1"),
+                InlineKeyboardButton("1 Resources", callback_data=f"join_resource:{action_id}:resources:1")
+            ],
+            [
+                InlineKeyboardButton("1 Information", callback_data=f"join_resource:{action_id}:information:1"),
+                InlineKeyboardButton("1 Force", callback_data=f"join_resource:{action_id}:force:1")
+            ],
+            [
+                InlineKeyboardButton("2 Influence", callback_data=f"join_resource:{action_id}:influence:2"),
+                InlineKeyboardButton("2 Force", callback_data=f"join_resource:{action_id}:force:2")
+            ],
+            [
+                InlineKeyboardButton(get_text("action_cancel", lang), callback_data="action_cancel")
+            ]
+        ]
+
+        reply_markup = InlineKeyboardMarkup(keyboard)
+
+        await update.message.reply_text(
+            get_text("select_resources_join", lang,
+                     action_type=get_action_name(action_type, lang),
+                     target_name=target_name),
+            reply_markup=reply_markup
+        )
+
+    except ValueError:
+        await update.message.reply_text(get_text("join_usage", lang))
+    except Exception as e:
+        logger.error(f"Error in join_command: {e}")
+        await update.message.reply_text(get_text("action_error", lang))
 
 
 async def exchange_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
