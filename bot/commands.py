@@ -273,6 +273,8 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"<b>{get_text('help_title', lang)}</b>\n\n"
         f"{get_text('help_basic', lang)}\n\n"
         f"{get_text('help_action', lang)}\n\n"
+        f"<b>{get_text('coordinated_actions_heading', lang, default='Coordinated Actions:')}</b>\n"
+        f"{get_text('coordinated_actions_help_text', lang, default='• Use the \"Join\" option from the main action menu to join someone\'s action\n• Create a coordinated action using \"Attack\" or \"Defense\" menu options\n• The more players join, the stronger the action will be')}\n\n"
         f"{get_text('help_resource', lang, default='*Resource Commands:*\n• /resources - View your current resources\n• /convert_resource [type] [amount] - Convert resources\n• /exchange - Interactive resource exchange menu\n• /check_income - Check your expected resource income')}\n\n"
         f"{get_text('help_political', lang)}\n\n"
     )

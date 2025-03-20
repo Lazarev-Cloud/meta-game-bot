@@ -202,6 +202,11 @@ TRANSLATIONS = {
         "status_failure": "❌",
         "status_info": "ℹ️",
 
+        "action_join": "Join",
+        "joining_coordinated_action": "Joining coordinated action",
+        "select_action_to_join": "Select a coordinated action to join:",
+
+
         # Admin commands
         "admin_only": "This command is for administrators only.",
         "admin_news_usage": "Usage: /admin_add_news [title] [content]",
@@ -350,6 +355,11 @@ TRANSLATIONS = {
         "ideology_neutral": "Нейтральный",
         "ideology_reformist": "Реформистский",
         "ideology_strongly_reformist": "Крайне реформистский",
+
+        "action_join": "Присоединиться",
+        "joining_coordinated_action": "Присоединение к координированному действию",
+        "select_action_to_join": "Выберите координированное действие, к которому хотите присоединиться:",
+
 
         # Relationship descriptions
         "compatibility_good": "Хорошая идеологическая совместимость",

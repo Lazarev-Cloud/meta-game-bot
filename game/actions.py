@@ -654,36 +654,222 @@ def get_cycle_results_time():
 
 
 def process_coordinated_action(action_id, player_id, action_type, target_type, target_id, resources_used):
-    """Process a coordinated action."""
+    """Process a coordinated action with combined resources from all participants."""
     try:
         # Get all participants
+        from db.queries import get_coordinated_action_participants
         participants = get_coordinated_action_participants(action_id)
-        
+
+        if not participants:
+            logger.error(f"No participants found for coordinated action {action_id}")
+            return {"success": False, "message": "No participants found"}
+
         # Calculate total resources
         total_resources = {}
         for participant in participants:
-            participant_resources = json.loads(participant[1])
+            participant_id, resources_json, joined_at, participant_name = participant
+
+            # Parse resources
+            participant_resources = json.loads(resources_json)
+
+            # Add participant resources to total
             for resource_type, amount in participant_resources.items():
                 if resource_type in total_resources:
                     total_resources[resource_type] += amount
                 else:
                     total_resources[resource_type] = amount
-        
-        # Process the action with combined resources
-        if action_type == ACTION_ATTACK:
-            result = process_attack(target_id, total_resources)
-        elif action_type == ACTION_DEFENSE:
-            result = process_defense(target_id, total_resources)
+
+        logger.info(f"Processing coordinated action {action_id} with total resources: {total_resources}")
+
+        # Get the target details
+        if target_type == "district":
+            # Process district-targeted action
+            from game.districts import get_district_by_id
+            district = get_district_by_id(target_id)
+            target_name = district['name'] if district else target_id
+
+            # Calculate resource power
+            action_power = calculate_coordinated_power(total_resources, action_type)
+
+            # Apply action effect based on type
+            if action_type == ACTION_ATTACK:
+                result = process_coordinated_attack(target_id, action_power, player_id, participants)
+            elif action_type == ACTION_DEFENSE:
+                result = process_coordinated_defense(target_id, action_power, player_id, participants)
+            else:
+                return {"success": False, "message": "Invalid action type"}
+
+            # Close the coordinated action
+            from db.queries import close_coordinated_action
+            close_coordinated_action(action_id)
+
+            return result
         else:
-            return {"success": False, "message": "Invalid action type"}
-        
-        # Close the coordinated action
-        close_coordinated_action(action_id)
-        
-        return result
+            # For non-district targets
+            return {"success": False, "message": "Unsupported target type for coordinated actions"}
+
     except Exception as e:
         logger.error(f"Error processing coordinated action {action_id}: {e}")
         return {"success": False, "message": str(e)}
+
+
+def calculate_coordinated_power(resources, action_type):
+    """Calculate the power of a coordinated action based on resources contributed."""
+    total_power = 0
+
+    # Apply different weights based on action type
+    for resource_type, amount in resources.items():
+        if action_type == ACTION_ATTACK:
+            if resource_type == "force":
+                total_power += amount * 2.0  # Force is most effective for attacks
+            elif resource_type == "influence":
+                total_power += amount * 1.5  # Influence is moderately effective
+            else:
+                total_power += amount * 1.0  # Other resources still help
+        elif action_type == ACTION_DEFENSE:
+            if resource_type == "influence":
+                total_power += amount * 2.0  # Influence is most effective for defense
+            elif resource_type == "force":
+                total_power += amount * 1.5  # Force is moderately effective
+            else:
+                total_power += amount * 1.0  # Other resources still help
+
+    # Apply a bonus for coordinated actions based on number of resources
+    total_resources = sum(resources.values())
+    if total_resources >= 6:
+        total_power *= 1.2  # 20% bonus for large coordinated actions
+    elif total_resources >= 4:
+        total_power *= 1.1  # 10% bonus for medium coordinated actions
+
+    # Round to nearest integer
+    return round(total_power)
+
+
+def process_coordinated_attack(district_id, attack_power, initiator_id, participants):
+    """Process a coordinated attack action on a district."""
+    try:
+        # Get current control data for the district
+        from db.queries import get_district_control
+        control_data = get_district_control(district_id)
+
+        # Get the district name for messages
+        from game.districts import get_district_by_id
+        district = get_district_by_id(district_id)
+        district_name = district['name'] if district else district_id
+
+        # Get participant names for messages
+        participant_names = [p[3] for p in participants]
+
+        if not control_data:
+            # No one controls the district, so attackers gain control
+            # Distribute control points proportionally among participants
+            for participant in participants:
+                participant_id, resources_json, joined_at, participant_name = participant
+
+                # Give each participant a share of the control points
+                participant_share = round(attack_power / len(participants))
+                from db.queries import update_district_control
+                update_district_control(participant_id, district_id, participant_share)
+
+            return {
+                "success": True,
+                "message": f"Coordinated attack successful on uncontrolled district {district_name}",
+                "participants": participant_names,
+                "control_gained": attack_power
+            }
+
+        # Find the player with the most control points (the defender)
+        defender_id, defender_control, defender_name = max(control_data, key=lambda x: x[1])
+
+        # Don't attack yourself
+        if defender_id == initiator_id:
+            # Find the next highest controller
+            control_data = [c for c in control_data if c[0] != initiator_id]
+            if not control_data:
+                return {
+                    "success": False,
+                    "message": f"You already control {district_name}. No other players to attack.",
+                    "participants": participant_names
+                }
+            defender_id, defender_control, defender_name = max(control_data, key=lambda x: x[1])
+
+        # Calculate attack effect - reduce defender control
+        defender_new_control = max(0, defender_control - attack_power)
+        defender_loss = defender_control - defender_new_control
+
+        # Update defender control
+        from db.queries import update_district_control
+        update_district_control(defender_id, district_id, -defender_loss)
+
+        # Distribute gained control among participants proportionally
+        for participant in participants:
+            participant_id, resources_json, joined_at, participant_name = participant
+
+            # Give each participant a share of the control points
+            participant_share = round(defender_loss / len(participants))
+            update_district_control(participant_id, district_id, participant_share)
+
+        # Add a news item about the attack
+        from db.queries import add_news
+        news_title = f"Coordinated Attack on {district_name}"
+        news_content = f"A coordinated attack led by {participant_names[0]} with {len(participants)} participants successfully reduced {defender_name}'s control by {defender_loss} points."
+        add_news(news_title, news_content)
+
+        return {
+            "success": True,
+            "message": f"Coordinated attack successful against {defender_name} in {district_name}",
+            "participants": participant_names,
+            "defender": defender_name,
+            "control_taken": defender_loss
+        }
+
+    except Exception as e:
+        logger.error(f"Error processing coordinated attack: {e}")
+        return {"success": False, "message": str(e)}
+
+
+def process_coordinated_defense(district_id, defense_power, initiator_id, participants):
+    """Process a coordinated defense action on a district."""
+    try:
+        # Get the district name for messages
+        from game.districts import get_district_by_id
+        district = get_district_by_id(district_id)
+        district_name = district['name'] if district else district_id
+
+        # Get participant names for messages
+        participant_names = [p[3] for p in participants]
+
+        # Increase control for each participant
+        for participant in participants:
+            participant_id, resources_json, joined_at, participant_name = participant
+
+            # Calculate this participant's share of the defense power
+            participant_share = round(defense_power / len(participants))
+
+            # Update participant's control
+            from db.queries import update_district_control
+            update_district_control(participant_id, district_id, participant_share)
+
+        # Add a defense effect to the district that will reduce impact of future attacks
+        # (This would require additional logic to implement effectively)
+
+        # Add a news item about the defense
+        from db.queries import add_news
+        news_title = f"Coordinated Defense of {district_name}"
+        news_content = f"A coordinated defense led by {participant_names[0]} with {len(participants)} participants fortified their control by {defense_power} points."
+        add_news(news_title, news_content)
+
+        return {
+            "success": True,
+            "message": f"Coordinated defense successful in {district_name}",
+            "participants": participant_names,
+            "control_gained": defense_power
+        }
+
+    except Exception as e:
+        logger.error(f"Error processing coordinated defense: {e}")
+        return {"success": False, "message": str(e)}
+
 
 def process_attack(district_id, resources):
     """Process an attack action with combined resources."""
