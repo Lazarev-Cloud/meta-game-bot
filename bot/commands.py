@@ -239,7 +239,7 @@ async def admin_help_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await update.message.reply_text(get_text("admin_only", lang))
         return
 
-    # Define the strings with apostrophes outside the f-string
+    # Define the strings outside the f-string
     reset_player_actions_text = "Reset a player's available actions"
     reset_all_actions_text = "Reset all players' available actions"
 
@@ -1148,8 +1148,6 @@ async def admin_process_cycle(update: Update, context: ContextTypes.DEFAULT_TYPE
     await update.message.reply_text(get_text("admin_cycle_processed", lang))
 
 
-# In bot/commands.py - Modify the join_command function
-
 async def join_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Show available coordinated actions to join via buttons."""
     user = update.effective_user
@@ -1308,14 +1306,14 @@ async def list_coordinated_actions_command(update: Update, context: ContextTypes
 
     # Get all open coordinated actions
     open_actions = get_open_coordinated_actions()
-    
+
     if not open_actions:
         await update.message.reply_text(get_text("no_coordinated_actions", lang))
         return
-    
+
     # Format actions
     response = f"*{get_text('coordinated_actions_title', lang)}*\n\n"
-    
+
     for action in open_actions:
         action_id = action[0]
         initiator_name = action[8] or get_text("unnamed", lang)
@@ -1323,23 +1321,23 @@ async def list_coordinated_actions_command(update: Update, context: ContextTypes
         action_type = get_action_name(action_type_raw, lang)
         target_type = action[3]
         target_id = action[4]
-        
+
         # Get target name based on type
         if target_type == "district":
             from game.districts import get_district_by_id
             target_info = get_district_by_id(target_id)
-            target_name = target_info[1] if target_info else target_id
+            target_name = target_info['name'] if target_info else target_id
         elif target_type == "politician":
             from game.politicians import get_politician_by_id
             target_info = get_politician_by_id(target_id)
-            target_name = target_info[1] if target_info else target_id
+            target_name = target_info['name'] if target_info else target_id
         else:
             target_name = target_id
-        
+
         # Get participants
         participants = get_coordinated_action_participants(action_id)
         participant_count = len(participants)
-        
+
         # Format action entry
         response += f"*{get_text('action_id', lang)}: {action_id}*\n"
         response += f"{get_text('action_type', lang)}: {action_type}\n"
@@ -1347,9 +1345,9 @@ async def list_coordinated_actions_command(update: Update, context: ContextTypes
         response += f"{get_text('initiator', lang)}: {initiator_name}\n"
         response += f"{get_text('participants', lang)}: {participant_count}\n"
         response += f"{get_text('join_command', lang)}: `/join {action_id} {action_type_raw} {target_type} {target_id}`\n\n"
-    
+
     response += get_text("coordinated_actions_help", lang)
-    
+
     await update.message.reply_text(response, parse_mode='Markdown')
 
 
@@ -1391,6 +1389,7 @@ def register_commands(application):
     application.add_handler(CommandHandler("resources", resources_command))
     application.add_handler(CommandHandler("convert_resource", convert_resource_command))
     application.add_handler(CommandHandler("check_income", check_income_command))
+    application.add_handler(CommandHandler("exchange", exchange_command))
 
     # Language handler
     application.add_handler(CommandHandler("language", language_command))

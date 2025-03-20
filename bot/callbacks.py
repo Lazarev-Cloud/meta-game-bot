@@ -2,26 +2,25 @@ import logging
 import sqlite3
 
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
-from telegram.ext import CallbackQueryHandler, ContextTypes, CommandHandler, ConversationHandler, MessageHandler, \
-    filters
+from telegram.ext import CallbackQueryHandler, ContextTypes, ConversationHandler
 
-from bot.commands import cancel_handler, set_name_handler, receive_info_content, start_command, help_command, \
-    status_command, map_command, time_command, news_command, action_command, quick_action_command, actions_left_command, \
-    cancel_action_command, join_command, list_coordinated_actions_command, view_district_command, politicians_command, \
-    politician_status_command, international_command, resources_command, convert_resource_command, check_income_command, \
-    exchange_command, language_command
 from languages import get_text, get_player_language, set_player_language, get_action_name, get_resource_name
 from db.queries import (
     get_player_resources, update_player_resources,
     get_remaining_actions, use_action, add_action,
-    update_district_control, create_coordinated_action
+    update_district_control, create_coordinated_action,
+    get_open_coordinated_actions, get_coordinated_action_participants, get_coordinated_action_details
 )
 from game.actions import (
     ACTION_INFLUENCE, ACTION_ATTACK, ACTION_DEFENSE,
     QUICK_ACTION_RECON, QUICK_ACTION_INFO, QUICK_ACTION_SUPPORT
 )
-from game.districts import format_district_info
-from game.politicians import format_politician_info
+from game.districts import (
+    format_district_info, get_district_by_id
+)
+from game.politicians import (
+    format_politician_info, get_politician_by_id
+)
 
 # Enable logging
 logging.basicConfig(
@@ -650,48 +649,54 @@ async def process_politician_undermine(query, politician_id):
         await query.edit_message_text(get_text("action_error", lang))
 
 
-def register_commands(application):
-    """Register all command handlers."""
-    # Create conversation handler for /start command
-    conv_handler = ConversationHandler(
-        entry_points=[CommandHandler("start", start_command)],
-        states={
-            "WAITING_NAME": [MessageHandler(filters.TEXT & ~filters.COMMAND, set_name_handler)],
-            "WAITING_INFO_CONTENT": [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_info_content)]
-        },
-        fallbacks=[CommandHandler("cancel", cancel_handler)]
-    )
-    application.add_handler(conv_handler)
+def register_callbacks(application):
+    """Register all callback handlers."""
+    # Action type callbacks
+    application.add_handler(CallbackQueryHandler(select_action_type_callback, pattern=r"^action_type:"))
+    application.add_handler(CallbackQueryHandler(action_join_callback, pattern=r"^action_type:join$"))
+    application.add_handler(CallbackQueryHandler(quick_action_type_callback, pattern=r"^quick_action_type:"))
 
-    # Add basic command handlers
-    application.add_handler(CommandHandler("help", help_command))
-    application.add_handler(CommandHandler("status", status_command))
-    application.add_handler(CommandHandler("map", map_command))
-    application.add_handler(CommandHandler("time", time_command))
-    application.add_handler(CommandHandler("news", news_command))
+    # Handle action mode selection (regular vs coordinated)
+    application.add_handler(CallbackQueryHandler(handle_action_mode_selection, pattern=r"^action_regular:"))
+    application.add_handler(CallbackQueryHandler(handle_action_mode_selection, pattern=r"^action_coordinated:"))
 
-    # Action handlers
-    application.add_handler(CommandHandler("action", action_command))
-    application.add_handler(CommandHandler("quick_action", quick_action_command))
-    application.add_handler(CommandHandler("cancel_action", cancel_action_command))
-    application.add_handler(CommandHandler("actions_left", actions_left_command))
-    application.add_handler(CommandHandler("join", join_command))
-    application.add_handler(CommandHandler("coordinated_actions", list_coordinated_actions_command))
+    # District and resource selection
+    application.add_handler(CallbackQueryHandler(district_selection_callback, pattern=r"^district_select:"))
+    application.add_handler(CallbackQueryHandler(resource_selection_callback, pattern=r"^resource:"))
+    application.add_handler(CallbackQueryHandler(submit_action_callback, pattern=r"^submit:"))
 
-    # District and politician handlers
-    application.add_handler(CommandHandler("view_district", view_district_command))
-    application.add_handler(CommandHandler("politicians", politicians_command))
-    application.add_handler(CommandHandler("politician_status", politician_status_command))
-    application.add_handler(CommandHandler("international", international_command))
+    # Join actions
+    application.add_handler(CallbackQueryHandler(join_action_callback, pattern=r"^join_action:"))
+    application.add_handler(CallbackQueryHandler(join_resource_callback, pattern=r"^join_resource:"))
+    application.add_handler(CallbackQueryHandler(join_submit_callback, pattern=r"^join_submit$"))
 
-    # Resource handlers
-    application.add_handler(CommandHandler("resources", resources_command))
-    application.add_handler(CommandHandler("convert_resource", convert_resource_command))
-    application.add_handler(CommandHandler("check_income", check_income_command))
-    application.add_handler(CommandHandler("exchange", exchange_command))
+    # Exchange resources
+    application.add_handler(CallbackQueryHandler(exchange_callback, pattern=r"^exchange:"))
+    application.add_handler(CallbackQueryHandler(exchange_again_callback, pattern=r"^exchange_again$"))
 
-    # Language handler
-    application.add_handler(CommandHandler("language", language_command))
+    # View details
+    application.add_handler(CallbackQueryHandler(view_district_callback, pattern=r"^view_district:"))
+    application.add_handler(CallbackQueryHandler(view_politician_callback, pattern=r"^view_politician:"))
+
+    # Direct district actions
+    application.add_handler(CallbackQueryHandler(district_action_callback, pattern=r"^action_influence:"))
+    application.add_handler(CallbackQueryHandler(district_action_callback, pattern=r"^action_attack:"))
+    application.add_handler(CallbackQueryHandler(district_action_callback, pattern=r"^action_defend:"))
+    application.add_handler(CallbackQueryHandler(district_action_callback, pattern=r"^quick_recon:"))
+    application.add_handler(CallbackQueryHandler(district_action_callback, pattern=r"^quick_support:"))
+
+    # Politician actions
+    application.add_handler(CallbackQueryHandler(pol_influence_callback, pattern=r"^pol_influence:"))
+    application.add_handler(CallbackQueryHandler(pol_info_callback, pattern=r"^pol_info:"))
+    application.add_handler(CallbackQueryHandler(pol_undermine_callback, pattern=r"^pol_undermine:"))
+
+    # Language selection
+    application.add_handler(CallbackQueryHandler(language_selection_callback, pattern=r"^lang:"))
+
+    # Cancel action
+    application.add_handler(CallbackQueryHandler(cancel_action_callback, pattern=r"^action_cancel$"))
+
+    logger.info("Callback handlers registered")
 
 
 async def select_action_type_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
