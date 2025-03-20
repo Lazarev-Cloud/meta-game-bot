@@ -17,34 +17,29 @@ class DatabaseConnectionPoolError(Exception):
 
 class DatabaseConnectionPool:
     """
-    Thread-safe SQLite connection pool with advanced features.
-
-    Features:
-    - Configurable max connections
-    - Connection timeout handling
-    - Exponential backoff for retries
-    - Foreign key enforcement
-    - Connection validation
+    Advanced thread-safe SQLite connection pool with robust error handling
     """
 
     def __init__(
             self,
             db_path: str = 'belgrade_game.db',
             max_connections: int = 10,
-            timeout: float = 10.0,
-            max_retries: int = 3,
+            timeout: float = 30.0,
+            max_retries: int = 5,
             initial_pragmas: Optional[Dict[str, str]] = None
     ):
-        """Initialize database connection pool with thread-local storage."""
         self._db_path = db_path
         self._max_connections = max_connections
         self._timeout = timeout
         self._max_retries = max_retries
+
+        # Enhanced PRAGMA settings for better concurrency and performance
         self._pragmas = {
             "foreign_keys": "ON",
-            "journal_mode": "WAL",
+            "journal_mode": "WAL",  # Write-Ahead Logging for better concurrency
             "synchronous": "NORMAL",
-            "cache_size": "-2000"
+            "cache_size": "-2000",  # Larger cache
+            "temp_store": "MEMORY"  # Use memory for temp tables
         }
         if initial_pragmas:
             self._pragmas.update(initial_pragmas)
@@ -52,18 +47,15 @@ class DatabaseConnectionPool:
         self._pool: list[sqlite3.Connection] = []
         self._lock = threading.Lock()
         self._connection_count = 0
-
-        # Thread-local storage for connections
         self._local = threading.local()
 
+        # Set up initial database configuration
         self._initialize_database()
 
     def _initialize_database(self):
         """
-        Create initial database configuration if needed.
-        Ensures database setup and initial PRAGMA configurations.
+        Create initial database configuration with enhanced settings
         """
-        conn = None
         try:
             conn = sqlite3.connect(self._db_path, timeout=self._timeout)
 
@@ -75,18 +67,58 @@ class DatabaseConnectionPool:
                     logger.warning(f"Could not set PRAGMA {pragma}: {pragma_error}")
 
             conn.commit()
+            conn.close()
         except sqlite3.Error as e:
             logger.error(f"Database initialization error: {e}")
             raise DatabaseConnectionPoolError(f"Failed to initialize database: {e}")
-        finally:
-            if conn:
-                conn.close()
+
+    def get_connection(self) -> sqlite3.Connection:
+        """
+        Get a connection with exponential backoff and robust error handling
+        """
+        # Check if there's already a connection for this thread
+        if hasattr(self._local, 'connection') and self._local.connection:
+            try:
+                # Test the connection
+                self._local.connection.execute("SELECT 1")
+                return self._local.connection
+            except (sqlite3.Error, sqlite3.ProgrammingError):
+                # Connection is invalid, remove it
+                self._local.connection = None
+
+        # Get a new connection with retry logic
+        retry_delay = 0.1  # Start with a small delay
+        for attempt in range(self._max_retries):
+            try:
+                # Acquire lock and get/create connection
+                with self._lock:
+                    if self._pool:
+                        conn = self._pool.pop()
+                    elif self._connection_count < self._max_connections:
+                        self._connection_count += 1
+                        conn = self._create_connection()
+                    else:
+                        raise DatabaseConnectionPoolError("No available database connections")
+
+                # Store in thread-local storage
+                self._local.connection = conn
+                return conn
+
+            except (sqlite3.OperationalError, DatabaseConnectionPoolError) as e:
+                logger.warning(f"Connection attempt {attempt + 1} failed: {e}")
+
+                # Exponential backoff with jitter
+                import random
+                time.sleep(retry_delay * (1 + random.random()))
+                retry_delay *= 2  # Exponential increase
+
+                if attempt == self._max_retries - 1:
+                    logger.error(f"Failed to get database connection after {self._max_retries} attempts")
+                    raise
 
     def _create_connection(self) -> sqlite3.Connection:
         """
-        Create a new database connection with configured PRAGMAs.
-
-        :return: Configured SQLite database connection
+        Create a new database connection with configured PRAGMAs
         """
         try:
             conn = sqlite3.connect(
@@ -103,37 +135,6 @@ class DatabaseConnectionPool:
         except sqlite3.Error as e:
             logger.error(f"Failed to create database connection: {e}")
             raise DatabaseConnectionPoolError(f"Connection creation failed: {e}")
-
-    def get_connection(self) -> sqlite3.Connection:
-        """
-        Get a connection specific to the current thread.
-
-        Returns:
-            A SQLite connection for the current thread
-        """
-        # Check if there's already a connection for this thread
-        if hasattr(self._local, 'connection') and self._local.connection:
-            try:
-                # Test the connection
-                self._local.connection.execute("SELECT 1")
-                return self._local.connection
-            except (sqlite3.Error, sqlite3.ProgrammingError):
-                # Connection is invalid, remove it
-                self._local.connection = None
-
-        # Get a new connection
-        with self._lock:
-            if self._pool:
-                conn = self._pool.pop()
-            elif self._connection_count < self._max_connections:
-                self._connection_count += 1
-                conn = self._create_connection()
-            else:
-                raise DatabaseConnectionPoolError("No available database connections")
-
-        # Store in thread-local storage
-        self._local.connection = conn
-        return conn
 
     def return_connection(self, conn: sqlite3.Connection):
         """Return a connection to the pool."""
@@ -183,7 +184,13 @@ class DatabaseConnectionPool:
                 except Exception:
                     pass
             self._connection_count = 0
-
+            if hasattr(self._local, 'connection'):
+                try:
+                    if self._local.connection:
+                        self._local.connection.close()
+                except Exception:
+                    pass
+                self._local.connection = None
 
 # Global database pool instance
 db_connection_pool = DatabaseConnectionPool()
@@ -944,13 +951,13 @@ def distribute_district_resources(conn):
             update_player_resources_internal(conn, player_id, "force", force)
 
 
-# Trading system queries
 @db_transaction
-def create_trade_offer(conn, sender_id, receiver_id, offer, request):
+def create_trade_offer(conn, sender_id: int, receiver_id: int, offer: Dict[str, int], request: Dict[str, int]) -> int:
     """
     Create a new trade offer.
 
     Args:
+        conn: Database connection
         sender_id: ID of player making the offer
         receiver_id: ID of player receiving the offer
         offer: Dict of resources being offered {resource_type: amount}
@@ -962,11 +969,28 @@ def create_trade_offer(conn, sender_id, receiver_id, offer, request):
     try:
         cursor = conn.cursor()
 
+        # Validate offer and request
+        valid_resources = {"influence", "resources", "information", "force"}
+        for resource_type in offer.keys():
+            if resource_type not in valid_resources:
+                logger.error(f"Invalid resource type in offer: {resource_type}")
+                return 0
+
+        for resource_type in request.keys():
+            if resource_type not in valid_resources:
+                logger.error(f"Invalid resource type in request: {resource_type}")
+                return 0
+
         # Verify sender has sufficient resources
-        sender_resources = get_player_resources(sender_id)
-        if not sender_resources:
-            logger.error(f"Sender {sender_id} not found or has no resources")
-            return 0
+        cursor.execute(
+            """
+            SELECT resource_type, amount
+            FROM resources
+            WHERE player_id = ?
+            """,
+            (sender_id,)
+        )
+        sender_resources = {r[0]: r[1] for r in cursor.fetchall()}
 
         for resource, amount in offer.items():
             if sender_resources.get(resource, 0) < amount:
@@ -981,11 +1005,12 @@ def create_trade_offer(conn, sender_id, receiver_id, offer, request):
             return 0
 
         # Create the offer
+        now = datetime.datetime.now().isoformat()
         cursor.execute("""
             INSERT INTO trade_offers 
             (sender_id, receiver_id, status, created_at)
             VALUES (?, ?, 'pending', ?)
-        """, (sender_id, receiver_id, datetime.datetime.now().isoformat()))
+        """, (sender_id, receiver_id, now))
 
         offer_id = cursor.lastrowid
 
@@ -1005,9 +1030,12 @@ def create_trade_offer(conn, sender_id, receiver_id, offer, request):
                 VALUES (?, ?, ?, 0)
             """, (offer_id, resource, amount))
 
-        # Deduct resources from sender
+        # Deduct offered resources from sender
         for resource, amount in offer.items():
-            update_player_resources_internal(conn, sender_id, resource, -amount)
+            cursor.execute(
+                f"UPDATE resources SET {resource} = {resource} - ? WHERE player_id = ?",
+                (amount, sender_id)
+            )
 
         return offer_id
 
@@ -1017,11 +1045,12 @@ def create_trade_offer(conn, sender_id, receiver_id, offer, request):
 
 
 @db_transaction
-def accept_trade_offer(conn, offer_id, receiver_id):
+def accept_trade_offer(conn, offer_id: int, receiver_id: int) -> bool:
     """
     Accept and execute a trade offer.
 
     Args:
+        conn: Database connection
         offer_id: ID of the trade offer
         receiver_id: ID of player accepting the offer
 
@@ -1063,10 +1092,26 @@ def accept_trade_offer(conn, offer_id, receiver_id):
                 requested[resource_type] = amount
 
         # Verify receiver has sufficient resources for the requested items
-        receiver_resources = get_player_resources(receiver_id)
-        if not receiver_resources:
+        cursor.execute(
+            """
+            SELECT influence, resources, information, force
+            FROM resources
+            WHERE player_id = ?
+            """,
+            (receiver_id,)
+        )
+
+        receiver_res = cursor.fetchone()
+        if not receiver_res:
             logger.error(f"Receiver {receiver_id} not found or has no resources")
             return False
+
+        receiver_resources = {
+            "influence": receiver_res[0],
+            "resources": receiver_res[1],
+            "information": receiver_res[2],
+            "force": receiver_res[3]
+        }
 
         for resource, amount in requested.items():
             if receiver_resources.get(resource, 0) < amount:
@@ -1074,22 +1119,32 @@ def accept_trade_offer(conn, offer_id, receiver_id):
                     f"Receiver {receiver_id} lacks {resource}: needs {amount}, has {receiver_resources.get(resource, 0)}")
                 return False
 
-        # Execute trade
-        # Transfer offered resources to receiver (already deducted from sender when offer was created)
-        for resource, amount in offered.items():
-            update_player_resources_internal(conn, receiver_id, resource, amount)
-
-        # Transfer requested resources from receiver to sender
+        # Execute trade - transfer requested resources
         for resource, amount in requested.items():
-            update_player_resources_internal(conn, receiver_id, resource, -amount)
-            update_player_resources_internal(conn, sender_id, resource, amount)
+            cursor.execute(
+                f"UPDATE resources SET {resource} = {resource} - ? WHERE player_id = ?",
+                (amount, receiver_id)
+            )
+
+            cursor.execute(
+                f"UPDATE resources SET {resource} = {resource} + ? WHERE player_id = ?",
+                (amount, sender_id)
+            )
+
+        # Transfer offered resources to receiver (already deducted from sender)
+        for resource, amount in offered.items():
+            cursor.execute(
+                f"UPDATE resources SET {resource} = {resource} + ? WHERE player_id = ?",
+                (amount, receiver_id)
+            )
 
         # Update offer status
+        now = datetime.datetime.now().isoformat()
         cursor.execute("""
             UPDATE trade_offers 
             SET status = 'completed', completed_at = ?
             WHERE offer_id = ?
-        """, (datetime.datetime.now().isoformat(), offer_id))
+        """, (now, offer_id))
 
         return True
 
@@ -1097,6 +1152,118 @@ def accept_trade_offer(conn, offer_id, receiver_id):
         logger.error(f"Error accepting trade offer: {e}")
         return False
 
+
+@db_transaction
+def cancel_trade_offer(conn, offer_id: int, sender_id: int) -> bool:
+    """
+    Cancel a trade offer and refund resources.
+
+    Args:
+        conn: Database connection
+        offer_id: ID of the trade to cancel
+        sender_id: ID of the player who created the offer
+
+    Returns:
+        bool: True if cancellation was successful
+    """
+    try:
+        cursor = conn.cursor()
+
+        # Verify offer exists, belongs to sender, and is still pending
+        cursor.execute("""
+            SELECT status 
+            FROM trade_offers 
+            WHERE offer_id = ? AND sender_id = ? AND status = 'pending'
+        """, (offer_id, sender_id))
+
+        if not cursor.fetchone():
+            logger.error(f"Trade offer {offer_id} not found, not pending, or not from sender {sender_id}")
+            return False
+
+        # Get offered resources to refund
+        cursor.execute("""
+            SELECT resource_type, amount 
+            FROM trade_resources 
+            WHERE offer_id = ? AND is_offer = 1
+        """, (offer_id,))
+
+        resources = cursor.fetchall()
+
+        # Refund resources to sender
+        for resource_type, amount in resources:
+            cursor.execute(
+                f"UPDATE resources SET {resource_type} = {resource_type} + ? WHERE player_id = ?",
+                (amount, sender_id)
+            )
+
+        # Update offer status
+        now = datetime.datetime.now().isoformat()
+        cursor.execute("""
+            UPDATE trade_offers 
+            SET status = 'cancelled', completed_at = ?
+            WHERE offer_id = ?
+        """, (now, offer_id))
+
+        return True
+
+    except Exception as e:
+        logger.error(f"Error cancelling trade offer: {e}")
+        return False
+
+
+def format_trade_info(trade_id: int, lang: str = 'en') -> str:
+    """Format trade information for display."""
+    with db_connection_pool.get_connection() as conn:
+        cursor = conn.cursor()
+
+        # Get trade information
+        cursor.execute("""
+            SELECT to.sender_id, to.receiver_id, to.status, to.created_at,
+                   p1.character_name as sender_name,
+                   p2.character_name as receiver_name
+            FROM trade_offers to
+            JOIN players p1 ON to.sender_id = p1.player_id
+            LEFT JOIN players p2 ON to.receiver_id = p2.player_id
+            WHERE to.offer_id = ?
+        """, (trade_id,))
+
+        trade = cursor.fetchone()
+        if not trade:
+            return get_text("trade_not_found", lang)
+
+        sender_id, receiver_id, status, created_at, sender_name, receiver_name = trade
+
+        # Get resources
+        cursor.execute("""
+            SELECT resource_type, amount, is_offer
+            FROM trade_resources
+            WHERE offer_id = ?
+        """, (trade_id,))
+
+        resources = cursor.fetchall()
+        offer_resources = {r[0]: r[1] for r in resources if r[2]}
+        request_resources = {r[0]: r[1] for r in resources if not r[2]}
+
+        # Format resources
+        offer_list = [f"{amount} {get_text(resource, lang)}" for resource, amount in offer_resources.items()]
+        request_list = [f"{amount} {get_text(resource, lang)}" for resource, amount in request_resources.items()]
+
+        created_time = datetime.datetime.fromisoformat(created_at)
+        formatted_time = created_time.strftime("%Y-%m-%d %H:%M")
+
+        lines = [
+            f"*{get_text('trade_offer', lang)}*",
+            f"{get_text('sender', lang)}: {sender_name}",
+            f"{get_text('receiver', lang)}: {receiver_name or get_text('not_specified', lang)}",
+            "",
+            f"{get_text('offering', lang)}: {', '.join(offer_list) or get_text('nothing', lang)}",
+            f"{get_text('requesting', lang)}: {', '.join(request_list) or get_text('nothing', lang)}",
+            "",
+            f"{get_text('status', lang)}: {get_text(status, lang)}",
+            f"{get_text('created', lang)}: {formatted_time}"
+        ]
+
+        return "\n".join(lines)
 
 @db_transaction
 def update_base_resources(conn, player_id):

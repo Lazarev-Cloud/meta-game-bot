@@ -43,7 +43,7 @@ async def process_game_cycle(context):
     current_time = now.time()
 
     # Determine current cycle
-    if datetime.time(6, 0) <= current_time < datetime.time(13, 1):
+    if datetime.time(6, 0) <= current_time < datetime.time(18, 0):
         cycle = "morning"
     else:
         cycle = "evening"
@@ -51,34 +51,52 @@ async def process_game_cycle(context):
     logger.info(f"Processing {cycle} cycle at {now}")
 
     try:
-        # Get all pending actions for this cycle using connection pool
-        actions = get_pending_actions(cycle)
+        # Process all actions for this cycle in a transaction
+        await asyncio.get_event_loop().run_in_executor(
+            executor,
+            process_all_cycle_actions,
+            cycle
+        )
 
-        # Process actions
-        for action in actions:
-            try:
-                action_id, player_id, action_type, target_type, target_id = action
-                process_single_action(action_id, player_id, action_type, target_type, target_id)
-            except Exception as e:
-                logger.error(f"Error processing action {action[0]}: {e}")
+        # Process joint actions
+        await asyncio.get_event_loop().run_in_executor(
+            executor,
+            process_expired_joint_actions
+        )
 
-        # Apply decay to district control
-        apply_district_decay()
+        # Apply district decay
+        await asyncio.get_event_loop().run_in_executor(
+            executor,
+            apply_district_decay
+        )
 
         # Distribute resources
-        distribute_district_resources()
+        await asyncio.get_event_loop().run_in_executor(
+            executor,
+            distribute_district_resources
+        )
 
         # Process international politicians
-        active_politicians = get_random_international_politicians(1, 3)
+        active_politicians = await asyncio.get_event_loop().run_in_executor(
+            executor,
+            get_random_international_politicians,
+            1, 3  # min_count, max_count
+        )
+
         for politician_id in active_politicians:
-            try:
-                process_international_politician_action(politician_id)
-            except Exception as e:
-                logger.error(f"Error processing international politician {politician_id}: {e}")
+            await asyncio.get_event_loop().run_in_executor(
+                executor,
+                process_international_politician_action,
+                politician_id
+            )
 
         # Create cycle summary
         cycle_number = current_time.hour // 3
-        create_cycle_summary(cycle_number)
+        await asyncio.get_event_loop().run_in_executor(
+            executor,
+            create_cycle_summary,
+            cycle_number
+        )
 
         # Notify players of results
         await notify_players_of_results(context, cycle)
@@ -93,7 +111,7 @@ async def process_game_cycle(context):
         logger.error(f"Exception traceback:\n{tb_string}")
 
 
-
+# Add this function to properly handle all cycle actions in a transaction
 @db_transaction
 def process_all_cycle_actions(conn, cycle: str):
     """Process all actions for a cycle in a single transaction."""
@@ -690,25 +708,37 @@ async def refresh_actions_job(context):
     """Refresh actions for all players every 3 hours."""
     try:
         # Get all active players
-        conn = sqlite3.connect('belgrade_game.db')
-        cursor = conn.cursor()
-        cursor.execute("SELECT player_id FROM players")
-        players = cursor.fetchall()
-        conn.close()
+        with db_connection_pool.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT player_id FROM players")
+            players = cursor.fetchall()
 
         for player_id_tuple in players:
             player_id = player_id_tuple[0]
 
             try:
-                # Refresh their actions
-                refresh_player_actions(player_id)
+                # Refresh their actions using the decorator
+                await asyncio.get_event_loop().run_in_executor(
+                    executor,
+                    refresh_player_actions,
+                    player_id
+                )
 
                 # Notify the player
-                lang = get_player_language(player_id)
-                await context.bot.send_message(
-                    chat_id=player_id,
-                    text=get_text("actions_refreshed_notification", lang)
-                )
+                try:
+                    lang = await asyncio.get_event_loop().run_in_executor(
+                        executor,
+                        get_player_language,
+                        player_id
+                    )
+
+                    await context.bot.send_message(
+                        chat_id=player_id,
+                        text=get_text("actions_refreshed_notification", lang)
+                    )
+                except Exception as e:
+                    logger.error(f"Failed to notify player {player_id} about action refresh: {e}")
+
             except Exception as e:
                 logger.error(f"Failed to refresh actions for player {player_id}: {e}")
 
@@ -716,11 +746,15 @@ async def refresh_actions_job(context):
     except Exception as e:
         logger.error(f"Error in refresh_actions_job: {e}")
 
+
 def get_current_cycle():
     """Return the current game cycle (morning or evening)."""
     now = datetime.datetime.now().time()
-    if CYCLE_STARTS[0] <= now < CYCLE_STARTS[4]:
+
+    # Morning cycle: 06:00 to 17:59
+    if datetime.time(6, 0) <= now < datetime.time(18, 0):
         return "morning"
+    # Evening cycle: 18:00 to 05:59
     else:
         return "evening"
 
@@ -728,20 +762,54 @@ def get_current_cycle():
 def get_cycle_deadline():
     """Return the submission deadline for the current cycle."""
     now = datetime.datetime.now().time()
-    if CYCLE_STARTS[0] <= now < CYCLE_STARTS[4]:
-        return CYCLE_STARTS[4]
+
+    # Morning cycle deadline: 12:00
+    if datetime.time(6, 0) <= now < datetime.time(18, 0):
+        return datetime.time(12, 0)
+    # Evening cycle deadline: 24:00
     else:
-        return CYCLE_STARTS[6]
+        return datetime.time(0, 0)
 
 
 def get_cycle_results_time():
     """Return the results time for the current cycle."""
     now = datetime.datetime.now().time()
-    if CYCLE_STARTS[0] <= now < CYCLE_STARTS[4]:
-        return CYCLE_STARTS[4]
-    else:
-        return CYCLE_STARTS[6]
 
+    # Morning cycle results: 13:00
+    if datetime.time(6, 0) <= now < datetime.time(18, 0):
+        return datetime.time(13, 0)
+    # Evening cycle results: 19:00
+    else:
+        return datetime.time(19, 0)
+
+
+def calculate_cycles_between(start_time: str, end_time: str) -> int:
+    """
+    Calculate the number of game cycles between two timestamps.
+
+    Args:
+        start_time: ISO format timestamp
+        end_time: ISO format timestamp
+
+    Returns:
+        int: Number of cycles
+    """
+    try:
+        start = datetime.datetime.fromisoformat(start_time)
+        end = datetime.datetime.fromisoformat(end_time)
+
+        # Calculate days difference
+        days_diff = (end.date() - start.date()).days
+
+        # Calculate cycles in the day
+        start_cycle = 0 if start.time() < datetime.time(18, 0) else 1
+        end_cycle = 0 if end.time() < datetime.time(18, 0) else 1
+
+        # Total cycles
+        return days_diff * 2 + end_cycle - start_cycle
+    except Exception as e:
+        logger.error(f"Error calculating cycles between: {e}")
+        return 0
 
 def calculate_quick_action_success(action_type: str, player_id: int, target_id: str) -> dict:
     """Calculate success chance and result of a quick action."""
