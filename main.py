@@ -13,8 +13,6 @@ from telegram.ext import Application
 from languages import get_text, get_player_language
 from languages_update import init_language_support
 import sqlite3
-from bot.callbacks import register_callbacks
-from bot.commands import register_commands
 from config import TOKEN, ADMIN_IDS
 from db.schema import setup_database
 from game.actions import schedule_jobs
@@ -54,6 +52,10 @@ def main() -> None:
         # Create the Application
         logger.info("Initializing Telegram bot...")
         application = Application.builder().token(TOKEN).build()
+
+        # Import handlers here to avoid circular imports
+        from bot.commands import register_commands
+        from bot.callbacks import register_callbacks
 
         # Register command handlers
         logger.info("Registering command handlers...")
@@ -123,7 +125,6 @@ def validate_system():
                     logger.warning(f"Essential translation key '{key}' is missing for language '{lang}'")
 
         # Check if admin IDs are configured
-        from config import ADMIN_IDS
         if not ADMIN_IDS:
             logger.warning("No admin IDs configured - admin commands will not be available")
 
@@ -174,7 +175,6 @@ def error_handler(update, context):
                 context.bot.send_message(chat_id=admin_id, text=error_message)
     except Exception as e:
         logger.error(f"Error notifying admins: {e}")
-
 
 
 if __name__ == "__main__":

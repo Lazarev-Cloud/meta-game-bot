@@ -5,7 +5,6 @@ from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import Application, CallbackQueryHandler, ContextTypes
 from config import TOKEN
 from db.schema import setup_database
-from bot.commands import register_commands
 from game.actions import schedule_jobs
 from languages import get_text, get_player_language, set_player_language, get_action_name, get_resource_name
 from db.queries import (
@@ -25,29 +24,6 @@ logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
 )
 logger = logging.getLogger(__name__)
-
-
-def main():
-    """Start the bot."""
-    # Set up the database
-    setup_database()
-
-    # Create the Application
-    application = Application.builder().token(TOKEN).build()
-
-    # Register command handlers
-    register_commands(application)
-
-    # Register callback handlers
-    register_callbacks(application)
-
-    # Set up scheduled jobs
-    application.job_queue.run_once(schedule_jobs, 1)
-
-    # Start the Bot
-    logger.info("Bot starting up...")
-    application.run_polling()
-    logger.info("Bot stopped")
 
 
 async def show_district_selection(query, message_text):
@@ -701,7 +677,3 @@ def register_callbacks(application):
     application.add_handler(CallbackQueryHandler(button_callback))
 
     logger.info("Callback handlers registered")
-
-
-if __name__ == "__main__":
-    main()
