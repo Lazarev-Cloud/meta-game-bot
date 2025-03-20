@@ -737,16 +737,37 @@ def update_action_counts(conn, player_id):
 # News-related queries
 @db_transaction
 def add_news(conn, title, content, is_public=True, target_player_id=None, is_fake=False):
-    """Add a news item."""
+    """
+    Add a news item with robust handling of timestamp
+    """
     cursor = conn.cursor()
-    now = datetime.datetime.now().isoformat()
-    cursor.execute(
-        """
-        INSERT INTO news (title, content, timestamp, is_public, target_player_id, is_fake)
-        VALUES (?, ?, ?, ?, ?, ?)
-        """,
-        (title, content, now, is_public, target_player_id, is_fake)
-    )
+
+    # Ensure created_at column exists, if not, use current timestamp
+    try:
+        now = datetime.datetime.now().isoformat()
+
+        # Try to insert with created_at
+        cursor.execute(
+            """
+            INSERT INTO news (title, content, created_at, timestamp, is_public, target_player_id, is_fake)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (title, content, now, now, is_public, target_player_id, is_fake)
+        )
+    except sqlite3.OperationalError as e:
+        # If column doesn't exist, fall back to basic insertion
+        if "no such column" in str(e).lower():
+            logger.warning("News table missing created_at column. Using alternative insertion.")
+            cursor.execute(
+                """
+                INSERT INTO news (title, content, timestamp, is_public, target_player_id, is_fake)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (title, content, now, is_public, target_player_id, is_fake)
+            )
+        else:
+            raise
+
     return cursor.lastrowid
 
 

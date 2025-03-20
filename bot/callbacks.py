@@ -3,24 +3,23 @@ import sqlite3
 
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import Application, CallbackQueryHandler, ContextTypes
-from telegram.ext._utils import asyncio
 
-from config import TOKEN
-from db.schema import setup_database
 from bot.commands import register_commands, executor
-from game.actions import schedule_jobs
-from languages import get_text, get_player_language, set_player_language, get_action_name, get_resource_name
+from config import TOKEN
 from db.queries import (
     get_player_resources, update_player_resources,
     get_remaining_actions, use_action, add_action,
-    update_district_control, get_district_info
+    update_district_control
 )
+from db.schema import setup_database
 from game.actions import (
     ACTION_INFLUENCE, ACTION_ATTACK, ACTION_DEFENSE,
     QUICK_ACTION_RECON, QUICK_ACTION_INFO, QUICK_ACTION_SUPPORT
 )
+from game.actions import schedule_jobs
 from game.districts import format_district_info
 from game.politicians import format_politician_info
+from languages import get_text, get_player_language, set_player_language, get_action_name, get_resource_name
 
 # Enable logging
 logging.basicConfig(
@@ -349,13 +348,19 @@ async def show_district_info(query, district_id):
     user = query.from_user
     lang = get_player_language(user.id)
 
-    # Get district info formatted for display via thread pool
-    district_info = await asyncio.get_event_loop().run_in_executor(
-        executor,
-        format_district_info,
-        district_id,
-        lang
-    )
+    # Get district info formatted for display via context.application.create_task
+    try:
+        district_info = await context.application.create_task(
+            format_district_info,
+            district_id,
+            lang
+        )
+    except Exception as e:
+        logger.error(f"Error getting district info: {e}")
+        await query.edit_message_text(
+            text=get_text("error_district_info", lang, default="Error retrieving district information.")
+        )
+        return
 
     if district_info:
         # Add action buttons
@@ -387,19 +392,26 @@ async def show_district_info(query, district_id):
             text=get_text("error_district_info", lang, default="Error retrieving district information.")
         )
 
+
 async def show_politician_info(query, politician_id):
     """Display information about a politician with action buttons."""
     user = query.from_user
     lang = get_player_language(user.id)
 
-    # Get politician info formatted for display via thread pool
-    politician_info = await asyncio.get_event_loop().run_in_executor(
-        executor,
-        format_politician_info,
-        politician_id,
-        user.id,
-        lang
-    )
+    # Get politician info formatted for display via context.application.create_task
+    try:
+        politician_info = await context.application.create_task(
+            format_politician_info,
+            politician_id,
+            user.id,
+            lang
+        )
+    except Exception as e:
+        logger.error(f"Error getting politician info: {e}")
+        await query.edit_message_text(
+            text=get_text("error_politician_info", lang, default="Error retrieving politician information.")
+        )
+        return
 
     if politician_info:
         # Add action buttons
@@ -425,6 +437,7 @@ async def show_politician_info(query, politician_id):
         await query.edit_message_text(
             text=get_text("error_politician_info", lang, default="Error retrieving politician information.")
         )
+
 
 async def process_politician_influence(query, politician_id):
     """Process an influence action on a politician."""
@@ -681,15 +694,14 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         await process_main_action(query, action_type, target_type, target_id, resources)
 
-    # Handle view district
-    elif callback_data.startswith("view_district:"):
-        district_id = callback_data.split(":")[1]
-        await show_district_info(query, district_id)
-
-    # Handle view politician
+    # For viewing politicians and districts, pass the context
     elif callback_data.startswith("view_politician:"):
         politician_id = int(callback_data.split(":")[1])
         await show_politician_info(query, politician_id)
+
+    elif callback_data.startswith("view_district:"):
+        district_id = callback_data.split(":")[1]
+        await show_district_info(query, district_id)
 
     # Handle politician actions
     elif callback_data.startswith("pol_influence:"):

@@ -256,6 +256,50 @@ def setup_database():
         if conn:
             conn.close()
 
+def update_database_schema():
+    """
+    Update database schema to resolve ambiguous column names and add missing columns
+    """
+    try:
+        conn = sqlite3.connect('belgrade_game.db')
+        cursor = conn.cursor()
+
+        # Add fully qualified column names to tables
+        cursor.execute("""
+            ALTER TABLE politicians 
+            ADD COLUMN politician_district_id TEXT 
+            REFERENCES districts(district_id)
+        """)
+
+        # Ensure news table has created_at column
+        cursor.execute("""
+            ALTER TABLE news 
+            ADD COLUMN created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        """)
+
+        # Update existing queries to use fully qualified column names
+        cursor.execute("""
+            CREATE VIEW v_politician_districts AS
+            SELECT 
+                p.politician_id, 
+                p.name, 
+                p.politician_district_id AS district_id,
+                d.name AS district_name
+            FROM politicians p
+            LEFT JOIN districts d ON p.politician_district_id = d.district_id
+        """)
+
+        conn.commit()
+        conn.close()
+        logger.info("Database schema updated successfully")
+    except sqlite3.OperationalError as e:
+        # Ignore error if column already exists
+        if "duplicate column name" not in str(e) and "column created_at already exists" not in str(e):
+            logger.error(f"Error updating database schema: {e}")
+    except Exception as e:
+        logger.error(f"Unexpected error updating database schema: {e}")
+
+
 
 def get_international_politicians_data():
     """Get initial international politicians data"""
