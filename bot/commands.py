@@ -268,6 +268,10 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Check if the user is an admin
     is_admin = user.id in ADMIN_IDS
 
+    # Get player information
+    player = get_player(user.id)
+    player_id = user.id if player else None
+
     # Basic commands for all users
     help_text = (
         f"<b>{get_text('help_title', lang)}</b>\n\n"
@@ -278,6 +282,10 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"{get_text('help_resource', lang, default='*Resource Commands:*\n• /resources - View your current resources\n• /convert_resource [type] [amount] - Convert resources\n• /exchange - Interactive resource exchange menu\n• /check_income - Check your expected resource income')}\n\n"
         f"{get_text('help_political', lang)}\n\n"
     )
+
+    # Add player ID information
+    if player_id:
+        help_text += f"<b>{get_text('player_id_title', lang, default='Your Player ID:')}</b> {player_id}\n\n"
 
     # Add admin hint for admins
     if is_admin:

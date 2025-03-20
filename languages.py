@@ -19,7 +19,13 @@ TRANSLATIONS = {
         "id": "ID",
         "name": "Имя",
         "username": "Имя пользователя",
-        "resources": "Ресурсы",
+        "resources": "Resources",
+        "influence": "Influence",
+        "information": "Information",
+        "force": "Force",
+        "relationship": "Отношения",
+        "compatibility": "Совместимость",
+        "player_id_title": "Your Player ID",
         
         # Admin command descriptions
         "admin_resources_desc": "Добавить ресурсы игроку",
@@ -239,8 +245,11 @@ TRANSLATIONS = {
         "username": "Имя пользователя",
         "resources": "Ресурсы",
         "influence": "Влияние",
+        "information": "Информация",
+        "force": "Сила",
         "relationship": "Отношения",
         "compatibility": "Совместимость",
+        "player_id_title": "Ваш ID игрока",
         
         # Admin command descriptions
         "admin_resources_desc": "Добавить ресурсы игроку",

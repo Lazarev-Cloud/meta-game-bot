@@ -388,7 +388,7 @@ def process_international_politician_action(politician_id):
                 UPDATE district_control 
                 SET control_points = CASE WHEN control_points > 5 THEN control_points - 5 ELSE control_points END
                 WHERE district_id IN (
-                    SELECT district_id FROM districts 
+                    SELECT districts.district_id FROM districts 
                     JOIN politicians ON districts.district_id = politicians.district_id
                     WHERE politicians.ideology_score > 3 AND politicians.is_international = 0
                 )
@@ -408,7 +408,7 @@ def process_international_politician_action(politician_id):
                 UPDATE district_control 
                 SET control_points = CASE WHEN control_points > 5 THEN control_points - 5 ELSE control_points END
                 WHERE district_id IN (
-                    SELECT district_id FROM districts 
+                    SELECT districts.district_id FROM districts 
                     JOIN politicians ON districts.district_id = politicians.district_id
                     WHERE politicians.ideology_score < -3 AND politicians.is_international = 0
                 )
@@ -430,7 +430,7 @@ def process_international_politician_action(politician_id):
                     UPDATE district_control 
                     SET control_points = control_points + 3
                     WHERE district_id IN (
-                        SELECT district_id FROM districts 
+                        SELECT districts.district_id FROM districts 
                         JOIN politicians ON districts.district_id = politicians.district_id
                         WHERE politicians.ideology_score BETWEEN -2 AND 2 AND politicians.is_international = 0
                     )
@@ -471,6 +471,15 @@ def process_international_politician_action(politician_id):
     except Exception as e:
         logger.error(f"Error processing international politician {politician_id}: {e}")
         return None
+
+
+def _escape_markdown(text):
+    """
+    Escape special characters for Markdown formatting.
+    """
+    if text is None:
+        return ""
+    return text.replace("*", "\\*").replace("_", "\\_").replace("`", "\\`").replace("[", "\\[")
 
 
 async def notify_players_of_results(context, cycle):
@@ -517,7 +526,7 @@ async def notify_players_of_results(context, cycle):
                         action_type, target_type, target_id, result_json = action
                         result = json.loads(result_json)
                         status = result.get('status', 'unknown')
-                        action_msg = result.get('message', get_text("no_details", lang))
+                        action_msg = _escape_markdown(result.get('message', get_text("no_details", lang)))
 
                         # Format based on status
                         if status == 'success':
@@ -529,7 +538,7 @@ async def notify_players_of_results(context, cycle):
                         else:
                             status_emoji = get_text("status_info", lang)
 
-                        message += f"{status_emoji} {action_type.capitalize()} - {action_msg}\n"
+                        message += f"{status_emoji} {_escape_markdown(action_type.capitalize())} - {action_msg}\n"
 
                     message += "\n"
 
@@ -560,12 +569,14 @@ async def notify_players_of_results(context, cycle):
                         news_id, title, content, timestamp, is_public, target_player, is_fake = news_item
                         news_time = datetime.datetime.fromisoformat(timestamp).strftime("%H:%M")
 
-                        message += f"📰 {news_time} - *{title}*\n"
-                        # Truncate long content
-                        if len(content) > 100:
-                            message += f"{content[:100]}...\n"
-                        else:
-                            message += f"{content}\n"
+                        # Escape special Markdown characters in title and content
+                        safe_title = title.replace("*", "\\*").replace("_", "\\_").replace("`", "\\`").replace("[", "\\[")
+                        
+                        message += f"📰 {news_time} - *{safe_title}*\n"
+                        # Truncate long content and escape special characters
+                        content_to_show = content[:100] + "..." if len(content) > 100 else content
+                        safe_content = content_to_show.replace("*", "\\*").replace("_", "\\_").replace("`", "\\`").replace("[", "\\[")
+                        message += f"{safe_content}\n"
 
                     message += "\n"
 

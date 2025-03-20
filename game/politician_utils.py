@@ -656,12 +656,17 @@ def generate_politician_influence_report(lang="en"):
         report_lines = [f"*{get_text('politician_influence_title', lang, default='Politician Influence Report')}*\n"]
 
         for politician in politicians:
+            if len(politician) < 6:
+                logger.warning(f"Incomplete politician data: {politician}")
+                continue
+                
             pol_id, name, role, ideology_score, influence, district_name = politician
 
             # Format ideology description
-            ideology = format_ideology(ideology_score, lang)
+            ideology = format_ideology(ideology_score or 0, lang)
 
             # Format influence tier
+            influence = influence or 0  # Ensure influence is not None
             if influence >= 6:
                 influence_tier = f"🔵🔵🔵 {get_text('high_influence', lang, default='High influence')}"
             elif influence >= 4:
@@ -672,7 +677,7 @@ def generate_politician_influence_report(lang="en"):
             district_text = f" ({district_name})" if district_name else ""
 
             report_lines.append(f"*{name}* - {role}{district_text}")
-            report_lines.append(f"  {ideology} ({ideology_score}), {influence_tier}")
+            report_lines.append(f"  {ideology} ({ideology_score or 0}), {influence_tier}")
 
         # Add section for international politicians
         report_lines.append(f"\n*{get_text('international_politicians', lang, default='International Politicians')}*\n")
@@ -688,13 +693,17 @@ def generate_politician_influence_report(lang="en"):
         international_politicians = cursor.fetchall()
 
         for politician in international_politicians:
+            if len(politician) < 4:
+                logger.warning(f"Incomplete international politician data: {politician}")
+                continue
+                
             pol_id, name, role, ideology_score = politician
 
             # Format ideology description
-            ideology = format_ideology(ideology_score, lang)
+            ideology = format_ideology(ideology_score or 0, lang)
 
             report_lines.append(f"*{name}* - {role}")
-            report_lines.append(f"  {ideology} ({ideology_score})")
+            report_lines.append(f"  {ideology} ({ideology_score or 0})")
 
         conn.close()
         return "\n".join(report_lines)
