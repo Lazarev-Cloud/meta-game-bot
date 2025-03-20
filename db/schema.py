@@ -1,6 +1,7 @@
 import sqlite3
 import logging
 import datetime
+import json
 
 logger = logging.getLogger(__name__)
 
@@ -115,19 +116,49 @@ def setup_database():
         )
         ''')
 
-        # Create table for politician relationships (removed duplicate)
-        cursor.execute('''
-        CREATE TABLE IF NOT EXISTS politician_relationships (
-            politician_id INTEGER,
-            player_id INTEGER,
-            friendliness INTEGER DEFAULT 50,
-            last_interaction TEXT,
-            interaction_count INTEGER DEFAULT 0,
-            PRIMARY KEY (politician_id, player_id),
-            FOREIGN KEY (politician_id) REFERENCES politicians (politician_id),
-            FOREIGN KEY (player_id) REFERENCES players (player_id)
-        )
-        ''')
+        # Create politician_relationships table
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS politician_relationships (
+                relationship_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                politician_id INTEGER,
+                player_id INTEGER,
+                friendliness INTEGER NOT NULL DEFAULT 50,
+                interaction_count INTEGER NOT NULL DEFAULT 0,
+                last_interaction INTEGER,
+                FOREIGN KEY (politician_id) REFERENCES politicians(politician_id),
+                FOREIGN KEY (player_id) REFERENCES players(player_id)
+            )
+        """)
+
+        # Create politician_abilities table
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS politician_abilities (
+                ability_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                politician_id INTEGER,
+                name TEXT NOT NULL,
+                description TEXT NOT NULL,
+                cooldown INTEGER NOT NULL,  -- в циклах
+                cost TEXT NOT NULL,  -- JSON строка с ресурсами
+                effect_type TEXT NOT NULL,  -- тип эффекта
+                effect_value TEXT NOT NULL,  -- значение эффекта в JSON
+                required_friendliness INTEGER NOT NULL,
+                FOREIGN KEY (politician_id) REFERENCES politicians(politician_id)
+            )
+        """)
+
+        # Create politician_ability_usage table
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS politician_ability_usage (
+                usage_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                politician_id INTEGER,
+                player_id INTEGER,
+                ability_id INTEGER,
+                last_used_cycle INTEGER,
+                FOREIGN KEY (politician_id) REFERENCES politicians(politician_id),
+                FOREIGN KEY (player_id) REFERENCES players(player_id),
+                FOREIGN KEY (ability_id) REFERENCES politician_abilities(ability_id)
+            )
+        """)
 
         # Create tables for trading system
         cursor.execute('''
@@ -198,13 +229,13 @@ def setup_database():
         # Initialize districts data
         districts = [
             ('stari_grad', 'Stari grad', 'Center of political power', 2, 0, 2, 0),
-            ('novi_beograd', 'Novi Beograd', 'Economic and business center', 1, 3, 0, 0),
-            ('zemun', 'Zemun', 'Criminal networks, smuggling', 0, 0, 1, 3),
-            ('savski_venac', 'Savski Venac', 'Diplomatic ties and embassies', 2, 0, 2, 0),
-            ('vozdovac', 'Voždovac', 'Military power and security', 1, 0, 0, 3),
-            ('cukarica', 'Čukarica', 'Industrial and working-class district', 0, 3, 0, 1),
-            ('palilula', 'Palilula', 'Youth and protest movements', 2, 0, 2, 0),
-            ('vracar', 'Vračar', 'Cultural and religious elite', 2, 1, 0, 0)
+            ('liman', 'Liman', 'Economic and business center', 1, 3, 0, 0),
+            ('petrovaradin', 'Petrovaradin', 'Criminal networks, smuggling', 0, 0, 1, 3),
+            ('grbavica', 'Grbavica', 'Diplomatic ties and embassies', 2, 0, 2, 0),
+            ('adamoviceva', 'Adamoviceva naselje', 'Military power and security', 1, 0, 0, 3),
+            ('sajmiste', 'Sajmište', 'Industrial and working-class district', 0, 3, 0, 1),
+            ('podbara', 'Podbara', 'Youth and protest movements', 2, 0, 2, 0),
+            ('salajka', 'Salajka', 'Cultural and religious elite', 2, 1, 0, 0)
         ]
 
         cursor.executemany(
@@ -218,21 +249,21 @@ def setup_database():
              'Supporter of centralized power and opponent of radical reforms'),
             (2, 'Milan Milutinović', 'Administration, regional influence', 3, 'stari_grad', 4, 50, 0,
              'Can slow down reforms but helps with bureaucracy'),
-            (3, 'Zoran Đinđić', 'Leader of the Democratic Party', -5, 'novi_beograd', 7, 50, 0,
+            (3, 'Zoran Đinđić', 'Leader of the Democratic Party', -5, 'liman', 7, 50, 0,
              'Promoting democratization and economic reforms'),
-            (4, 'Željko "Arkan" Ražnatović', 'Criminal networks, black market', -2, 'zemun', 5, 50, 0,
+            (4, 'Željko "Arkan" Ražnatović', 'Criminal networks, black market', -2, 'petrovaradin', 5, 50, 0,
              'Influential figure in criminal circles and politics'),
-            (5, 'Borislav Milošević', 'International diplomats', 3, 'savski_venac', 4, 50, 0,
+            (5, 'Borislav Milošević', 'International diplomats', 3, 'grbavica', 4, 50, 0,
              'Ambassador of Yugoslavia to Russia'),
             (
-                6, 'Nebojša Pavković', 'Military command', -4, 'vozdovac', 6, 50, 0,
+                6, 'Nebojša Pavković', 'Military command', -4, 'adamoviceva', 6, 50, 0,
                 'Supporter of hardline security policies'),
-            (7, 'Miroljub Labus', 'Union leaders', 2, 'cukarica', 4, 50, 0,
+            (7, 'Miroljub Labus', 'Union leaders', 2, 'sajmiste', 4, 50, 0,
              'Advocated for economic reforms and integration with Europe'),
-            (8, 'Čedomir "Čeda" Jovanović', 'Student movement leader', -4, 'palilula', 5, 50, 0,
+            (8, 'Čedomir "Čeda" Jovanović', 'Student movement leader', -4, 'podbara', 5, 50, 0,
              'Active participant in protests against the Milošević regime'),
             (
-                9, 'Patriarch Pavle', 'Religious leaders', -1, 'vracar', 5, 50, 0,
+                9, 'Patriarch Pavle', 'Religious leaders', -1, 'salajka', 5, 50, 0,
                 'Supports traditional values and status quo')
         ]
 
@@ -246,6 +277,50 @@ def setup_database():
         cursor.executemany(
             "INSERT INTO politicians VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
             international_politicians
+        )
+
+        # Initialize politician abilities
+        politician_abilities = [
+            # Неманя Ковачевич
+            (1, 1, "Административный ресурс", 
+             "Позволяет заблокировать одну заявку противника в день в районе Стари Град",
+             1,  # cooldown в циклах
+             json.dumps({"influence": 2, "information": 1}),  # cost
+             "block_action",  # effect_type
+             json.dumps({"district_id": "stari_grad"}),  # effect_value
+             80),  # required_friendliness
+
+            # Профессор Драган Йович
+            (2, 3, "Студенческий протест",
+             "Можно организовать протест в любом районе (+15 ОК к атаке)",
+             2,  # cooldown
+             json.dumps({"influence": 2, "information": 2}),
+             "attack_bonus",
+             json.dumps({"bonus": 15}),
+             75),
+
+            # Зоран "Зоки" Новакович
+            (3, 4, "Теневые связи",
+             "Конвертирует 2 любых ресурса в 4 Силы раз в день",
+             1,  # cooldown
+             json.dumps({"influence": 1, "information": 1}),
+             "resource_conversion",
+             json.dumps({"force": 4}),
+             70),
+
+            # Полковник Бранко Петрович
+            (4, 6, "Силовая зачистка",
+             "Можно 'обнулить' контроль противника в одном районе раз в 3 цикла",
+             3,  # cooldown
+             json.dumps({"force": 3, "influence": 2}),
+             "reset_control",
+             json.dumps({"district_id": None}),  # district_id будет указан при использовании
+             85)
+        ]
+
+        cursor.executemany(
+            "INSERT INTO politician_abilities VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            politician_abilities
         )
 
         conn.commit()

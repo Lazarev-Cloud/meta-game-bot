@@ -42,14 +42,14 @@ ADDITIONAL_TRANSLATIONS = {
         "force_desc": "Military, police, and armed groups",
 
         # Detailed district descriptions
-        "district_desc_stari_grad": "The political heart of Belgrade, where government offices are located",
-        "district_desc_novi_beograd": "Modern business district with international connections",
-        "district_desc_zemun": "Historical district with strong criminal elements",
-        "district_desc_savski_venac": "Diplomatic quarter with many foreign embassies",
-        "district_desc_vozdovac": "Military base and security headquarters",
-        "district_desc_cukarica": "Industrial area with factories and working-class population",
-        "district_desc_palilula": "University district with student activism",
-        "district_desc_vracar": "Cultural and religious center",
+        "district_desc_stari_grad": "The political heart of Novi Sad, where government offices are located",
+        "district_desc_liman": "Modern business district with international connections",
+        "district_desc_petrovaradin": "Historical district with strong criminal elements",
+        "district_desc_grbavica": "Diplomatic quarter with many foreign embassies",
+        "district_desc_adamoviceva": "Military base and security headquarters",
+        "district_desc_sajmiste": "Industrial area with factories and working-class population",
+        "district_desc_podbara": "University district with student activism",
+        "district_desc_salajka": "Cultural and religious center",
 
         # Detailed politician descriptions
         "politician_desc_milosevic": "As President of Yugoslavia, Milošević maintains tight control over state institutions and security forces.",
@@ -63,35 +63,36 @@ ADDITIONAL_TRANSLATIONS = {
         "joint_action_defense_desc": "A unified defensive strategy",
 
         # Detailed resource distribution messages
-        "resource_distribution_success": "Your controlled districts have generated resources!",
-        "resource_distribution_none": "You didn't receive any resources this cycle. Control more districts to generate income.",
+        "resource_distribution_success": "Your controlled districts have generated Gotovina!",
+        "resource_distribution_none": "You didn't receive any Gotovina this cycle. Control more districts to generate income.",
+        "resource_distribution_base": "You received base Gotovina: +1 influence, +1 Gotovina, +1 information, +1 force",
 
         # Detailed trade system messages
-        "trade_system_info": "The trading system allows you to exchange resources with other players.",
-        "trade_how_to": "To create a trade, use: /trade <player_id> offer <resource> <amount> request <resource> <amount>",
+        "trade_system_info": "The trading system allows you to exchange Gotovina with other players.",
+        "trade_how_to": "To create a trade, use: /trade <player_id> offer <Gotovina> <amount> request <Gotovina> <amount>",
         "trade_complete_details": "Trade #{trade_id} completed. You received: {received} and gave: {given}",
 
         # Enhanced help categories
         "help_category_basic": "Basic Commands",
         "help_category_action": "Action Commands",
-        "help_category_resource": "Resource Commands",
+        "help_category_resource": "Gotovina Commands",
         "help_category_political": "Political Commands",
         "help_category_advanced": "Advanced Features",
 
         # Advanced feature descriptions
         "feature_joint_actions": "Joint Actions: Coordinate with other players for stronger effects",
-        "feature_trade": "Trading: Exchange resources with other players",
+        "feature_trade": "Trading: Exchange Gotovina with other players",
         "feature_politician_abilities": "Politician Abilities: Use special actions through allied politicians",
 
         # New user tips
         "tip_first_steps": "First steps: Focus on gaining control in one district. Use influence actions to establish presence.",
-        "tip_resources": "Resource tip: Convert general Resources to specialized ones based on your strategy.",
+        "tip_resources": "Gotovina tip: Convert general Gotovina to specialized ones based on your strategy.",
         "tip_politicians": "Politician tip: Build relationships with politicians who match your ideology.",
         "tip_defense": "Defense tip: Defend territories you want to keep, not every place you have presence.",
 
         # More detailed error messages
         "error_action_timeout": "Action timed out. Please try again.",
-        "error_invalid_resource_combination": "Invalid resource combination for this action type.",
+        "error_invalid_resource_combination": "Invalid Gotovina combination for this action type.",
         "error_politician_unavailable": "This politician is not available for interaction at this time.",
         "error_district_contested": "This district is heavily contested right now. Your action faces strong opposition.",
 
@@ -101,7 +102,7 @@ ADDITIONAL_TRANSLATIONS = {
         # Detailed game mechanics for help command
         "mechanics_control": "District Control: Control points represent your influence in a district. 60+ points = full control with resource generation.",
         "mechanics_actions": "Actions: You have 1 main action and 2 quick actions every 3 hours. Main actions have stronger effects.",
-        "mechanics_resources": "Resources: Generated from controlled districts. Each district produces different resource types.",
+        "mechanics_resources": "Gotovina: Generated from controlled districts. Each district produces different Gotovina types.",
         "mechanics_ideology": "Ideology: Your position on the reform-conservative scale (-5 to +5) affects compatibility with politicians.",
 
         # Command helpers
@@ -121,7 +122,7 @@ ADDITIONAL_TRANSLATIONS = {
         # Pluralization templates
         "points_count": "{count} point|{count} points",
         "players_count": "{count} player|{count} players",
-        "resources_count": "{count} resource|{count} resources",
+        "resources_count": "{count} Gotovina|{count} Gotovina|{count} Gotovina",
         "actions_count": "{count} action|{count} actions",
     },
 
@@ -152,14 +153,14 @@ ADDITIONAL_TRANSLATIONS = {
         "force_desc": "Военные, полиция и вооруженные группы",
 
         # Detailed district descriptions
-        "district_desc_stari_grad": "Политическое сердце Белграда, где расположены правительственные учреждения",
-        "district_desc_novi_beograd": "Современный деловой район с международными связями",
-        "district_desc_zemun": "Исторический район с сильными криминальными элементами",
-        "district_desc_savski_venac": "Дипломатический квартал со многими иностранными посольствами",
-        "district_desc_vozdovac": "Военная база и штаб-квартиры безопасности",
-        "district_desc_cukarica": "Промышленная зона с фабриками и рабочим населением",
-        "district_desc_palilula": "Университетский район со студенческим активизмом",
-        "district_desc_vracar": "Культурный и религиозный центр",
+        "district_desc_stari_grad": "Политическое сердце Нови Сада, где расположены правительственные учреждения",
+        "district_desc_liman": "Современный деловой район с международными связями",
+        "district_desc_petrovaradin": "Исторический район с сильными криминальными элементами",
+        "district_desc_grbavica": "Дипломатический квартал со многими иностранными посольствами",
+        "district_desc_adamoviceva": "Военная база и штаб-квартиры безопасности",
+        "district_desc_sajmiste": "Промышленная зона с фабриками и рабочим населением",
+        "district_desc_podbara": "Университетский район со студенческим активизмом",
+        "district_desc_salajka": "Культурный и религиозный центр",
 
         # Detailed politician descriptions
         "politician_desc_milosevic": "Как президент Югославии, Милошевич поддерживает жесткий контроль над государственными институтами и силами безопасности.",
@@ -173,35 +174,36 @@ ADDITIONAL_TRANSLATIONS = {
         "joint_action_defense_desc": "Единая оборонительная стратегия",
 
         # Detailed resource distribution messages
-        "resource_distribution_success": "Ваши контролируемые районы сгенерировали ресурсы!",
-        "resource_distribution_none": "Вы не получили ресурсов в этом цикле. Контролируйте больше районов для получения дохода.",
+        "resource_distribution_success": "Ваши контролируемые районы сгенерировали Gotovina!",
+        "resource_distribution_none": "В этом цикле вы не получили Gotovina от районов. Захватывайте больше районов для получения дополнительного дохода.",
+        "resource_distribution_base": "Вы получили базовые Gotovina: +1 влияние, +1 Gotovina, +1 информация, +1 сила",
 
         # Detailed trade system messages
-        "trade_system_info": "Система торговли позволяет обмениваться ресурсами с другими игроками.",
-        "trade_how_to": "Чтобы создать обмен, используйте: /trade <id_игрока> offer <ресурс> <количество> request <ресурс> <количество>",
+        "trade_system_info": "Система торговли позволяет обмениваться Gotovina с другими игроками.",
+        "trade_how_to": "Чтобы создать обмен, используйте: /trade <id_игрока> offer <Gotovina> <количество> request <Gotovina> <количество>",
         "trade_complete_details": "Обмен #{trade_id} завершен. Вы получили: {received} и отдали: {given}",
 
         # Enhanced help categories
         "help_category_basic": "Основные команды",
         "help_category_action": "Команды действий",
-        "help_category_resource": "Команды ресурсов",
+        "help_category_resource": "Команды Gotovina",
         "help_category_political": "Политические команды",
         "help_category_advanced": "Продвинутые функции",
 
         # Advanced feature descriptions
         "feature_joint_actions": "Совместные действия: Координируйтесь с другими игроками для более сильных эффектов",
-        "feature_trade": "Торговля: Обменивайтесь ресурсами с другими игроками",
+        "feature_trade": "Торговля: Обменивайтесь Gotovina с другими игроками",
         "feature_politician_abilities": "Способности политиков: Используйте специальные действия через союзных политиков",
 
         # New user tips
         "tip_first_steps": "Первые шаги: Сосредоточьтесь на получении контроля в одном районе. Используйте действия влияния для установления присутствия.",
-        "tip_resources": "Совет по ресурсам: Конвертируйте общие Ресурсы в специализированные в зависимости от вашей стратегии.",
+        "tip_resources": "Совет по Gotovina: Конвертируйте общие Gotovina в специализированные в зависимости от вашей стратегии.",
         "tip_politicians": "Совет по политикам: Стройте отношения с политиками, которые соответствуют вашей идеологии.",
         "tip_defense": "Совет по защите: Защищайте территории, которые вы хотите сохранить, а не каждое место, где у вас есть присутствие.",
 
         # More detailed error messages
         "error_action_timeout": "Время действия истекло. Пожалуйста, попробуйте снова.",
-        "error_invalid_resource_combination": "Недопустимая комбинация ресурсов для этого типа действия.",
+        "error_invalid_resource_combination": "Недопустимая комбинация Gotovina для этого типа действия.",
         "error_politician_unavailable": "Этот политик недоступен для взаимодействия в данный момент.",
         "error_district_contested": "Этот район сейчас сильно оспаривается. Ваше действие сталкивается с сильной оппозицией.",
 
@@ -211,7 +213,7 @@ ADDITIONAL_TRANSLATIONS = {
         # Detailed game mechanics for help command
         "mechanics_control": "Контроль района: Очки контроля представляют ваше влияние в районе. 60+ очков = полный контроль с генерацией ресурсов.",
         "mechanics_actions": "Действия: У вас есть 1 основное действие и 2 быстрых действия каждые 3 часа. Основные действия имеют более сильные эффекты.",
-        "mechanics_resources": "Ресурсы: Генерируются из контролируемых районов. Каждый район производит разные типы ресурсов.",
+        "mechanics_resources": "Gotovina: Генерируются из контролируемых районов. Каждый район производит разные типы Gotovina.",
         "mechanics_ideology": "Идеология: Ваша позиция по шкале реформы-консерватизма (от -5 до +5) влияет на совместимость с политиками.",
 
         # Command helpers
@@ -231,7 +233,7 @@ ADDITIONAL_TRANSLATIONS = {
         # Pluralization templates
         "points_count": "{count} очко|{count} очка|{count} очков",
         "players_count": "{count} игрок|{count} игрока|{count} игроков",
-        "resources_count": "{count} ресурс|{count} ресурса|{count} ресурсов",
+        "resources_count": "{count} Gotovina|{count} Gotovina|{count} Gotovina",
         "actions_count": "{count} действие|{count} действия|{count} действий",
     }
 }
@@ -240,7 +242,7 @@ ADDITIONAL_TRANSLATIONS = {
 ADMIN_TRANSLATIONS = {
     "en": {
         # Extended admin command descriptions
-        "admin_resource_detailed": "Add resources to a player's inventory",
+        "admin_resource_detailed": "Add Gotovina to a player's inventory",
         "admin_set_control_detailed": "Set a player's control points in a district",
         "admin_reset_actions_detailed": "Reset a player's available actions to full",
         "admin_process_cycle_detailed": "Manually trigger cycle processing (results calculation)",
@@ -250,7 +252,7 @@ ADMIN_TRANSLATIONS = {
         # Admin resource management
         "admin_resources_added_detailed": "Added {amount} {resource_type} to player {player_id}. Previous: {previous}, New: {new_amount}",
         "admin_resources_removed": "Removed {amount} {resource_type} from player {player_id}. Previous: {previous}, New: {new_amount}",
-        "admin_resources_view": "Resources for player {player_id}: Influence: {influence}, Resources: {resources}, Information: {information}, Force: {force}",
+        "admin_resources_view": "Gotovina for player {player_id}: Influence: {influence}, Gotovina: {resources}, Information: {information}, Force: {force}",
 
         # Admin district control management
         "admin_control_added": "Added {points} control points to player {player_id} in district {district_id}. New total: {new_total}",
@@ -259,8 +261,8 @@ ADMIN_TRANSLATIONS = {
 
         # Admin player management
         "admin_player_rename": "Renamed player {player_id} from '{old_name}' to '{new_name}'",
-        "admin_player_list_detailed": "Detailed player list (including activity and resources)",
-        "admin_player_reset": "Reset player {player_id} data (control points and resources)",
+        "admin_player_list_detailed": "Detailed player list (including activity and Gotovina)",
+        "admin_player_reset": "Reset player {player_id} data (control points and Gotovina)",
 
         # Admin international politics
         "admin_intl_activate": "Manually activated international politician {name}",
@@ -271,11 +273,17 @@ ADMIN_TRANSLATIONS = {
         "admin_force_action": "Force an action for player {player_id} in district {district_id}",
         "admin_block_action": "Blocked pending action {action_id} from player {player_id}",
         "admin_modify_action": "Modified action {action_id} parameters",
+
+        # New admin translations
+        "admin_select_player": "Select a player to manage their Gotovina:",
+        "admin_no_players": "No players found in the database.",
+        "admin_resource_updated": "Gotovina updated successfully for {player_name}",
+        "admin_resource_failed": "Failed to update Gotovina for {player_name}",
     },
 
     "ru": {
         # Extended admin command descriptions
-        "admin_resource_detailed": "Добавить ресурсы в инвентарь игрока",
+        "admin_resource_detailed": "Добавить Gotovina в инвентарь игрока",
         "admin_set_control_detailed": "Установить очки контроля игрока в районе",
         "admin_reset_actions_detailed": "Сбросить доступные действия игрока до полных",
         "admin_process_cycle_detailed": "Вручную запустить обработку цикла (расчет результатов)",
@@ -285,7 +293,7 @@ ADMIN_TRANSLATIONS = {
         # Admin resource management
         "admin_resources_added_detailed": "Добавлено {amount} {resource_type} игроку {player_id}. Ранее: {previous}, Новое: {new_amount}",
         "admin_resources_removed": "Удалено {amount} {resource_type} у игрока {player_id}. Ранее: {previous}, Новое: {new_amount}",
-        "admin_resources_view": "Ресурсы игрока {player_id}: Влияние: {influence}, Ресурсы: {resources}, Информация: {information}, Сила: {force}",
+        "admin_resources_view": "Gotovina игрока {player_id}: Влияние: {influence}, Gotovina: {resources}, Информация: {information}, Сила: {force}",
 
         # Admin district control management
         "admin_control_added": "Добавлено {points} очков контроля игроку {player_id} в районе {district_id}. Новый итог: {new_total}",
@@ -294,8 +302,8 @@ ADMIN_TRANSLATIONS = {
 
         # Admin player management
         "admin_player_rename": "Переименован игрок {player_id} с '{old_name}' на '{new_name}'",
-        "admin_player_list_detailed": "Подробный список игроков (включая активность и ресурсы)",
-        "admin_player_reset": "Сброшены данные игрока {player_id} (очки контроля и ресурсы)",
+        "admin_player_list_detailed": "Подробный список игроков (включая активность и Gotovina)",
+        "admin_player_reset": "Сброшены данные игрока {player_id} (очки контроля и Gotovina)",
 
         # Admin international politics
         "admin_intl_activate": "Вручную активирован международный политик {name}",
@@ -306,6 +314,12 @@ ADMIN_TRANSLATIONS = {
         "admin_force_action": "Принудительное действие для игрока {player_id} в районе {district_id}",
         "admin_block_action": "Заблокировано ожидающее действие {action_id} от игрока {player_id}",
         "admin_modify_action": "Изменены параметры действия {action_id}",
+
+        # New admin translations
+        "admin_select_player": "Выберите игрока для управления его Gotovina:",
+        "admin_no_players": "В базе данных нет игроков.",
+        "admin_resource_updated": "Gotovina успешно обновлены для {player_name}",
+        "admin_resource_failed": "Не удалось обновить Gotovina для {player_name}",
     }
 }
 

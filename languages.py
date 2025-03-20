@@ -36,7 +36,7 @@ TRANSLATIONS = {
         # Status information
         "status_title": "Status of {character_name}",
         "status_ideology": "Ideology: {ideology} ({score})",
-        "status_resources": "*Resources:*\n🔵 Influence: {influence}\n💰 Resources: {resources}\n🔍 Information: {information}\n👊 Force: {force}",
+        "status_resources": "*Gotovina:*\n🔵 Influence: {influence}\n💰 Gotovina: {resources}\n🔍 Information: {information}\n👊 Force: {force}",
         "status_actions": "*Actions Remaining:*\nMain Actions: {main}\nQuick Actions: {quick}",
         "status_districts": "*Controlled Districts:*",
         "status_no_districts": "*Controlled Districts:* None",
@@ -46,7 +46,7 @@ TRANSLATIONS = {
         "name": "Name",
         "username": "Username",
         "ideology": "Ideology",
-        "resources": "Resources",
+        "resources": "Gotovina",
         "influence": "Influence",
         "information": "Information",
         "force": "Force",
@@ -85,25 +85,25 @@ TRANSLATIONS = {
         "no_quick_actions": "You have no quick actions left. Actions refresh every 3 hours or at the start of a new cycle.",
         "select_action_type": "Select the type of main action you want to perform:",
         "select_quick_action": "Select the type of quick action you want to perform:",
-        "action_cancelled": "Your last pending action has been cancelled and resources refunded.",
+        "action_cancelled": "Your last pending action has been cancelled and Gotovina refunded.",
         "no_pending_actions": "You have no pending actions to cancel.",
         "actions_refreshed": "Your actions have been refreshed!\n\nMain Actions: {main}\nQuick Actions: {quick}",
         "current_actions": "Current Actions Remaining:\n\nMain Actions: {main}\nQuick Actions: {quick}",
 
         # Resource management
-        "resources_title": "Your Current Resources",
-        "resources_guide": "*Resource Usage Guide:*\n• *Influence* - Used for political maneuvers, gaining additional actions\n• *Resources* - Economy, finances, connections. Can be converted to other resources\n• *Information* - Intelligence, rumors. Used for reconnaissance\n• *Force* - Military, police, criminal structures. Effective for attacks and defense",
-        "convert_usage": "Usage: /convert_resource [type] [amount]\nExample: /convert_resource influence 2\n\nThis will convert 2 'resources' into 1 of the specified type.",
+        "resources_title": "Your Current Gotovina",
+        "resources_guide": "*Resource Usage Guide:*\n• *Influence* - Used for political maneuvers, gaining additional actions\n• *Gotovina* - Economy, finances, connections. Can be converted to other Gotovina\n• *Information* - Intelligence, rumors. Used for reconnaissance\n• *Force* - Military, police, criminal structures. Effective for attacks and defense",
+        "convert_usage": "Usage: /convert_resource [type] [amount]\nExample: /convert_resource influence 2\n\nThis will convert 2 'Gotovina' into 1 of the specified type.",
         "amount_not_number": "Amount must be a number.",
         "amount_not_positive": "Amount must be positive.",
         "invalid_resource_type": "Invalid resource type. Valid types: {valid_types}",
-        "not_enough_resources": "You don't have enough resources. Need {needed}, have {available}.",
-        "conversion_success": "Converted {resources_used} resources into {amount} {resource_type}.",
-        "no_districts_controlled": "You don't control any districts yet, so you won't receive any resource income.\n\nControl districts (60+ control points) to receive resources each cycle.",
+        "not_enough_resources": "You don't have enough Gotovina. Need {needed}, have {available}.",
+        "conversion_success": "Converted {resources_used} Gotovina into {amount} {resource_type}.",
+        "no_districts_controlled": "You don't control any districts yet, so you won't receive any Gotovina income.\n\nControl districts (60+ control points) to receive Gotovina each cycle.",
         "income_controlled_districts": "*Controlled Districts:*",
-        "income_total": "*Total Per Cycle:*\n🔵 Influence: +{influence}\n💰 Resources: +{resources}\n🔍 Information: +{information}\n👊 Force: +{force}",
-        "income_note": "*Note:* Resources are distributed at the end of each cycle.",
-        "income_no_full_control": "You have districts with some presence, but none are fully controlled yet.\n\nYou need 60+ control points in a district to receive resources from it.",
+        "income_total": "*Total Per Cycle:*\n🔵 Influence: +{influence}\n💰 Gotovina: +{resources}\n🔍 Information: +{information}\n👊 Force: +{force}",
+        "income_note": "*Note:* Gotovina are distributed at the end of each cycle.",
+        "income_no_full_control": "You have districts with some presence, but none are fully controlled yet.\n\nYou need 60+ control points in a district to receive Gotovina from it.",
 
         # Politicians
         "politicians_title": "Key Politicians in Belgrade",
@@ -144,7 +144,7 @@ TRANSLATIONS = {
         "politician_not_found": "Politician not found.",
         "politician_info_success": "You have gathered valuable information about {name}.",
         "politician_collaborate_success": "You have successfully collaborated with {name} on a political initiative.",
-        "politician_request_success": "You have received resources from {name}.",
+        "politician_request_success": "You have received Gotovina from {name}.",
         "politician_power_success": "You have used {name}'s political influence to pressure your opponents.",
         "politician_rumors_success": "You have spread rumors about {name}, damaging their reputation.",
         "politician_scandal_success": "You have exposed {name} in a political scandal, severely damaging their position.",
@@ -157,7 +157,7 @@ TRANSLATIONS = {
         "no_details": "No details available",
         "your_districts": "*Your Districts:*",
         "recent_news": "*Recent News:*",
-        "current_resources": "*Current Resources:*",
+        "current_resources": "*Current Gotovina:*",
 
         # Control status
         "control_strong": "🔒 Strong control",
@@ -183,8 +183,8 @@ TRANSLATIONS = {
         "action_cancel": "Cancel",
 
         # Actions used in interactions
-        "select_resources": "Select resources to use for {action_type} action in {district_name}:",
-        "insufficient_resources": "You don't have enough {resource_type} resources. Action cancelled.",
+        "select_resources": "Select Gotovina to use for {action_type} action in {district_name}:",
+        "insufficient_resources": "You don't have enough {resource_type} Gotovina. Action cancelled.",
         "action_submitted": "Your {action_type} action in {target_name} has been submitted using {resources}. Results will be processed at the end of the cycle.",
         "info_spreading": "Your information has been spread through the news network. It will appear in the next news cycle.",
         "enter_info_content": "What information do you want to spread? Please type your message:",
@@ -264,8 +264,8 @@ TRANSLATIONS = {
         "action_pol_influence_desc": "Try to improve your relationship",
         "action_pol_collaborate": "Collaborate",
         "action_pol_collaborate_desc": "Work together on a political initiative",
-        "action_pol_request": "Request Resources",
-        "action_pol_request_desc": "Ask for political support and resources",
+        "action_pol_request": "Request Gotovina",
+        "action_pol_request_desc": "Ask for political support and Gotovina",
         "action_pol_power": "Use Political Power",
         "action_pol_power_desc": "Use their political influence to pressure others",
         "action_pol_undermine": "Undermine",
@@ -385,6 +385,8 @@ TRANSLATIONS = {
         # Resource distribution
         "resource_distribution_title": "📦 Resource Distribution",
         "resource_from_district": "{district}: {amount}/{base} {resource} ({control_points} control points - {control})",
+        "resource_distribution_none": "You didn't receive any district resources this cycle. Control more districts to generate additional income.",
+        "resource_distribution_base": "You received base resources: +1 influence, +1 resources, +1 information, +1 force",
 
         # Control types for resources
         "control_absolute": "🌟 Absolute control (120%)",
@@ -392,21 +394,36 @@ TRANSLATIONS = {
         "control_firm": "✅ Firm control (80%)",
         "control_contested": "⚠️ Partial control (60%)",
         "control_weak": "⚡ Weak control (40%)",
+
+        # New translations
+        "district_desc_stari_grad": "Политическое сердце Нови Сада, где расположены правительственные учреждения",
+        "politician_abilities_no_args": {
+            "en": "Please specify a politician name to view their abilities.",
+            "ru": "Укажите имя политика, чтобы просмотреть его способности."
+        },
+        "politician_no_abilities": {
+            "en": "This politician has no special abilities available to you.",
+            "ru": "У этого политика нет доступных для вас специальных способностей."
+        },
+        "error_using_ability": {
+            "en": "Error using ability. Please try again later.",
+            "ru": "Ошибка при использовании способности. Пожалуйста, попробуйте позже."
+        },
     },
 
     "ru": {
         # Basic commands and responses
-        "welcome": "Добро пожаловать в Белградскую Игру, {user_name}! Эта игра моделирует политическую борьбу в Югославии 1998 года через контроль над районами Белграда.\n\nПожалуйста, введите имя вашего персонажа:",
-        "name_set": "Добро пожаловать, {character_name}! Теперь вы политический игрок в Белграде 1998 года.\n\nИспользуйте /help для просмотра доступных команд и /status для проверки вашей текущей ситуации.",
+        "welcome": "Добро пожаловать в Новисадскую Игру, {user_name}! Эта игра моделирует политическую борьбу в Югославии 1998 года через контроль над районами Нови Сада.\n\nПожалуйста, введите имя вашего персонажа:",
+        "name_set": "Добро пожаловать, {character_name}! Теперь вы политический игрок в Нови Саде 1998 года.\n\nИспользуйте /help для просмотра доступных команд и /status для проверки вашей текущей ситуации.",
         "invalid_name": "Пожалуйста, введите корректное имя.",
         "operation_cancelled": "Операция отменена.",
         "not_registered": "Вы не зарегистрированы. Используйте /start, чтобы начать игру.",
 
         # Help and documentation
-        "help_title": "Руководство по командам Белградской Игры",
+        "help_title": "Руководство по командам Новисадской Игры",
         "help_basic": "*Основные команды:*\n• /start - Начать игру и зарегистрировать персонажа\n• /help - Показать список команд\n• /status - Проверить ресурсы и контроль районов\n• /map - Просмотреть текущую карту контроля\n• /time - Показать текущий игровой цикл и время до следующего\n• /news - Показать последние новости\n• /language - Изменить язык интерфейса",
         "help_action": "*Команды действий:*\n• /action - Подать основную заявку (влияние, атака, защита)\n• /quick_action - Подать быструю заявку (разведка, информация, поддержка)\n• /cancel_action - Отменить последнюю заявку\n• /actions_left - Проверить оставшиеся заявки\n• /view_district [район] - Просмотр информации о районе",
-        "help_resource": "*Команды ресурсов:*\n• /resources - Просмотр имеющихся ресурсов\n• /convert_resource [тип] [количество] - Конвертация ресурсов\n• /check_income - Проверка ожидаемого прихода ресурсов",
+        "help_resource": "*Команды Gotovina:*\n• /resources - Просмотр имеющихся Gotovina\n• /convert_resource [тип] [количество] - Конвертация Gotovina\n• /check_income - Проверка ожидаемого прихода Gotovina",
         "help_political": "*Политические команды:*\n• /politicians - Список доступных политиков\n• /politician_status [имя] - Информация о конкретном политике\n• /international - Информация о международных политиках",
         "help_footer": "Для подробных правил игры обратитесь к игровому документу.",
         "admin_commands": "Команды администратора",
@@ -415,7 +432,7 @@ TRANSLATIONS = {
         # Status information
         "status_title": "Статус персонажа {character_name}",
         "status_ideology": "Идеология: {ideology} ({score})",
-        "status_resources": "*Ресурсы:*\n🔵 Влияние: {influence}\n💰 Ресурсы: {resources}\n🔍 Информация: {information}\n👊 Сила: {force}",
+        "status_resources": "*Gotovina:*\n🔵 Влияние: {influence}\n💰 Gotovina: {resources}\n🔍 Информация: {information}\n👊 Сила: {force}",
         "status_actions": "*Оставшиеся действия:*\nОсновные заявки: {main}\nБыстрые заявки: {quick}",
         "status_districts": "*Контролируемые районы:*",
         "status_no_districts": "*Контролируемые районы:* Отсутствуют",
@@ -425,14 +442,14 @@ TRANSLATIONS = {
         "name": "Имя",
         "username": "Имя пользователя",
         "ideology": "Идеология",
-        "resources": "Ресурсы",
+        "resources": "Gotovina",
         "influence": "Влияние",
         "information": "Информация",
         "force": "Сила",
         "points": "очков",
 
         # Map and districts
-        "map_title": "Текущая карта контроля Белграда",
+        "map_title": "Текущая карта контроля Нови Сада",
         "map_legend": "Обозначения:",
         "map_strong_control": "🔒 Сильный контроль (80+ очков)",
         "map_controlled": "✅ Контролируется (60-79 очков)",
@@ -464,34 +481,34 @@ TRANSLATIONS = {
         "no_quick_actions": "У вас не осталось быстрых заявок. Заявки обновляются каждые 3 часа или в начале нового цикла.",
         "select_action_type": "Выберите тип основной заявки, которую хотите выполнить:",
         "select_quick_action": "Выберите тип быстрой заявки, которую хотите выполнить:",
-        "action_cancelled": "Ваша последняя заявка отменена, ресурсы возвращены.",
+        "action_cancelled": "Ваша последняя заявка отменена, Gotovina возвращены.",
         "no_pending_actions": "У вас нет ожидающих заявок для отмены.",
         "actions_refreshed": "Ваши заявки обновлены!\n\nОсновные заявки: {main}\nБыстрые заявки: {quick}",
         "current_actions": "Текущие оставшиеся заявки:\n\nОсновные заявки: {main}\nБыстрые заявки: {quick}",
 
         # Resource management
-        "resources_title": "Ваши текущие ресурсы",
-        "resources_guide": "*Руководство по использованию ресурсов:*\n• *Влияние* - Используется для политических манёвров, получения дополнительных заявок\n• *Ресурсы* - Экономика, финансы, связи. Можно конвертировать в другие ресурсы\n• *Информация* - Разведданные, слухи. Используется для разведки\n• *Сила* - Военные, полиция, криминальные структуры. Эффективны для атак и защиты",
-        "convert_usage": "Использование: /convert_resource [тип] [количество]\nПример: /convert_resource influence 2\n\nЭто конвертирует 2 'resources' в 1 указанного типа.",
+        "resources_title": "Ваши текущие Gotovina",
+        "resources_guide": "*Руководство по использованию Gotovina:*\n• *Влияние* - Используется для политических манёвров, получения дополнительных заявок\n• *Gotovina* - Экономика, финансы, связи. Можно конвертировать в другие Gotovina\n• *Информация* - Разведданные, слухи. Используется для разведки\n• *Сила* - Военные, полиция, криминальные структуры. Эффективны для атак и защиты",
+        "convert_usage": "Использование: /convert_resource [тип] [количество]\nПример: /convert_resource influence 2\n\nЭто конвертирует 2 'Gotovina' в 1 указанного типа.",
         "amount_not_number": "Количество должно быть числом.",
         "amount_not_positive": "Количество должно быть положительным.",
-        "invalid_resource_type": "Недопустимый тип ресурса. Допустимые типы: {valid_types}",
-        "not_enough_resources": "У вас недостаточно ресурсов. Нужно {needed}, у вас есть {available}.",
-        "conversion_success": "Конвертировано {resources_used} ресурсов в {amount} {resource_type}.",
-        "no_districts_controlled": "Вы пока не контролируете ни одного района, поэтому не будете получать ресурсы.\n\nКонтролируйте районы (60+ очков контроля) для получения ресурсов каждый цикл.",
+        "invalid_resource_type": "Недопустимый тип Gotovina. Допустимые типы: {valid_types}",
+        "not_enough_resources": "У вас недостаточно Gotovina. Нужно {needed}, у вас есть {available}.",
+        "conversion_success": "Конвертировано {resources_used} Gotovina в {amount} {resource_type}.",
+        "no_districts_controlled": "Вы пока не контролируете ни одного района, поэтому не будете получать Gotovina.\n\nКонтролируйте районы (60+ очков контроля) для получения Gotovina каждый цикл.",
         "income_controlled_districts": "*Контролируемые районы:*",
-        "income_total": "*Всего за цикл:*\n🔵 Влияние: +{influence}\n💰 Ресурсы: +{resources}\n🔍 Информация: +{information}\n👊 Сила: +{force}",
-        "income_note": "*Примечание:* Ресурсы распределяются в конце каждого цикла.",
-        "income_no_full_control": "У вас есть районы с некоторым присутствием, но ни один не контролируется полностью.\n\nДля получения ресурсов из района нужно 60+ очков контроля.",
+        "income_total": "*Всего за цикл:*\n🔵 Влияние: +{influence}\n💰 Gotovina: +{resources}\n🔍 Информация: +{information}\n👊 Сила: +{force}",
+        "income_note": "*Примечание:* Gotovina распределяются в конце каждого цикла.",
+        "income_no_full_control": "У вас есть районы с некоторым присутствием, но ни один не контролируется полностью.\n\nДля получения Gotovina из района нужно 60+ очков контроля.",
 
         # Politicians
-        "politicians_title": "Ключевые политики Белграда",
+        "politicians_title": "Ключевые политики Нови Сада",
         "no_politicians": "В базе данных не найдено политиков.",
         "select_politician": "Выберите политика для просмотра:",
         "politician_not_found": "Политик '{name}' не найден. Используйте /politician_status без аргументов для просмотра списка.",
         "international_title": "Международные политики",
         "no_international": "В базе данных не найдены международные политики.",
-        "international_note": "*Примечание:* Международные политики могут активироваться случайным образом в каждом цикле. Их действия могут существенно повлиять на политический ландшафт Белграда. Используйте /news для получения актуальной информации об их деятельности.",
+        "international_note": "*Примечание:* Международные политики могут активироваться случайным образом в каждом цикле. Их действия могут существенно повлиять на политический ландшафт Нови Сада. Используйте /news для получения актуальной информации об их деятельности.",
         "relationship": "Отношения",
         "compatibility": "Совместимость",
         "role": "Роль",
@@ -523,7 +540,7 @@ TRANSLATIONS = {
         "politician_not_found": "Политик не найден.",
         "politician_info_success": "Вы собрали ценную информацию о {name}.",
         "politician_collaborate_success": "Вы успешно сотрудничали с {name} по политической инициативе.",
-        "politician_request_success": "Вы получили ресурсы от {name}.",
+        "politician_request_success": "Вы получили Gotovina от {name}.",
         "politician_power_success": "Вы использовали политическое влияние {name} для давления на оппонентов.",
         "politician_rumors_success": "Вы распространили слухи о {name}, нанеся урон их репутации.",
         "politician_scandal_success": "Вы разоблачили {name} в политическом скандале, серьезно подорвав их позицию.",
@@ -536,7 +553,7 @@ TRANSLATIONS = {
         "no_details": "Нет доступных деталей",
         "your_districts": "*Ваши районы:*",
         "recent_news": "*Недавние новости:*",
-        "current_resources": "*Текущие ресурсы:*",
+        "current_resources": "*Текущие Gotovina:*",
 
         # Control status
         "control_strong": "🔒 Сильный контроль",
@@ -562,8 +579,8 @@ TRANSLATIONS = {
         "action_cancel": "Отмена",
 
         # Resources used in actions
-        "select_resources": "Выберите ресурсы для {action_type} действия в районе {district_name}:",
-        "insufficient_resources": "У вас недостаточно ресурсов типа {resource_type}. Действие отменено.",
+        "select_resources": "Выберите Gotovina для {action_type} действия в районе {district_name}:",
+        "insufficient_resources": "У вас недостаточно Gotovina типа {resource_type}. Действие отменено.",
         "action_submitted": "Ваше действие {action_type} в {target_name} было подано с использованием {resources}. Результаты будут обработаны в конце цикла.",
         "info_spreading": "Ваша информация распространена через новостную сеть. Она появится в следующем новостном цикле.",
         "enter_info_content": "Какую информацию вы хотите распространить? Пожалуйста, напишите сообщение:",
@@ -571,7 +588,7 @@ TRANSLATIONS = {
         "action_error": "Что-то пошло не так. Пожалуйста, попробуйте снова.",
         "info_from_user": "Информация от {user}",
         "error_district_selection": "Ошибка при показе списка районов. Пожалуйста, попробуйте снова.",
-        "error_resource_selection": "Ошибка при показе выбора ресурсов. Пожалуйста, попробуйте снова.",
+        "error_resource_selection": "Ошибка при показе выбора Gotovina. Пожалуйста, попробуйте снова.",
         "error_district_info": "Ошибка при получении информации о районе.",
         "error_politician_info": "Ошибка при получении информации о политике.",
 
@@ -586,9 +603,9 @@ TRANSLATIONS = {
         "admin_news_usage": "Использование: /admin_add_news [заголовок] [содержание]",
         "admin_news_added": "Новость добавлена с ID: {news_id}",
         "admin_cycle_processed": "Игровой цикл обработан.",
-        "admin_resources_usage": "Использование: /admin_add_resources [ID игрока] [тип ресурса] [количество]",
+        "admin_resources_usage": "Использование: /admin_add_resources [ID игрока] [тип Gotovina] [количество]",
         "admin_invalid_args": "Недопустимые аргументы.",
-        "admin_invalid_resource": "Недопустимый тип ресурса.",
+        "admin_invalid_resource": "Недопустимый тип Gotovina.",
         "admin_player_not_found": "Игрок {player_id} не найден.",
         "admin_resources_added": "Добавлено {amount} {resource_type} игроку {player_id}. Новый итог: {new_amount}",
         "admin_control_usage": "Использование: /admin_set_control [ID игрока] [ID района] [очки контроля]",
@@ -600,12 +617,12 @@ TRANSLATIONS = {
         "admin_help_desc": "Показать это сообщение помощи администратора",
         "admin_news_desc": "Добавить новость",
         "admin_cycle_desc": "Вручную обработать игровой цикл",
-        "admin_resources_desc": "Добавить ресурсы игроку",
+        "admin_resources_desc": "Добавить Gotovina игроку",
         "admin_control_desc": "Установить контроль над районом",
         "admin_ideology_desc": "Установить идеологический показатель игрока (-5 до +5)",
         "admin_list_desc": "Список всех зарегистрированных игроков",
         "admin_error": "Ошибка администратора: {error}",
-        "admin_player_resources_not_found": "Игрок {player_id} существует, но не имеет записи ресурсов.",
+        "admin_player_resources_not_found": "Игрок {player_id} существует, но не имеет записи Gotovina.",
         "admin_reset_actions_usage": "Использование: /admin_reset_actions [ID игрока]",
         "admin_reset_actions_success": "Действия сброшены для игрока {player_id}.",
         "admin_reset_all_actions_success": "Действия сброшены для {count} игроков.",
@@ -643,8 +660,8 @@ TRANSLATIONS = {
         "action_pol_influence_desc": "Попытаться улучшить ваши отношения",
         "action_pol_collaborate": "Сотрудничество",
         "action_pol_collaborate_desc": "Работать вместе над политической инициативой",
-        "action_pol_request": "Запросить ресурсы",
-        "action_pol_request_desc": "Попросить политическую поддержку и ресурсы",
+        "action_pol_request": "Запросить Gotovina",
+        "action_pol_request_desc": "Попросить политическую поддержку и Gotovina",
         "action_pol_power": "Использовать влияние",
         "action_pol_power_desc": "Использовать их политическое влияние для давления на оппонентов",
         "action_pol_undermine": "Подорвать влияние",
@@ -675,7 +692,7 @@ TRANSLATIONS = {
         "db_connection_error": "Ошибка подключения к базе данных. Пожалуйста, попробуйте позже.",
         "invalid_district_error": "Недействительный район. Пожалуйста, выберите правильный район.",
         "invalid_politician_error": "Недействительный политик. Пожалуйста, выберите правильного политика.",
-        "insufficient_resources_detailed": "Недостаточно ресурсов. Вам нужно {required} {resource_type}, но у вас есть только {available}.",
+        "insufficient_resources_detailed": "Недостаточно Gotovina. Вам нужно {required} {resource_type}, но у вас есть только {available}.",
         "invalid_action_error": "Недействительное действие. Пожалуйста, выберите правильный тип действия.",
         "language_detection_error": "Не удалось определить ваш язык. Используется английский по умолчанию.",
         "error_message": "Извините, что-то пошло не так. Об ошибке сообщено.",
@@ -693,7 +710,7 @@ TRANSLATIONS = {
         # Cycle summary
         "cycle_summary_title": "Итоги цикла {start}:00-{end}:00",
         "cycle_summary_actions": "🎯 Основные действия:",
-        "cycle_summary_action_count": "- {action} в {target}: {count} раз",
+        "cycle_summary_action_count": "- {action} in {target}: {count} раз",
         "cycle_summary_control": "🏛 Значимые изменения контроля:",
         "cycle_summary_control_change": "- Район {district}: {points:+d} очков",
 
@@ -707,12 +724,6 @@ TRANSLATIONS = {
         "success_control_bonus": "Бонус от контроля района: +{bonus}%",
         "success_power_bonus": "Бонус от совместного действия: +{bonus}%",
 
-        # District control status
-        "control_strong": "🔒 Сильный контроль",
-        "control_full": "✅ Полный контроль",
-        "control_contested": "⚠️ Оспариваемый",
-        "control_weak": "❌ Слабое влияние",
-
         # Action power effects
         "effect_primary_boost": "🎯 Усиленное действие",
         "effect_precision": "🔍 Точное действие",
@@ -722,7 +733,7 @@ TRANSLATIONS = {
         "effect_sustain": "⏳ Продлённый эффект",
 
         # Resource combinations
-        "combo_double_primary": "+5 к силе действия за использование двух основных ресурсов",
+        "combo_double_primary": "+5 к силе действия за использование двух основных Gotovina",
         "combo_influence_info": "+3 к силе действия за комбинацию влияния и информации",
         "combo_force_influence": "+3 к силе действия за комбинацию силы и влияния",
         "combo_force_info": "+3 к силе действия за комбинацию силы и информации",
@@ -731,7 +742,7 @@ TRANSLATIONS = {
         "trade_completed_title": "🤝 Обмен выполнен",
         "trade_completed_sender": "Ваше предложение обмена принято игроком {receiver_id}",
         "trade_completed_receiver": "Вы приняли предложение обмена от игрока {sender_id}",
-        "trade_offer_usage": "Использование: /trade <id игрока> offer <ресурс> <количество> request <ресурс> <количество>",
+        "trade_offer_usage": "Использование: /trade <id игрока> offer <Gotovina> <количество> request <Gotovina> <количество>",
         "trade_offer_invalid_format": "❌ Неверный формат команды",
         "trade_offer_received": "📦 Новое предложение обмена от игрока {sender_id}\nПредлагает: {offered}\nЗапрашивает: {requested}\n\nID предложения: {offer_id}\nДля принятия используйте: /accept_trade {offer_id}",
         "trade_offer_sent": "✅ Предложение обмена отправлено игроку {receiver_id}",
@@ -742,7 +753,7 @@ TRANSLATIONS = {
         "accept_trade_usage": "Использование: /accept_trade [ID предложения]",
         "trade_accepted": "✅ Вы приняли предложение обмена. Обмен завершен!",
         "trade_accepted_notification": "✅ Игрок {player_id} принял ваше предложение обмена #{offer_id}. Обмен завершен!",
-        "trade_accept_failed": "❌ Не удалось принять предложение обмена. Предложение может быть недействительным, или у вас недостаточно ресурсов.",
+        "trade_accept_failed": "❌ Не удалось принять предложение обмена. Предложение может быть недействительным, или у вас недостаточно Gotovina.",
         "invalid_offer_id": "❌ Неверный ID предложения. Пожалуйста, укажите корректный номер.",
         "error_accepting_trade": "❌ Произошла ошибка при принятии предложения обмена.",
         "get_trade_offer_sender": "Не удалось получить ID отправителя предложения.",
@@ -750,7 +761,7 @@ TRANSLATIONS = {
         # Politician abilities
         "ability_administrative_desc": "Блокирует одну заявку противника в своём районе",
         "ability_student_protest_desc": "Организует студенческий протест (+15 к атаке в выбранном районе)",
-        "ability_shadow_conversion_desc": "Конвертирует 2 любых ресурса в 3 единицы Силы",
+        "ability_shadow_conversion_desc": "Конвертирует 2 любых Gotovina в 3 единицы Силы",
         "ability_diplomatic_immunity_desc": "Защищает от одной враждебной акции в течение дня",
         "ability_media_pressure_desc": "Снижает эффективность действий противника в районе на 50%",
 
@@ -768,8 +779,10 @@ TRANSLATIONS = {
         "quick_action_failure": "❌ Провал. ({roll}/{chance}) Быстрое действие {action} в {target} не удалось.",
 
         # Resource distribution
-        "resource_distribution_title": "📦 Получение ресурсов",
+        "resource_distribution_title": "📦 Получение Gotovina",
         "resource_from_district": "{district}: {amount}/{base} {resource} ({control_points} очков контроля - {control})",
+        "resource_distribution_none": "You didn't receive any district resources this cycle. Control more districts to generate additional income.",
+        "resource_distribution_base": "You received base resources: +1 influence, +1 resources, +1 information, +1 force",
 
         # Control types for resources
         "control_absolute": "🌟 Абсолютный контроль (120%)",
@@ -777,6 +790,9 @@ TRANSLATIONS = {
         "control_firm": "✅ Уверенный контроль (80%)",
         "control_contested": "⚠️ Частичный контроль (60%)",
         "control_weak": "⚡ Слабый контроль (40%)",
+
+        # New translations
+        "district_desc_stari_grad": "Политическое сердце Нови Сада, где расположены правительственные учреждения",
     }
 }
 

@@ -17,13 +17,15 @@ from db.queries import (
     get_player_language, get_player_resources, update_player_resources,
     get_remaining_actions, update_action_counts, get_news,
     get_player_districts, add_news, use_action, get_district_info,
-    create_trade_offer, accept_trade_offer, get_all_districts
+    create_trade_offer, accept_trade_offer, get_all_districts,
+    update_base_resources, process_district_resources, reset_player_actions
 )
 from game.districts import (
     format_district_info, get_district_by_name
 )
 from game.politicians import (
-    format_politicians_list, format_politician_info, get_politician_by_name
+    format_politicians_list, format_politician_info, get_politician_by_name,
+    get_politician_abilities
 )
 from game.actions import (
     process_game_cycle, get_current_cycle, get_cycle_deadline, get_cycle_results_time
@@ -1392,7 +1394,7 @@ async def check_income_command(update: Update, context: ContextTypes.DEFAULT_TYP
         user.id
     )
 
-    # Get districts controlled by the player (60+ control points)
+    # Get districts controlled by the player (25+ control points)
     districts = await asyncio.get_event_loop().run_in_executor(
         executor,
         get_player_districts,
@@ -1412,7 +1414,7 @@ async def check_income_command(update: Update, context: ContextTypes.DEFAULT_TYP
         for district_data in districts:
             district_id, name, control_points = district_data
 
-            if control_points >= 60:
+            if control_points >= 25:  # Changed from 60 to 25
                 district = await asyncio.get_event_loop().run_in_executor(
                     executor,
                     get_district_info,
@@ -1853,4 +1855,241 @@ def register_commands(application):
     application.add_handler(CommandHandler("trade", trade_offer))
     application.add_handler(CommandHandler("accept_trade", accept_trade))
 
+    # New admin command for managing player resources with interactive menu
+    application.add_handler(CommandHandler("admin_manage_resources", admin_manage_resources))
+
     logger.info("Command handlers registered")
+
+async def process_cycle_results():
+    """Process results for the current cycle."""
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        
+        # Get all players
+        cursor.execute("SELECT player_id FROM players")
+        players = cursor.fetchall()
+        
+        for player in players:
+            player_id = player[0]
+            
+            # Update base resources for each player
+            await asyncio.get_event_loop().run_in_executor(
+                executor,
+                update_base_resources,
+                player_id
+            )
+            
+            # Process district resources
+            await asyncio.get_event_loop().run_in_executor(
+                executor,
+                process_district_resources,
+                player_id
+            )
+            
+            # Reset actions
+            await asyncio.get_event_loop().run_in_executor(
+                executor,
+                reset_player_actions,
+                player_id
+            )
+        
+        conn.commit()
+    except Exception as e:
+        logger.error(f"Error processing cycle results: {e}")
+        conn.rollback()
+    finally:
+        conn.close()
+
+async def admin_manage_resources(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Admin command to manage player resources with interactive menu."""
+    user = update.effective_user
+
+    # Run database operation in thread pool
+    lang = await asyncio.get_event_loop().run_in_executor(
+        executor,
+        get_player_language,
+        user.id
+    )
+
+    if user.id not in ADMIN_IDS:
+        await update.message.reply_text(get_text("admin_only", lang))
+        return
+
+    # Get all players
+    players = await asyncio.get_event_loop().run_in_executor(
+        executor,
+        list_all_players
+    )
+
+    if not players:
+        await update.message.reply_text(get_text("admin_no_players", lang))
+        return
+
+    # Create inline keyboard with player buttons
+    keyboard = []
+    for player in players:
+        player_id, username, character_name = player
+        button_text = f"{character_name} (@{username})"
+        keyboard.append([InlineKeyboardButton(button_text, callback_data=f"admin_resources_{player_id}")])
+
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await update.message.reply_text(
+        get_text("admin_select_player", lang),
+        reply_markup=reply_markup
+    )
+
+async def admin_resources_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle callback for admin resources management."""
+    query = update.callback_query
+    await query.answer()
+
+    if query.from_user.id not in ADMIN_IDS:
+        await query.message.reply_text(get_text("admin_only", "en"))
+        return
+
+    # Extract player_id from callback_data
+    player_id = int(query.data.split('_')[2])
+    
+    # Get player resources
+    resources = await asyncio.get_event_loop().run_in_executor(
+        executor,
+        get_player_resources,
+        player_id
+    )
+
+    # Create keyboard for resource management
+    keyboard = []
+    for resource_type in ["influence", "resources", "information", "force"]:
+        current_amount = resources.get(resource_type, 0)
+        keyboard.extend([
+            [
+                InlineKeyboardButton(f"-10 {resource_type}", callback_data=f"admin_resource_{player_id}_{resource_type}_-10"),
+                InlineKeyboardButton(f"-1 {resource_type}", callback_data=f"admin_resource_{player_id}_{resource_type}_-1"),
+                InlineKeyboardButton(f"{current_amount} {resource_type}", callback_data=f"admin_resource_{player_id}_{resource_type}_0"),
+                InlineKeyboardButton(f"+1 {resource_type}", callback_data=f"admin_resource_{player_id}_{resource_type}_1"),
+                InlineKeyboardButton(f"+10 {resource_type}", callback_data=f"admin_resource_{player_id}_{resource_type}_10")
+            ]
+        ])
+    
+    # Add back button
+    keyboard.append([InlineKeyboardButton("Back to player list", callback_data="admin_resources_back")])
+    
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    # Get player info
+    player = await asyncio.get_event_loop().run_in_executor(
+        executor,
+        get_player,
+        player_id
+    )
+    
+    if player:
+        username, character_name = player[1], player[2]
+        await query.message.edit_text(
+            f"Managing resources for {character_name} (@{username})\n"
+            f"Current resources:\n"
+            f"Influence: {resources.get('influence', 0)}\n"
+            f"Resources: {resources.get('resources', 0)}\n"
+            f"Information: {resources.get('information', 0)}\n"
+            f"Force: {resources.get('force', 0)}",
+            reply_markup=reply_markup
+        )
+
+async def admin_resource_change_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle callback for changing resource amounts."""
+    query = update.callback_query
+    await query.answer()
+
+    if query.from_user.id not in ADMIN_IDS:
+        await query.message.reply_text(get_text("admin_only", "en"))
+        return
+
+    # Extract data from callback_data
+    _, player_id, resource_type, amount = query.data.split('_')
+    player_id = int(player_id)
+    amount = int(amount)
+
+    # Update resources
+    success = await asyncio.get_event_loop().run_in_executor(
+        executor,
+        update_player_resources,
+        player_id,
+        resource_type,
+        amount
+    )
+
+    if success:
+        # Refresh the resource management menu
+        await admin_resources_callback(update, context)
+    else:
+        await query.message.reply_text("Failed to update resources")
+
+async def politician_abilities_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show available abilities for a politician."""
+    user = update.effective_user
+    args = context.args
+
+    if not args:
+        await update.message.reply_text(get_text("politician_abilities_no_args", get_player_language(user.id)))
+        return
+
+    politician_name = ' '.join(args)
+    politician = await asyncio.get_event_loop().run_in_executor(
+        executor,
+        get_politician_by_name,
+        politician_name
+    )
+
+    if not politician:
+        await update.message.reply_text(
+            get_text("politician_not_found", get_player_language(user.id), name=politician_name)
+        )
+        return
+
+    # Get available abilities
+    abilities = await asyncio.get_event_loop().run_in_executor(
+        executor,
+        get_politician_abilities,
+        politician[0],  # politician_id
+        user.id,
+        get_player_language(user.id)
+    )
+
+    if not abilities:
+        await update.message.reply_text(
+            get_text("politician_no_abilities", get_player_language(user.id))
+        )
+        return
+
+    # Format abilities list
+    abilities_text = [f"*{politician[1]}'s Abilities:*\n"]
+    for ability in abilities:
+        status = "✅" if ability['is_available'] else f"⏳ ({ability['cycles_remaining']} cycles)"
+        abilities_text.append(f"\n*{ability['name']}* {status}")
+        abilities_text.append(f"_{ability['description']}_")
+        
+        # Show cost
+        cost_text = []
+        for resource, amount in ability['cost'].items():
+            cost_text.append(f"{get_resource_name(resource, get_player_language(user.id))}: {amount}")
+        abilities_text.append(f"Cost: {', '.join(cost_text)}")
+
+    # Create buttons for available abilities
+    keyboard = []
+    for ability in abilities:
+        if ability['is_available']:
+            keyboard.append([
+                InlineKeyboardButton(
+                    ability['name'],
+                    callback_data=f"use_ability:{politician[0]}:{ability['id']}"
+                )
+            ])
+
+    reply_markup = InlineKeyboardMarkup(keyboard) if keyboard else None
+
+    await update.message.reply_text(
+        "\n".join(abilities_text),
+        parse_mode='Markdown',
+        reply_markup=reply_markup
+    )

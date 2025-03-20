@@ -1,7 +1,8 @@
 import logging
 import sqlite3
+import asyncio
 
-from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
+from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 from telegram.ext import Application, CallbackQueryHandler, ContextTypes, CallbackContext
 
 from bot.commands import register_commands, executor
@@ -9,7 +10,7 @@ from config import TOKEN
 from db.queries import (
     get_player_resources, update_player_resources,
     get_remaining_actions, use_action, add_action,
-    update_district_control
+    update_district_control, use_politician_ability
 )
 from db.schema import setup_database
 from game.actions import (
@@ -609,6 +610,44 @@ async def process_politician_undermine(query, politician_id):
         await query.edit_message_text(get_text("action_error", lang))
 
 
+async def use_ability_callback(query: CallbackQuery):
+    """Handle using a politician's ability."""
+    user = query.from_user
+    lang = get_player_language(user.id)
+
+    try:
+        # Parse callback data
+        _, politician_id, ability_id = query.data.split(':')
+        politician_id = int(politician_id)
+        ability_id = int(ability_id)
+
+        # Use the ability
+        success, message = await asyncio.get_event_loop().run_in_executor(
+            executor,
+            use_politician_ability,
+            politician_id,
+            user.id,
+            ability_id
+        )
+
+        if success:
+            await query.edit_message_text(
+                f"✅ {message}",
+                parse_mode='Markdown'
+            )
+        else:
+            await query.edit_message_text(
+                f"❌ {message}",
+                parse_mode='Markdown'
+            )
+
+    except Exception as e:
+        logger.error(f"Error using ability: {e}")
+        await query.edit_message_text(
+            get_text("error_using_ability", lang)
+        )
+
+
 # Callback query handler for inline keyboard buttons
 async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle button callbacks from inline keyboards."""
@@ -720,14 +759,29 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif callback_data == "action_cancel":
         await query.edit_message_text("Action cancelled.")
 
+    elif callback_data.startswith("use_ability:"):
+        await use_ability_callback(query)
+
     else:
         await query.edit_message_text(f"Unrecognized callback: {callback_data}")
 
 
 def register_callbacks(application):
-    """Register callback handlers."""
-    # Add callback query handler for inline keyboards
-    application.add_handler(CallbackQueryHandler(button_callback))
+    """Register callback query handlers."""
+    # Existing callbacks
+    application.add_handler(CallbackQueryHandler(button_callback, pattern="^action_"))
+    application.add_handler(CallbackQueryHandler(handle_quick_action_callback, pattern="^quick_action_"))
+    application.add_handler(CallbackQueryHandler(handle_cancel_callback, pattern="^cancel_"))
+    application.add_handler(CallbackQueryHandler(handle_district_callback, pattern="^district_"))
+    application.add_handler(CallbackQueryHandler(handle_politician_callback, pattern="^politician_"))
+    application.add_handler(CallbackQueryHandler(handle_trade_callback, pattern="^trade_"))
+    
+    # New admin resource management callbacks
+    application.add_handler(CallbackQueryHandler(admin_resources_callback, pattern="^admin_resources_"))
+    application.add_handler(CallbackQueryHandler(admin_resource_change_callback, pattern="^admin_resource_"))
+
+    # New ability management callbacks
+    application.add_handler(CallbackQueryHandler(use_ability_callback, pattern="^use_ability:"))
 
     logger.info("Callback handlers registered")
 

@@ -564,3 +564,240 @@ def process_daily_international_events():
         
     except Exception as e:
         logger.error(f"Error processing international events: {e}")
+
+def get_politician_abilities(politician_id: int, player_id: int, lang="en") -> List[Dict[str, Any]]:
+    """
+    Get available abilities for a politician based on player's relationship
+
+    Args:
+        politician_id: Politician ID
+        player_id: Player ID
+        lang: Language code
+
+    Returns:
+        List[Dict]: List of available abilities
+    """
+    from languages import get_text
+    import json
+
+    try:
+        # Get relationship data
+        relationship = get_politician_relationship(politician_id, player_id)
+        friendliness = relationship.get('friendliness', 50) if relationship else 50
+
+        # Get current cycle
+        conn = sqlite3.connect('belgrade_game.db')
+        cursor = conn.cursor()
+        cursor.execute("SELECT current_cycle FROM game_state")
+        current_cycle = cursor.fetchone()[0]
+
+        # Get abilities
+        cursor.execute(
+            """
+            SELECT a.ability_id, a.name, a.description, a.cooldown, a.cost, 
+                   a.effect_type, a.effect_value, a.required_friendliness,
+                   u.last_used_cycle
+            FROM politician_abilities a
+            LEFT JOIN politician_ability_usage u 
+                ON a.ability_id = u.ability_id 
+                AND u.politician_id = a.politician_id 
+                AND u.player_id = ?
+            WHERE a.politician_id = ?
+            """,
+            (player_id, politician_id)
+        )
+        abilities = cursor.fetchall()
+        conn.close()
+
+        available_abilities = []
+        for ability in abilities:
+            ability_id, name, description, cooldown, cost_json, effect_type, effect_value, required_friendliness, last_used = ability
+            
+            # Check if ability is available based on friendliness
+            if friendliness < required_friendliness:
+                continue
+
+            # Check cooldown
+            is_available = True
+            if last_used is not None:
+                cycles_since_use = current_cycle - last_used
+                if cycles_since_use < cooldown:
+                    is_available = False
+
+            # Parse cost and effect
+            cost = json.loads(cost_json)
+            effect = json.loads(effect_value)
+
+            available_abilities.append({
+                'id': ability_id,
+                'name': name,
+                'description': description,
+                'cost': cost,
+                'effect_type': effect_type,
+                'effect': effect,
+                'cooldown': cooldown,
+                'is_available': is_available,
+                'cycles_remaining': max(0, cooldown - (current_cycle - last_used)) if last_used is not None else 0
+            })
+
+        return available_abilities
+
+    except Exception as e:
+        logger.error(f"Error getting politician abilities: {e}")
+        return []
+
+def use_politician_ability(politician_id: int, player_id: int, ability_id: int) -> Tuple[bool, str]:
+    """
+    Use a politician's ability
+
+    Args:
+        politician_id: Politician ID
+        player_id: Player ID
+        ability_id: Ability ID
+
+    Returns:
+        Tuple[bool, str]: (Success, Message)
+    """
+    try:
+        conn = sqlite3.connect('belgrade_game.db')
+        cursor = conn.cursor()
+
+        # Get current cycle
+        cursor.execute("SELECT current_cycle FROM game_state")
+        current_cycle = cursor.fetchone()[0]
+
+        # Get ability details
+        cursor.execute(
+            """
+            SELECT a.cost, a.effect_type, a.effect_value, a.required_friendliness,
+                   u.last_used_cycle
+            FROM politician_abilities a
+            LEFT JOIN politician_ability_usage u 
+                ON a.ability_id = u.ability_id 
+                AND u.politician_id = a.politician_id 
+                AND u.player_id = ?
+            WHERE a.ability_id = ? AND a.politician_id = ?
+            """,
+            (player_id, ability_id, politician_id)
+        )
+        ability = cursor.fetchone()
+
+        if not ability:
+            conn.close()
+            return False, "Ability not found"
+
+        cost_json, effect_type, effect_value, required_friendliness, last_used = ability
+        cost = json.loads(cost_json)
+        effect = json.loads(effect_value)
+
+        # Check friendliness
+        relationship = get_politician_relationship(politician_id, player_id)
+        friendliness = relationship.get('friendliness', 50) if relationship else 50
+        if friendliness < required_friendliness:
+            conn.close()
+            return False, "Insufficient friendliness"
+
+        # Check cooldown
+        if last_used is not None:
+            cycles_since_use = current_cycle - last_used
+            if cycles_since_use < cooldown:
+                conn.close()
+                return False, f"Ability on cooldown for {cooldown - cycles_since_use} more cycles"
+
+        # Check resources
+        for resource, amount in cost.items():
+            cursor.execute(
+                "SELECT amount FROM resources WHERE player_id = ? AND resource_type = ?",
+                (player_id, resource)
+            )
+            result = cursor.fetchone()
+            if not result or result[0] < amount:
+                conn.close()
+                return False, f"Insufficient {resource}"
+
+        # Deduct resources
+        for resource, amount in cost.items():
+            cursor.execute(
+                """
+                UPDATE resources 
+                SET amount = amount - ? 
+                WHERE player_id = ? AND resource_type = ?
+                """,
+                (amount, player_id, resource)
+            )
+
+        # Record usage
+        cursor.execute(
+            """
+            INSERT INTO politician_ability_usage (politician_id, player_id, ability_id, last_used_cycle)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(politician_id, player_id, ability_id) 
+            DO UPDATE SET last_used_cycle = ?
+            """,
+            (politician_id, player_id, ability_id, current_cycle, current_cycle)
+        )
+
+        # Apply effect based on type
+        success = True
+        message = "Ability used successfully"
+        
+        if effect_type == "block_action":
+            # Block an action in a district
+            district_id = effect.get('district_id')
+            cursor.execute(
+                """
+                INSERT INTO blocked_actions (district_id, player_id, cycle)
+                VALUES (?, ?, ?)
+                """,
+                (district_id, player_id, current_cycle)
+            )
+            message = f"Action blocked in district {district_id}"
+            
+        elif effect_type == "attack_bonus":
+            # Add attack bonus to a district
+            district_id = effect.get('district_id')
+            bonus = effect.get('bonus', 0)
+            cursor.execute(
+                """
+                INSERT INTO district_bonuses (district_id, player_id, bonus_type, amount, cycle)
+                VALUES (?, ?, 'attack', ?, ?)
+                """,
+                (district_id, player_id, bonus, current_cycle)
+            )
+            message = f"Added {bonus} attack bonus to district {district_id}"
+            
+        elif effect_type == "resource_conversion":
+            # Convert resources
+            for resource, amount in effect.items():
+                cursor.execute(
+                    """
+                    UPDATE resources 
+                    SET amount = amount + ? 
+                    WHERE player_id = ? AND resource_type = ?
+                    """,
+                    (amount, player_id, resource)
+                )
+            message = "Resources converted successfully"
+            
+        elif effect_type == "reset_control":
+            # Reset control in a district
+            district_id = effect.get('district_id')
+            cursor.execute(
+                """
+                UPDATE district_control 
+                SET control_points = 0 
+                WHERE district_id = ? AND player_id != ?
+                """,
+                (district_id, player_id)
+            )
+            message = f"Control reset in district {district_id}"
+
+        conn.commit()
+        conn.close()
+        return success, message
+
+    except Exception as e:
+        logger.error(f"Error using politician ability: {e}")
+        if conn:
+            conn.close()
+        return False, "Error using ability"

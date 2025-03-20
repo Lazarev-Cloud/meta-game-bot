@@ -416,6 +416,7 @@ class DatabaseConnectionPool:
             self._connection_count = 0
             if hasattr(self._local, 'connection'):
                 self._local.connection = None
+
 # Player-related queries
 @db_transaction
 def get_player(conn, player_id):
@@ -829,7 +830,6 @@ def refresh_player_actions(conn, player_id):
     return cursor.rowcount > 0
 
 
-
 @db_transaction
 def update_action_counts(conn, player_id):
     """Reset action counts if it's been more than 3 hours since last refresh."""
@@ -854,6 +854,7 @@ def update_action_counts(conn, player_id):
         )
         return True
     return False
+
 
 # News-related queries
 @db_transaction
@@ -1095,3 +1096,18 @@ def accept_trade_offer(conn, offer_id, receiver_id):
     except Exception as e:
         logger.error(f"Error accepting trade offer: {e}")
         return False
+
+
+@db_transaction
+def update_base_resources(conn, player_id):
+    """Update base resources at the start of each cycle."""
+    cursor = conn.cursor()
+    cursor.execute("""
+        UPDATE resources 
+        SET influence = influence + 1,
+            resources = resources + 1,
+            information = information + 1,
+            force = force + 1
+        WHERE player_id = ?
+    """, (player_id,))
+    return cursor.rowcount > 0

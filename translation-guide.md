@@ -23,7 +23,7 @@ TRANSLATIONS = {
         # More English translations...
     },
     "ru": {
-        "welcome": "Добро пожаловать в Белградскую Игру, {user_name}!",
+        "welcome": "Добро пожаловать в Новисадскую Игру, {user_name}!",
         # More Russian translations...
     }
 }
@@ -39,7 +39,7 @@ CYCLE_NAMES = {
 
 RESOURCE_NAMES = {
     "en": {"influence": "Influence", "resources": "Resources", ...},
-    "ru": {"influence": "Влияние", "resources": "Ресурсы", ...}
+    "ru": {"influence": "Влияние", "resources": "Gotovina", ...}
 }
 ```
 

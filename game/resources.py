@@ -1,20 +1,21 @@
 import sqlite3
 import logging
+import math
 
 logger = logging.getLogger(__name__)
 
 def calculate_resource_amount(control_points: int, base_amount: int) -> int:
     """Calculate resource amount based on control points."""
     if control_points >= 75:  # Absolute control
-        return int(base_amount * 1.2)  # 120%
+        return math.ceil(base_amount * 1.2)  # 120%
     elif control_points >= 50:  # Strong control
         return base_amount  # 100%
     elif control_points >= 35:  # Firm control
-        return int(base_amount * 0.8)  # 80%
+        return math.ceil(base_amount * 0.8)  # 80%
     elif control_points >= 20:  # Contested control
-        return int(base_amount * 0.6)  # 60%
+        return math.ceil(base_amount * 0.6)  # 60%
     else:  # Weak control
-        return int(base_amount * 0.4)  # 40%
+        return math.ceil(base_amount * 0.4)  # 40%
 
 def distribute_district_resources():
     """Distribute resources to players based on their district control."""
@@ -35,6 +36,7 @@ def distribute_district_resources():
             FROM districts d
             LEFT JOIN district_control dc ON d.district_id = dc.district_id
             WHERE dc.player_id IS NOT NULL  -- Only districts with controlling players
+            AND dc.control_points >= 25  -- Only players with sufficient control (changed from 60 to 25)
         """)
         
         districts = cursor.fetchall()
@@ -80,6 +82,24 @@ def distribute_district_resources():
 def update_player_resources(player_id: int, resource_type: str, amount: int):
     # Implementation of update_player_resources function
     pass
+
+def update_base_resources_for_all():
+    """Update base resources for all players at the start of each cycle."""
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT player_id FROM players")
+        players = cursor.fetchall()
+        
+        for player in players:
+            update_base_resources(player[0])
+        
+        conn.commit()
+    except Exception as e:
+        logger.error(f"Error updating base resources: {e}")
+        conn.rollback()
+    finally:
+        conn.close()
 
 # Example usage
 distribute_district_resources() 
