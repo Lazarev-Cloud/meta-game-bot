@@ -8,11 +8,19 @@ import logging
 import sqlite3
 from typing import Dict, Any, Optional, Union, List
 
+from languages import get_text
+
 logger = logging.getLogger(__name__)
 
 # Additional translations to add to the existing language dictionary
 ADDITIONAL_TRANSLATIONS = {
     "en": {
+        "insufficient_resources_for_main_action": "Main actions require at least 2 resources. Please select more resources.",
+        "insufficient_resources_for_action": "You need to select at least one resource for this action.",
+        "joined_coordinated_action": "You have joined the {action_type} action targeting {target}. Contributing resources: {resources}",
+        "coordinated_actions_heading": "Coordinated Actions:",
+        "coordinated_actions_help_text": "• Use the \"Join\" option from the main action menu to join someone's action\n• Create a coordinated action using \"Attack\" or \"Defense\" menu options\n• The more players join, the stronger the action will be",
+        "your_resources": "Your Resources",
         # District report translations
         "district_report_title": "District Status Report",
         "controlled_by": "Controlled by",
@@ -106,6 +114,12 @@ ADDITIONAL_TRANSLATIONS = {
     },
 
     "ru": {
+        "insufficient_resources_for_main_action": "Основные действия требуют как минимум 2 ресурса. Пожалуйста, выберите больше ресурсов.",
+        "insufficient_resources_for_action": "Вам нужно выбрать хотя бы один ресурс для этого действия.",
+        "joined_coordinated_action": "Вы присоединились к действию {action_type}, нацеленному на {target}. Выделенные ресурсы: {resources}",
+        "coordinated_actions_heading": "Координированные действия:",
+        "coordinated_actions_help_text": "• Используйте опцию \"Присоединиться\" в меню основных действий, чтобы присоединиться к действию другого игрока\n• Создайте координированное действие, используя опции меню \"Атака\" или \"Защита\"\n• Чем больше игроков присоединятся, тем сильнее будет действие",
+        "your_resources": "Ваши ресурсы",
         # District report translations
         "district_report_title": "Отчет о состоянии районов",
         "controlled_by": "Контролируется",

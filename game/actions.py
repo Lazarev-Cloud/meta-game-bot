@@ -1,23 +1,24 @@
-import logging
 import datetime
 import json
+import logging
 import random
 import sqlite3
+
 from db.queries import (
-    add_action, update_district_control, distribute_district_resources,
-    get_district_control, get_district_info, get_politician_info,
-    add_news, get_news, get_player_resources, get_player_districts,
-    get_remaining_actions, update_player_resources, get_player_language,
+    update_district_control, distribute_district_resources,
+    get_district_control, get_district_info, add_news, get_news, get_player_resources, get_player_language,
     get_player_districts, refresh_player_actions
 )
 from languages import get_text, get_cycle_name
 
 logger = logging.getLogger(__name__)
 
-# Constants for action types
+# Main actions
 ACTION_INFLUENCE = "influence"
 ACTION_ATTACK = "attack"
 ACTION_DEFENSE = "defense"
+
+# Quick actions
 QUICK_ACTION_RECON = "recon"
 QUICK_ACTION_INFO = "info"
 QUICK_ACTION_SUPPORT = "support"
@@ -83,6 +84,7 @@ async def process_game_cycle(context):
         tb_list = traceback.format_exception(None, e, e.__traceback__)
         tb_string = ''.join(tb_list)
         logger.error(f"Exception traceback:\n{tb_string}")
+
 
 # Helper functions to break down the process
 def get_pending_actions(cycle):
@@ -155,109 +157,144 @@ def get_random_international_politicians(min_count, max_count):
         logger.error(f"Error getting international politicians: {e}")
         return []
 
+
 def process_action(action_id, player_id, action_type, target_type, target_id):
     """Process a single action and return the result"""
     result = {}
 
-    if target_type == "district":
-        if action_type == ACTION_INFLUENCE:
-            # Process influence action on district
-            success_roll = random.randint(1, 100)
-
-            if success_roll > 70:  # Success
-                update_district_control(player_id, target_id, 10)
-                result = {"status": "success", "message": f"Successfully increased influence in {target_id}",
-                          "control_change": 10}
-            elif success_roll > 30:  # Partial success
-                update_district_control(player_id, target_id, 5)
-                result = {"status": "partial", "message": f"Partially increased influence in {target_id}",
-                          "control_change": 5}
-            else:  # Failure
-                result = {"status": "failure", "message": f"Failed to increase influence in {target_id}",
-                          "control_change": 0}
-
-        elif action_type == ACTION_ATTACK:
-            # Process attack action on district
-            # Get current controlling player(s)
-            control_data = get_district_control(target_id)
-
-            if control_data:
-                # Attack the player with the most control
-                target_player_id = control_data[0][0]
+    try:
+        if target_type == "district":
+            if action_type == ACTION_INFLUENCE:
+                # Process influence action on district
                 success_roll = random.randint(1, 100)
 
                 if success_roll > 70:  # Success
-                    # Reduce target player's control
-                    update_district_control(target_player_id, target_id, -10)
-                    # Increase attacking player's control
+                    update_district_control(player_id, target_id, 10)
+                    result = {"status": "success", "message": f"Successfully increased influence in {target_id}",
+                              "control_change": 10}
+                elif success_roll > 30:  # Partial success
+                    update_district_control(player_id, target_id, 5)
+                    result = {"status": "partial", "message": f"Partially increased influence in {target_id}",
+                              "control_change": 5}
+                else:  # Failure
+                    result = {"status": "failure", "message": f"Failed to increase influence in {target_id}",
+                              "control_change": 0}
+
+            elif action_type == ACTION_ATTACK:
+                # Process attack action on district
+                # Get current controlling player(s)
+                control_data = get_district_control(target_id)
+
+                if control_data:
+                    # Attack the player with the most control
+                    target_player_id = control_data[0][0]
+                    success_roll = random.randint(1, 100)
+
+                    if success_roll > 70:  # Success
+                        # Reduce target player's control
+                        update_district_control(target_player_id, target_id, -10)
+                        # Increase attacking player's control
+                        update_district_control(player_id, target_id, 10)
+                        result = {
+                            "status": "success",
+                            "message": f"Successfully attacked {target_id}",
+                            "target_player": target_player_id,
+                            "target_control_change": -10,
+                            "attacker_control_change": 10
+                        }
+                    elif success_roll > 30:  # Partial success
+                        update_district_control(target_player_id, target_id, -5)
+                        update_district_control(player_id, target_id, 5)
+                        result = {
+                            "status": "partial",
+                            "message": f"Partially successful attack on {target_id}",
+                            "target_player": target_player_id,
+                            "target_control_change": -5,
+                            "attacker_control_change": 5
+                        }
+                    else:  # Failure
+                        result = {
+                            "status": "failure",
+                            "message": f"Failed to attack {target_id}",
+                            "target_player": target_player_id,
+                            "target_control_change": 0,
+                            "attacker_control_change": 0
+                        }
+                else:
+                    # No one controls the district, so just add control points
                     update_district_control(player_id, target_id, 10)
                     result = {
                         "status": "success",
-                        "message": f"Successfully attacked {target_id}",
-                        "target_player": target_player_id,
-                        "target_control_change": -10,
+                        "message": f"Claimed uncontrolled district {target_id}",
                         "attacker_control_change": 10
                     }
-                elif success_roll > 30:  # Partial success
-                    update_district_control(target_player_id, target_id, -5)
-                    update_district_control(player_id, target_id, 5)
-                    result = {
-                        "status": "partial",
-                        "message": f"Partially successful attack on {target_id}",
-                        "target_player": target_player_id,
-                        "target_control_change": -5,
-                        "attacker_control_change": 5
-                    }
-                else:  # Failure
-                    result = {
-                        "status": "failure",
-                        "message": f"Failed to attack {target_id}",
-                        "target_player": target_player_id,
-                        "target_control_change": 0,
-                        "attacker_control_change": 0
-                    }
-            else:
-                # No one controls the district, so just add control points
-                update_district_control(player_id, target_id, 10)
+
+            elif action_type == ACTION_DEFENSE:
+                # Process defense action - will be used to reduce impact of attacks
+                result = {"status": "active", "message": f"Defensive measures in place for {target_id}"}
+
+            elif action_type == QUICK_ACTION_RECON:
+                # Process reconnaissance action
+                control_data = get_district_control(target_id)
+                district_info = get_district_info(target_id)
+
                 result = {
                     "status": "success",
-                    "message": f"Claimed uncontrolled district {target_id}",
-                    "attacker_control_change": 10
+                    "message": f"Reconnaissance of {target_id} complete",
+                    "control_data": control_data,
+                    "district_info": district_info
                 }
 
-        elif action_type == ACTION_DEFENSE:
-            # Process defense action - will be used to reduce impact of attacks
-            result = {"status": "active", "message": f"Defensive measures in place for {target_id}"}
+            elif action_type == QUICK_ACTION_SUPPORT:
+                # Process support action (small influence gain)
+                update_district_control(player_id, target_id, 5)
+                result = {"status": "success", "message": f"Support action in {target_id} complete",
+                          "control_change": 5}
 
-        elif action_type == QUICK_ACTION_RECON:
-            # Process reconnaissance action
-            control_data = get_district_control(target_id)
-            district_info = get_district_info(target_id)
-
-            result = {
-                "status": "success",
-                "message": f"Reconnaissance of {target_id} complete",
-                "control_data": control_data,
-                "district_info": district_info
-            }
-
-        elif action_type == QUICK_ACTION_SUPPORT:
-            # Process support action (small influence gain)
-            update_district_control(player_id, target_id, 5)
-            result = {"status": "success", "message": f"Support action in {target_id} complete", "control_change": 5}
-
-    elif target_type == "politician":
-        if action_type == ACTION_INFLUENCE:
-            # Process influence on politician
-            politician = get_politician_info(politician_id=target_id)
-            if politician:
-                # Update friendliness
-                # This is simplified - in a real game you'd track per-player relationships
+            elif action_type == QUICK_ACTION_INFO:
+                # Process information spreading
                 result = {
                     "status": "success",
-                    "message": f"Improved relationship with {politician[1]}",
-                    "politician": politician[1]
+                    "message": f"Information has been spread about {target_id}",
                 }
+
+        elif target_type == "politician":
+            if action_type == ACTION_INFLUENCE:
+                # Process influence on politician
+                from game.politicians import get_politician_by_id
+                politician = get_politician_by_id(target_id)
+                if politician:
+                    # Update politician relationship in the results processing phase
+                    result = {
+                        "status": "success",
+                        "message": f"Improved relationship with {politician['name']}",
+                        "politician_id": politician['politician_id']
+                    }
+            elif action_type == "undermine":
+                # Process undermining action on politician
+                from game.politicians import get_politician_by_id
+                politician = get_politician_by_id(target_id)
+                if politician:
+                    result = {
+                        "status": "success",
+                        "message": f"Started undermining {politician['name']}'s influence",
+                        "politician_id": politician['politician_id']
+                    }
+            elif action_type == "info":
+                # Process info gathering on politician
+                from game.politicians import get_politician_by_id
+                politician = get_politician_by_id(target_id)
+                if politician:
+                    result = {
+                        "status": "success",
+                        "message": f"Gathered intelligence on {politician['name']}",
+                        "politician_id": politician['politician_id'],
+                        "politician_data": politician
+                    }
+
+    except Exception as e:
+        logger.error(f"Error in process_action: {e}")
+        result = {"status": "error", "message": f"An error occurred: {str(e)}"}
 
     return result
 
@@ -570,12 +607,15 @@ async def notify_players_of_results(context, cycle):
                         news_time = datetime.datetime.fromisoformat(timestamp).strftime("%H:%M")
 
                         # Escape special Markdown characters in title and content
-                        safe_title = title.replace("*", "\\*").replace("_", "\\_").replace("`", "\\`").replace("[", "\\[")
-                        
+                        safe_title = title.replace("*", "\\*").replace("_", "\\_").replace("`", "\\`").replace("[",
+                                                                                                               "\\[")
+
                         message += f"📰 {news_time} - *{safe_title}*\n"
                         # Truncate long content and escape special characters
                         content_to_show = content[:100] + "..." if len(content) > 100 else content
-                        safe_content = content_to_show.replace("*", "\\*").replace("_", "\\_").replace("`", "\\`").replace("[", "\\[")
+                        safe_content = content_to_show.replace("*", "\\*").replace("_", "\\_").replace("`",
+                                                                                                       "\\`").replace(
+                            "[", "\\[")
                         message += f"{safe_content}\n"
 
                     message += "\n"
@@ -887,7 +927,7 @@ def process_attack(district_id, resources):
     try:
         # Get current control points
         current_control = get_district_control(district_id)
-        
+
         # Calculate attack power
         attack_power = 0
         for resource_type, amount in resources.items():
@@ -897,11 +937,11 @@ def process_attack(district_id, resources):
                 attack_power += amount * 1.5  # Influence is moderately effective
             else:
                 attack_power += amount  # Other resources are less effective
-        
+
         # Apply attack
         new_control = max(0, current_control - attack_power)
         update_district_control(district_id, new_control)
-        
+
         return {
             "success": True,
             "message": f"Attack successful. District control reduced by {attack_power} points.",
@@ -911,12 +951,13 @@ def process_attack(district_id, resources):
         logger.error(f"Error processing attack: {e}")
         return {"success": False, "message": str(e)}
 
+
 def process_defense(district_id, resources):
     """Process a defense action with combined resources."""
     try:
         # Get current control points
         current_control = get_district_control(district_id)
-        
+
         # Calculate defense power
         defense_power = 0
         for resource_type, amount in resources.items():
@@ -926,11 +967,11 @@ def process_defense(district_id, resources):
                 defense_power += amount * 1.5  # Force is moderately effective
             else:
                 defense_power += amount  # Other resources are less effective
-        
+
         # Apply defense
         new_control = min(100, current_control + defense_power)
         update_district_control(district_id, new_control)
-        
+
         return {
             "success": True,
             "message": f"Defense successful. District control increased by {defense_power} points.",

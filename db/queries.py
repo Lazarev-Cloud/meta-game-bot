@@ -4,6 +4,9 @@ import datetime
 import json
 from functools import wraps
 import time
+
+from game.actions import ACTION_ATTACK, ACTION_DEFENSE
+
 logger = logging.getLogger(__name__)
 
 
@@ -471,7 +474,6 @@ def use_action(conn, player_id, is_main_action):
 
     return result
 
-
 @db_transaction
 def refresh_player_actions(conn, player_id):
     """Reset action counts and update refresh timestamp."""
@@ -590,6 +592,11 @@ def create_coordinated_action(conn, initiator_id, action_type, target_type, targ
     else:
         cycle = "evening"
 
+    # Only certain action types can be coordinated
+    if action_type not in [ACTION_ATTACK, ACTION_DEFENSE]:
+        logger.warning(f"Attempt to create coordinated action with invalid type: {action_type}")
+        return None
+
     cursor.execute(
         """
         INSERT INTO coordinated_actions 
@@ -613,6 +620,7 @@ def create_coordinated_action(conn, initiator_id, action_type, target_type, targ
 
     return action_id
 
+
 @db_transaction
 def join_coordinated_action(conn, player_id, action_id, resources_used):
     """Join an existing coordinated action."""
@@ -621,21 +629,39 @@ def join_coordinated_action(conn, player_id, action_id, resources_used):
     # Check if action exists and is still open
     cursor.execute(
         """
-        SELECT action_id, expires_at, status 
+        SELECT action_id, expires_at, status, initiator_id
         FROM coordinated_actions 
         WHERE action_id = ?
         """,
         (action_id,)
     )
     action = cursor.fetchone()
-    
+
     if not action:
         return False, "Action not found"
-    
-    if action[2] != 'open':
+
+    action_id, expires_at_str, status, initiator_id = action
+
+    # Don't allow initiator to join their own action
+    if player_id == initiator_id:
+        return False, "You cannot join your own action"
+
+    # Check if player already joined this action
+    cursor.execute(
+        """
+        SELECT player_id
+        FROM coordinated_action_participants
+        WHERE action_id = ? AND player_id = ?
+        """,
+        (action_id, player_id)
+    )
+    if cursor.fetchone():
+        return False, "You have already joined this action"
+
+    if status != 'open':
         return False, "Action is no longer open"
-    
-    expires_at = datetime.datetime.fromisoformat(action[1])
+
+    expires_at = datetime.datetime.fromisoformat(expires_at_str)
     if datetime.datetime.now() > expires_at:
         return False, "Action has expired"
 
@@ -650,6 +676,7 @@ def join_coordinated_action(conn, player_id, action_id, resources_used):
     )
 
     return True, "Successfully joined action"
+
 
 @db_transaction
 def get_open_coordinated_actions(conn):

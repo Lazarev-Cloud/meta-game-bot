@@ -9,7 +9,8 @@ from db.queries import (
     get_player_resources, update_player_resources,
     get_remaining_actions, use_action, add_action,
     update_district_control, create_coordinated_action,
-    get_open_coordinated_actions, get_coordinated_action_participants, get_coordinated_action_details
+    get_open_coordinated_actions, get_coordinated_action_participants, get_coordinated_action_details,
+    join_coordinated_action
 )
 from game.actions import (
     ACTION_INFLUENCE, ACTION_ATTACK, ACTION_DEFENSE,
@@ -302,14 +303,18 @@ async def process_quick_action(query, action_type, target_type, target_id):
         else:
             target_name = target_id
 
-        # Determine resource type based on action
+        # Determine resource type and amount based on action
         if action_type == QUICK_ACTION_RECON:
             resource_type = "information"
             resource_amount = 1
         elif action_type == QUICK_ACTION_SUPPORT:
             resource_type = "influence"
             resource_amount = 1
+        elif action_type == QUICK_ACTION_INFO:
+            resource_type = "information"
+            resource_amount = 1
         else:
+            logger.warning(f"Unknown quick action type: {action_type}")
             resource_type = None
             resource_amount = 0
 
@@ -323,8 +328,10 @@ async def process_quick_action(query, action_type, target_type, target_id):
                 return
             update_player_resources(user.id, resource_type, -resource_amount)
 
-        # Use one quick action
-        use_action(user.id, False)  # False means it's a quick action, not a main action
+        # Use one quick action - IMPORTANT: False for quick action
+        if not use_action(user.id, False):  # False means it's a quick action, not a main action
+            await query.edit_message_text(get_text("no_quick_actions", lang))
+            return
 
         # Add the action to the database
         if resource_type:
@@ -337,7 +344,7 @@ async def process_quick_action(query, action_type, target_type, target_id):
         # Show confirmation message
         await query.edit_message_text(
             get_text("action_success", lang,
-                     type=get_action_name(f"action_{action_type}", lang),
+                     type=get_action_name(action_type, lang),
                      target=target_name)
         )
 
@@ -357,7 +364,7 @@ async def process_main_action(query, action_type, target_type, target_id, resour
         if actions['main'] <= 0:
             await query.edit_message_text(get_text("no_main_actions", lang))
             return
-            
+
         # Parse resources
         resources_dict = {}
         for resource_type in resources_list:
@@ -365,6 +372,15 @@ async def process_main_action(query, action_type, target_type, target_id, resour
                 resources_dict[resource_type] += 1
             else:
                 resources_dict[resource_type] = 1
+
+        # Ensure we have sufficient resources for a main action (minimum 2)
+        total_resources = sum(resources_dict.values())
+        if total_resources < 2:
+            await query.edit_message_text(
+                get_text("insufficient_resources_for_main_action", lang,
+                         default="Main actions require at least 2 resources. Please select more resources.")
+            )
+            return
 
         # Check if player has the resources
         player_resources = get_player_resources(user.id)
@@ -391,32 +407,40 @@ async def process_main_action(query, action_type, target_type, target_id, resour
         for resource_type, amount in resources_dict.items():
             update_player_resources(user.id, resource_type, -amount)
 
-        # Use one main action
-        use_action(user.id, True)  # True means it's a main action
+        # Use one main action - IMPORTANT: True for main action
+        if not use_action(user.id, True):  # True means it's a main action
+            await query.edit_message_text(get_text("no_main_actions", lang))
+            return
+
+        # Format resources for display
+        resources_text = []
+        for resource_type, amount in resources_dict.items():
+            resources_text.append(f"{amount} {get_resource_name(resource_type, lang)}")
+        resources_display = ", ".join(resources_text)
 
         # If it's a coordinated action, create it
         if is_coordinated:
-            from db.queries import create_coordinated_action
             action_id = create_coordinated_action(
                 user.id, action_type, target_type, target_id, resources_dict
             )
             message = get_text("action_coordinated_created", lang,
-                             type=get_text(f"action_{action_type}", lang),
-                             target=target_name,
-                             id=action_id)
+                               type=get_text(f"action_{action_type}", lang),
+                               target=target_name,
+                               id=action_id,
+                               resources=resources_display)
         else:
             # Otherwise, add a regular action
             add_action(user.id, action_type, target_type, target_id, resources_dict)
-            message = get_text("action_success", lang,
-                             type=get_text(f"action_{action_type}", lang),
-                             target=target_name)
+            message = get_text("action_submitted", lang,
+                               action_type=get_text(f"action_{action_type}", lang),
+                               target_name=target_name,
+                               resources=resources_display)
 
         await query.edit_message_text(message)
 
     except Exception as e:
         logger.error(f"Error processing main action: {e}")
         await query.edit_message_text(get_text("action_error", lang))
-
 
 async def show_district_info(query, district_id):
     """Display information about a district with action buttons."""
@@ -1358,8 +1382,7 @@ async def join_submit_callback(update: Update, context: ContextTypes.DEFAULT_TYP
 
     user_data = context.user_data[user.id]
 
-    if 'joining_action' not in user_data or 'selected_resources' not in user_data or not user_data[
-        'selected_resources']:
+    if 'joining_action' not in user_data or 'selected_resources' not in user_data or not user_data['selected_resources']:
         await query.edit_message_text(get_text("no_resources_selected", lang))
         return
 
@@ -1377,6 +1400,20 @@ async def join_submit_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         else:
             resources_dict[resource_type] = 1
 
+    # Ensure at least 1 resource is selected
+    if not resources_dict:
+        await query.edit_message_text(get_text("no_resources_selected", lang))
+        return
+
+    # Coordinated actions are main actions, so ensure at least 1 resource
+    total_resources = sum(resources_dict.values())
+    if total_resources < 1:
+        await query.edit_message_text(
+            get_text("insufficient_resources_for_action", lang,
+                     default="You need to select at least one resource to join this action.")
+        )
+        return
+
     # Check if player has the resources
     player_resources = get_player_resources(user.id)
     for resource_type, amount in resources_dict.items():
@@ -1393,7 +1430,6 @@ async def join_submit_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         return
 
     # Join the coordinated action
-    from db.queries import join_coordinated_action
     success, message = join_coordinated_action(user.id, action_id, resources_dict)
 
     if success:
@@ -1401,8 +1437,8 @@ async def join_submit_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         for resource_type, amount in resources_dict.items():
             update_player_resources(user.id, resource_type, -amount)
 
-        # Use action
-        use_action(user.id, True)
+        # Use main action
+        use_action(user.id, True)  # True for main action
 
         # Format resources for display
         resources_display = []
@@ -1413,14 +1449,14 @@ async def join_submit_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         await query.edit_message_text(
             get_text("action_joined", lang,
                      action_type=get_action_name(action_type, lang),
-                     resources=resources_text,
-                     target=target_name)
+                     resources=resources_text)
         )
     else:
         await query.edit_message_text(message)
 
     # Clear user data
     context.user_data[user.id] = {}
+
 
 async def district_action_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle direct actions from district view."""
