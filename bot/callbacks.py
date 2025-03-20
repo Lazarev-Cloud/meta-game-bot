@@ -1,38 +1,31 @@
-import asyncio
+import datetime
 import logging
+import asyncio
+from lib2to3.fixes.fix_input import context
+from typing import Any
+from concurrent.futures import ThreadPoolExecutor
 
-from db.queries import executor
-from game.politician_utils import use_politician_ability  # Import the missing function
-
-logger = logging.getLogger(__name__)
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
-from telegram.ext import Application, CallbackQueryHandler, ContextTypes
+from telegram.ext import ContextTypes, CallbackContext, Application, CallbackQueryHandler
 
-from bot.commands import register_commands, executor
-from config import ADMIN_IDS
-from db.queries import (
-    get_player_resources, update_player_resources,
-    update_district_control,
-    add_action, get_remaining_actions, use_action,
-    db_connection_pool, db_transaction
-)
+from bot.commands import register_commands, list_all_players
+from config import TOKEN, ADMIN_IDS
+from db.game_queries import get_player_resources, update_district_control, get_all_districts
+from db.queries import db_connection_pool, db_transaction, get_remaining_actions, update_player_resources, use_action, \
+    add_action, set_player_language
 from db.schema import setup_database
-from game.actions import (
-    ACTION_INFLUENCE, ACTION_ATTACK, ACTION_DEFENSE,
-    QUICK_ACTION_RECON, QUICK_ACTION_INFO, QUICK_ACTION_SUPPORT
-)
-from game.actions import schedule_jobs
+from game.actions import schedule_jobs, ACTION_INFLUENCE, ACTION_ATTACK, ACTION_DEFENSE, QUICK_ACTION_RECON, \
+    QUICK_ACTION_SUPPORT, QUICK_ACTION_INFO
 from game.districts import format_district_info
 from game.politicians import format_politician_info
-# Import trading functions from game.trading instead of db.game_queries
 from game.trading import accept_trade_offer
-from languages import get_text, get_player_language, set_player_language, get_action_name, get_resource_name
+from languages import get_text, get_player_language, get_action_name, get_resource_name
+from game.politician_utils import use_politician_ability
 
-# Enable logging
-logging.basicConfig(
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
-)
+# Create a thread pool executor for running database operations
+executor = ThreadPoolExecutor(max_workers=4)
 
+logger = logging.getLogger(__name__)
 
 def main():
     """Start the bot."""
