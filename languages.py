@@ -418,6 +418,7 @@ def get_text(key, lang="en", default=None, **kwargs):
 
     return text
 
+
 def get_cycle_name(cycle, lang="en"):
     """Get the translated name of a cycle"""
     if lang not in CYCLE_NAMES:
@@ -457,31 +458,60 @@ def get_action_name(action_type, lang="en"):
 
 def get_player_language(player_id):
     """Get player's preferred language"""
-    conn = sqlite3.connect('belgrade_game.db')
-    cursor = conn.cursor()
+    try:
+        conn = sqlite3.connect('belgrade_game.db')
+        cursor = conn.cursor()
 
-    cursor.execute("SELECT language FROM players WHERE player_id = ?", (player_id,))
-    result = cursor.fetchone()
-    conn.close()
+        cursor.execute("SELECT language FROM players WHERE player_id = ?", (player_id,))
+        result = cursor.fetchone()
+        conn.close()
 
-    if result:
-        return result[0]
-    else:
-        return "en"  # Default to English
+        if result:
+            return result[0]
+        else:
+            logger.warning(f"No language found for player {player_id}, defaulting to English")
+            return "en"  # Default to English
+    except Exception as e:
+        logger.error(f"Error getting player language for player {player_id}: {e}")
+        return "en"  # Default to English on error
 
 
 def set_player_language(player_id, language):
     """Set player's preferred language"""
-    conn = sqlite3.connect('belgrade_game.db')
-    cursor = conn.cursor()
+    try:
+        conn = sqlite3.connect('belgrade_game.db')
+        cursor = conn.cursor()
 
-    cursor.execute(
-        "UPDATE players SET language = ? WHERE player_id = ?",
-        (language, player_id)
-    )
+        # Check if player exists
+        cursor.execute("SELECT player_id FROM players WHERE player_id = ?", (player_id,))
+        player_exists = cursor.fetchone() is not None
 
-    conn.commit()
-    conn.close()
+        if player_exists:
+            cursor.execute(
+                "UPDATE players SET language = ? WHERE player_id = ?",
+                (language, player_id)
+            )
+            rows_affected = cursor.rowcount
+            conn.commit()
+            conn.close()
+
+            if rows_affected == 0:
+                logger.warning(f"Failed to update language for player {player_id}. No rows affected.")
+                return False
+            logger.info(f"Language updated to {language} for player {player_id}")
+            return True
+        else:
+            # Player doesn't exist, this might happen if set_player_language is called before registration
+            logger.warning(f"Tried to set language for non-existent player {player_id}")
+            conn.close()
+            return False
+    except Exception as e:
+        logger.error(f"Error setting player language for player {player_id}: {e}")
+        try:
+            conn.close()
+        except:
+            pass
+        return False
 
 
 # Finally, add a utility function to check for missing translations
