@@ -7,10 +7,15 @@ from telegram.ext import ContextTypes
 from db.queries import (
     update_district_control, distribute_district_resources,
     get_district_control, get_district_info, add_news, get_news, get_player_resources, get_player_language,
-    get_player_districts, refresh_player_actions, db_transaction
+    get_player_districts, refresh_player_actions, db_transaction, update_resources, spend_resources, update_control_points,
+    get_player_resource_counts
 )
 from db.utils import get_db_connection, release_db_connection
 from languages import get_text, get_cycle_name, get_action_name, get_resource_name
+from bot.politicians import (
+    get_random_international_politicians,
+    process_international_politician_action
+)
 
 logger = logging.getLogger(__name__)
 
@@ -102,10 +107,51 @@ ACTION_EFFECTS = {
 # Game cycle times
 MORNING_CYCLE_START = datetime.time(6, 0)  # 6:00 AM
 MORNING_CYCLE_DEADLINE = datetime.time(12, 0)  # 12:00 PM
-MORNING_CYCLE_RESULTS = datetime.time(13, 0)  # 1:00 PM
+MORNING_CYCLE_RESULTS = datetime.time(8, 0)  # 8:00 AM
 EVENING_CYCLE_START = datetime.time(13, 1)  # 1:01 PM
 EVENING_CYCLE_DEADLINE = datetime.time(18, 0)  # 6:00 PM
 EVENING_CYCLE_RESULTS = datetime.time(19, 0)  # 7:00 PM
+
+
+async def process_game_cycle(context):
+    """Process a full game cycle."""
+    try:
+        logger.info("Processing game cycle...")
+        bot = context.bot
+        
+        # Update district control based on control points
+        update_district_control()
+        
+        # Distribute resources to controlling players
+        distribute_district_resources()
+        
+        # Process international politician actions
+        process_international_politician_events()
+        
+        # Add news about the cycle completion
+        now = datetime.datetime.now()
+        current_time = now.time()
+        if current_time.hour < 12:
+            cycle = "morning"
+        else:
+            cycle = "evening"
+            
+        cycle_name = get_cycle_name(cycle, "en")
+        
+        add_news(
+            title=f"{cycle_name} Cycle Completed",
+            content=f"The {cycle_name.lower()} cycle has been completed. Resources have been distributed to controlling players.",
+            is_public=True,
+        )
+        
+        # Refresh player actions
+        refresh_player_actions()
+        
+        logger.info("Game cycle processed successfully")
+        return True
+    except Exception as e:
+        logger.error(f"Error processing game cycle: {e}")
+        return False
 
 
 async def process_game_cycle(context):
@@ -166,7 +212,7 @@ async def process_game_cycle(context):
 def get_pending_actions(cycle):
     """Get all pending actions for a cycle with a dedicated connection."""
     try:
-        conn = sqlite3.connect('belgrade_game.db')
+        conn = sqlite3.connect('novi_sad_game.db')
         cursor = conn.cursor()
         cursor.execute(
             "SELECT action_id, player_id, action_type, target_type, target_id FROM actions WHERE status = 'pending' AND cycle = ?",
@@ -187,7 +233,7 @@ def process_single_action(action_id, player_id, action_type, target_type, target
         result = process_action(action_id, player_id, action_type, target_type, target_id)
 
         # Update status
-        conn = sqlite3.connect('belgrade_game.db')
+        conn = sqlite3.connect('novi_sad_game.db')
         cursor = conn.cursor()
         cursor.execute(
             "UPDATE actions SET status = 'completed', result = ? WHERE action_id = ?",
@@ -204,7 +250,7 @@ def process_single_action(action_id, player_id, action_type, target_type, target
 def apply_district_decay():
     """Apply decay to district control with a dedicated connection."""
     try:
-        conn = sqlite3.connect('belgrade_game.db')
+        conn = sqlite3.connect('novi_sad_game.db')
         cursor = conn.cursor()
         cursor.execute(
             "UPDATE district_control SET control_points = MAX(0, control_points - 5) WHERE control_points > 0"
@@ -220,7 +266,7 @@ def apply_district_decay():
 def get_random_international_politicians(min_count, max_count):
     """Get random international politician IDs."""
     try:
-        conn = sqlite3.connect('belgrade_game.db')
+        conn = sqlite3.connect('novi_sad_game.db')
         cursor = conn.cursor()
         cursor.execute("SELECT politician_id FROM politicians WHERE is_international = 1")
         politicians = cursor.fetchall()
@@ -237,6 +283,7 @@ def get_random_international_politicians(min_count, max_count):
 def process_action(action_id, player_id, action_type, target_type, target_id):
     """Process a single action and return the result"""
     result = {}
+    player_lang = get_player_language(player_id)
 
     try:
         # Determine if this is a main or quick action
@@ -252,20 +299,20 @@ def process_action(action_id, player_id, action_type, target_type, target_id):
                     update_district_control(player_id, target_id, 10)
                     result = {
                         "status": "success",
-                        "message": f"Successfully increased influence in {target_id}",
+                        "message": get_text("influence_success", player_lang, "Successfully increased influence in {target}").format(target=target_id),
                         "control_change": 10
                     }
                 elif success_roll > 30:  # Partial success (40% chance)
                     update_district_control(player_id, target_id, 5)
                     result = {
                         "status": "partial",
-                        "message": f"Partially increased influence in {target_id}",
+                        "message": get_text("influence_partial", player_lang, "Partially increased influence in {target}").format(target=target_id),
                         "control_change": 5
                     }
                 else:  # Failure (30% chance)
                     result = {
                         "status": "failure",
-                        "message": f"Failed to increase influence in {target_id}",
+                        "message": get_text("influence_failure", player_lang, "Failed to increase influence in {target}").format(target=target_id),
                         "control_change": 0
                     }
 
@@ -286,7 +333,7 @@ def process_action(action_id, player_id, action_type, target_type, target_id):
                         update_district_control(player_id, target_id, 10)
                         result = {
                             "status": "success",
-                            "message": f"Successfully attacked {target_id}",
+                            "message": get_text("attack_success", player_lang, "Successfully attacked {target}").format(target=target_id),
                             "target_player": target_player_id,
                             "target_control_change": -10,
                             "attacker_control_change": 10
@@ -296,7 +343,7 @@ def process_action(action_id, player_id, action_type, target_type, target_id):
                         update_district_control(player_id, target_id, 5)
                         result = {
                             "status": "partial",
-                            "message": f"Partially successful attack on {target_id}",
+                            "message": get_text("attack_partial", player_lang, "Partially successful attack on {target}").format(target=target_id),
                             "target_player": target_player_id,
                             "target_control_change": -5,
                             "attacker_control_change": 5
@@ -304,7 +351,7 @@ def process_action(action_id, player_id, action_type, target_type, target_id):
                     else:  # Failure
                         result = {
                             "status": "failure",
-                            "message": f"Failed to attack {target_id}",
+                            "message": get_text("attack_failure", player_lang, "Failed to attack {target}").format(target=target_id),
                             "target_player": target_player_id,
                             "target_control_change": 0,
                             "attacker_control_change": 0
@@ -314,16 +361,30 @@ def process_action(action_id, player_id, action_type, target_type, target_id):
                     update_district_control(player_id, target_id, 10)
                     result = {
                         "status": "success",
-                        "message": f"Claimed uncontrolled district {target_id}",
+                        "message": get_text("attack_uncontrolled", player_lang, "Claimed uncontrolled district {target}").format(target=target_id),
                         "attacker_control_change": 10
                     }
 
             elif action_type == ACTION_DEFENSE:
                 # Process defense action - will block future attacks
-                result = {"status": "active", "message": f"Defensive measures in place for {target_id}"}
-
-                # Store the defense bonus in the district_control table or another appropriate place
-                conn = sqlite3.connect('belgrade_game.db')
+                success_roll = random.randint(1, 100)
+                defense_bonus = 10
+                
+                if success_roll > 70:  # Success
+                    defense_bonus = 10
+                    status = "success"
+                    message_key = "defense_success"
+                elif success_roll > 30:  # Partial success
+                    defense_bonus = 5
+                    status = "partial"
+                    message_key = "defense_partial"
+                else:  # Failure
+                    defense_bonus = 2
+                    status = "failure"
+                    message_key = "defense_failure"
+                
+                # Store the defense bonus in the district_control table
+                conn = sqlite3.connect('novi_sad_game.db')
                 cursor = conn.cursor()
                 now = datetime.datetime.now().isoformat()
 
@@ -332,12 +393,18 @@ def process_action(action_id, player_id, action_type, target_type, target_id):
                     """
                     INSERT OR REPLACE INTO district_defense 
                     (district_id, player_id, defense_bonus, expires_at)
-                    VALUES (?, ?, 10, ?)
+                    VALUES (?, ?, ?, ?)
                     """,
-                    (target_id, player_id, now)  # Use appropriate expiration time based on cycle
+                    (target_id, player_id, defense_bonus, now)  # Use appropriate expiration time based on cycle
                 )
                 conn.commit()
                 conn.close()
+                
+                result = {
+                    "status": status,
+                    "message": get_text(message_key, player_lang, "Defensive measures in place for {target}").format(target=target_id),
+                    "defense_bonus": defense_bonus
+                }
 
             elif action_type == QUICK_ACTION_RECON:
                 # Process reconnaissance action - always succeeds
@@ -345,7 +412,7 @@ def process_action(action_id, player_id, action_type, target_type, target_id):
                 district_info = get_district_info(target_id)
 
                 # Get pending actions targeting this district
-                conn = sqlite3.connect('belgrade_game.db')
+                conn = sqlite3.connect('novi_sad_game.db')
                 cursor = conn.cursor()
                 cursor.execute(
                     """
@@ -361,7 +428,7 @@ def process_action(action_id, player_id, action_type, target_type, target_id):
 
                 result = {
                     "status": "success",
-                    "message": f"Reconnaissance of {target_id} complete",
+                    "message": get_text("recon_success", player_lang, "Reconnaissance of {target} complete").format(target=target_id),
                     "control_data": control_data,
                     "district_info": district_info,
                     "pending_actions": pending_actions if pending_actions else []
@@ -372,7 +439,7 @@ def process_action(action_id, player_id, action_type, target_type, target_id):
                 update_district_control(player_id, target_id, 5)
                 result = {
                     "status": "success",
-                    "message": f"Support action in {target_id} complete",
+                    "message": get_text("support_success", player_lang, "Support action in {target} complete").format(target=target_id),
                     "control_change": 5
                 }
 
@@ -380,7 +447,7 @@ def process_action(action_id, player_id, action_type, target_type, target_id):
                 # Process information spreading - always succeeds
                 result = {
                     "status": "success",
-                    "message": f"Information has been spread about {target_id}",
+                    "message": get_text("info_success", player_lang, "Information has been spread about {target}").format(target=target_id),
                 }
 
         elif target_type == "politician":
@@ -392,7 +459,7 @@ def process_action(action_id, player_id, action_type, target_type, target_id):
                     # Update politician relationship in the results processing phase
                     result = {
                         "status": "success",
-                        "message": f"Improved relationship with {politician['name']}",
+                        "message": get_text("influence_success", player_lang, "Improved relationship with {politician}").format(politician=politician['name']),
                         "politician_id": politician['politician_id']
                     }
             elif action_type == "undermine":
@@ -402,7 +469,7 @@ def process_action(action_id, player_id, action_type, target_type, target_id):
                 if politician:
                     result = {
                         "status": "success",
-                        "message": f"Started undermining {politician['name']}'s influence",
+                        "message": get_text("influence_success", player_lang, "Started undermining {politician}'s influence").format(politician=politician['name']),
                         "politician_id": politician['politician_id']
                     }
             elif action_type == "info":
@@ -412,7 +479,7 @@ def process_action(action_id, player_id, action_type, target_type, target_id):
                 if politician:
                     result = {
                         "status": "success",
-                        "message": f"Gathered intelligence on {politician['name']}",
+                        "message": get_text("influence_success", player_lang, "Gathered intelligence on {politician}").format(politician=politician['name']),
                         "politician_id": politician['politician_id'],
                         "politician_data": politician
                     }
@@ -442,7 +509,7 @@ def apply_physical_presence_bonus(player_id, district_id, action_type):
         return {"applied": False, "bonus": 0, "message": "Bonus only applies to main actions"}
 
     try:
-        conn = sqlite3.connect('belgrade_game.db')
+        conn = sqlite3.connect('novi_sad_game.db')
         cursor = conn.cursor()
 
         # Check for a valid and not expired record of physical presence
@@ -469,7 +536,7 @@ def apply_physical_presence_bonus(player_id, district_id, action_type):
             return {
                 "applied": True, 
                 "bonus": 20,
-                "message": f"Physical presence bonus applied (+20 CP). Expires in {int(time_remaining)} minutes.",
+                "message": get_text("physical_presence_bonus", player_lang, "Physical presence bonus applied (+20 CP). Expires in {time_remaining} minutes").format(time_remaining=time_remaining),
                 "expires_at": expires_at.isoformat()
             }
 
@@ -577,7 +644,7 @@ def register_player_presence(player_id, district_id, location_data=None):
         
         return {
             "success": True,
-            "message": f"Physical presence registered in district. Expires at {formatted_time}.",
+            "message": get_text("physical_presence_registered", player_lang, "Physical presence registered in district. Expires at {formatted_time}").format(formatted_time=formatted_time),
             "expires_at": expires_at.isoformat()
         }
         
@@ -648,28 +715,28 @@ def verify_location_in_district(location_data, district_id):
             logger.warning(f"Invalid coordinates: {lat}, {lon}")
             return False
             
-        # Belgrade boundaries approximation (simplified for demo)
-        belgrade_bounds = {
-            'min_lat': 44.7,
-            'max_lat': 44.9,
-            'min_lon': 20.3,
-            'max_lon': 20.6
+        # Novi Sad boundaries approximation (simplified for demo)
+        novi_sad_bounds = {
+            'min_lat': 45.20,
+            'max_lat': 45.28,
+            'min_lon': 19.80,
+            'max_lon': 19.90
         }
         
-        # First verify within Belgrade
-        if (belgrade_bounds['min_lat'] <= lat <= belgrade_bounds['max_lat'] and
-            belgrade_bounds['min_lon'] <= lon <= belgrade_bounds['max_lon']):
+        # First verify within Novi Sad
+        if (novi_sad_bounds['min_lat'] <= lat <= novi_sad_bounds['max_lat'] and
+            novi_sad_bounds['min_lon'] <= lon <= novi_sad_bounds['max_lon']):
             
             # District-specific bounds (approximate)
             district_bounds = {
-                'stari_grad': {'min_lat': 44.8, 'max_lat': 44.83, 'min_lon': 20.45, 'max_lon': 20.48},
-                'novi_beograd': {'min_lat': 44.8, 'max_lat': 44.84, 'min_lon': 20.38, 'max_lon': 20.43},
-                'zemun': {'min_lat': 44.84, 'max_lat': 44.88, 'min_lon': 20.37, 'max_lon': 20.42},
-                'savski_venac': {'min_lat': 44.78, 'max_lat': 44.81, 'min_lon': 20.44, 'max_lon': 20.47},
-                'vozdovac': {'min_lat': 44.75, 'max_lat': 44.79, 'min_lon': 20.48, 'max_lon': 20.53},
-                'cukarica': {'min_lat': 44.77, 'max_lat': 44.8, 'min_lon': 20.36, 'max_lon': 20.41},
-                'palilula': {'min_lat': 44.81, 'max_lat': 44.85, 'min_lon': 20.47, 'max_lon': 20.52},
-                'vracar': {'min_lat': 44.79, 'max_lat': 44.81, 'min_lon': 20.46, 'max_lon': 20.49}
+                'stari_grad': {'min_lat': 45.25, 'max_lat': 45.26, 'min_lon': 19.84, 'max_lon': 19.85},
+                'liman': {'min_lat': 45.24, 'max_lat': 45.25, 'min_lon': 19.83, 'max_lon': 19.84},
+                'petrovaradin': {'min_lat': 45.25, 'max_lat': 45.26, 'min_lon': 19.86, 'max_lon': 19.88},
+                'podbara': {'min_lat': 45.26, 'max_lat': 45.27, 'min_lon': 19.84, 'max_lon': 19.85},
+                'detelinara': {'min_lat': 45.26, 'max_lat': 45.27, 'min_lon': 19.82, 'max_lon': 19.84},
+                'satelit': {'min_lat': 45.25, 'max_lat': 45.26, 'min_lon': 19.80, 'max_lon': 19.82},
+                'adamovicevo': {'min_lat': 45.24, 'max_lat': 45.25, 'min_lon': 19.81, 'max_lon': 19.82},
+                'sremska_kamenica': {'min_lat': 45.22, 'max_lat': 45.23, 'min_lon': 19.83, 'max_lon': 19.85}
             }
             
             # If we have bounds for this district, check against them
@@ -679,7 +746,7 @@ def verify_location_in_district(location_data, district_id):
                         bounds['min_lon'] <= lon <= bounds['max_lon'])
             else:
                 # If we don't have specific bounds, use the quadrant approach as fallback
-                conn = sqlite3.connect('belgrade_game.db')
+                conn = sqlite3.connect('novi_sad_game.db')
                 cursor = conn.cursor()
                 
                 # Get district's area code to verify it matches the location quadrant
@@ -691,28 +758,28 @@ def verify_location_in_district(location_data, district_id):
                     logger.warning(f"District {district_id} not found in database")
                     return False
                 
-                # Belgrade center coordinates (approximate)
-                belgrade_center_lat = 44.8125
-                belgrade_center_lon = 20.4612
+                # Novi Sad center coordinates (approximate)
+                novi_sad_center_lat = 45.2551
+                novi_sad_center_lon = 19.8451
                 
                 # Determine which quadrant the location is in
                 quadrant_districts = {
-                    "NE": ['palilula', 'vracar'],
-                    "NW": ['zemun', 'novi_beograd'],
-                    "SE": ['stari_grad', 'savski_venac'],
-                    "SW": ['cukarica', 'vozdovac']
+                    "NE": ['podbara', 'detelinara'],
+                    "NW": ['satelit', 'adamovicevo'],
+                    "SE": ['stari_grad', 'petrovaradin'],
+                    "SW": ['liman', 'sremska_kamenica']
                 }
                 
-                if lat > belgrade_center_lat and lon > belgrade_center_lon:
+                if lat > novi_sad_center_lat and lon > novi_sad_center_lon:
                     return district_id in quadrant_districts["NE"]
-                elif lat > belgrade_center_lat and lon <= belgrade_center_lon:
+                elif lat > novi_sad_center_lat and lon <= novi_sad_center_lon:
                     return district_id in quadrant_districts["NW"]
-                elif lat <= belgrade_center_lat and lon > belgrade_center_lon:
+                elif lat <= novi_sad_center_lat and lon > novi_sad_center_lon:
                     return district_id in quadrant_districts["SE"]
                 else:
                     return district_id in quadrant_districts["SW"]
         else:
-            logger.warning(f"Location {lat}, {lon} is outside Belgrade boundaries")
+            logger.warning(f"Location {lat}, {lon} is outside Novi Sad boundaries")
             return False
             
     except Exception as e:
@@ -737,6 +804,8 @@ def get_player_presence_status(player_id):
     conn = None
     try:
         conn = get_db_connection()
+        if conn is None:
+            conn = sqlite3.connect('novi_sad_game.db')
         cursor = conn.cursor()
         
         now = datetime.datetime.now().isoformat()
@@ -814,28 +883,25 @@ def get_player_presence_status(player_id):
             release_db_connection(conn)
 
 
-def process_international_politicians():
-    """Process actions by international politicians"""
-    # Choose 1-3 random international politicians to activate
-    conn = sqlite3.connect('belgrade_game.db')
-    cursor = conn.cursor()
-
-    cursor.execute("SELECT politician_id, name FROM politicians WHERE is_international = 1")
-    international_politicians = cursor.fetchall()
-
-    num_active = random.randint(1, 3)
-    active_politicians = random.sample(international_politicians, min(num_active, len(international_politicians)))
-
-    activated_events = []
-
-    for politician_id, name in active_politicians:
-        # Process this politician's action
-        event = process_international_politician_action(politician_id)
-        if event:
-            activated_events.append(event)
-
-    conn.close()
-    return activated_events
+def process_international_politician_events():
+    """Process actions from international politicians for the current cycle."""
+    try:
+        logger.info("Processing international politician events...")
+        
+        # Get 1-3 random active international politicians based on activity probability
+        active_politicians = get_random_international_politicians(min_count=1, max_count=3)
+        
+        logger.info(f"Active international politicians for this cycle: {active_politicians}")
+        
+        # Process each politician's action
+        for politician_id in active_politicians:
+            process_international_politician_action(politician_id)
+            
+        logger.info("International politician events processed successfully")
+        return True
+    except Exception as e:
+        logger.error(f"Error processing international politician events: {e}")
+        return False
 
 
 async def schedule_jobs(application):
@@ -860,7 +926,7 @@ async def refresh_actions(context):
     """Refresh actions for all players every 3 hours."""
     try:
         # Get all active players
-        conn = sqlite3.connect('belgrade_game.db')
+        conn = sqlite3.connect('novi_sad_game.db')
         cursor = conn.cursor()
         cursor.execute("SELECT player_id FROM players")
         players = cursor.fetchall()
@@ -903,7 +969,7 @@ def process_international_politician_action(politician_id):
         dict: Details of the action taken, or None if no action was taken
     """
     try:
-        conn = sqlite3.connect('belgrade_game.db')
+        conn = sqlite3.connect('novi_sad_game.db')
         cursor = conn.cursor()
 
         cursor.execute("SELECT * FROM politicians WHERE politician_id = ?", (politician_id,))
@@ -940,7 +1006,7 @@ def process_international_politician_action(politician_id):
                 WHERE district_id IN (
                     SELECT districts.district_id FROM districts 
                     JOIN politicians ON districts.district_id = politicians.district_id
-                    WHERE politicians.ideology_score > 3 AND politicians.is_international = 0
+                    WHERE politicians.ideology > 3 AND politicians.is_international = 0
                 )
                 """
             )
@@ -960,7 +1026,7 @@ def process_international_politician_action(politician_id):
                 WHERE district_id IN (
                     SELECT districts.district_id FROM districts 
                     JOIN politicians ON districts.district_id = politicians.district_id
-                    WHERE politicians.ideology_score < -3 AND politicians.is_international = 0
+                    WHERE politicians.ideology < -3 AND politicians.is_international = 0
                 )
                 """
             )
@@ -982,7 +1048,7 @@ def process_international_politician_action(politician_id):
                     WHERE district_id IN (
                         SELECT districts.district_id FROM districts 
                         JOIN politicians ON districts.district_id = politicians.district_id
-                        WHERE politicians.ideology_score BETWEEN -2 AND 2 AND politicians.is_international = 0
+                        WHERE politicians.ideology BETWEEN -2 AND 2 AND politicians.is_international = 0
                     )
                     """
                 )
@@ -1035,7 +1101,7 @@ def _escape_markdown(text):
 async def notify_players_of_results(context, cycle):
     """Send notifications to all players about cycle results."""
     try:
-        conn = sqlite3.connect('belgrade_game.db')
+        conn = sqlite3.connect('novi_sad_game.db')
         cursor = conn.cursor()
 
         # Get all active players
@@ -1163,7 +1229,7 @@ async def refresh_actions_job(context):
     """Refresh actions for all players every 3 hours."""
     try:
         # Get all active players
-        conn = sqlite3.connect('belgrade_game.db')
+        conn = sqlite3.connect('novi_sad_game.db')
         cursor = conn.cursor()
         cursor.execute("SELECT player_id FROM players")
         players = cursor.fetchall()
@@ -1221,7 +1287,7 @@ def process_coordinated_action(action_id):
     """Process a coordinated action with combined resources from all participants."""
     try:
         # Get the coordinated action
-        conn = sqlite3.connect('belgrade_game.db')
+        conn = sqlite3.connect('novi_sad_game.db')
         cursor = conn.cursor()
 
         cursor.execute(
@@ -1377,7 +1443,7 @@ def process_join_with_resources(player_id, action_id, resources_dict):
     """
     try:
         # Get action details
-        conn = sqlite3.connect('belgrade_game.db')
+        conn = sqlite3.connect('novi_sad_game.db')
         cursor = conn.cursor()
 
         # Check if action exists and is still open
@@ -1575,7 +1641,7 @@ def process_coordinated_attack(district_id, attack_power, initiator_id, particip
             defender_id, defender_control, defender_name = max(filtered_control_data, key=lambda x: x[1])
 
         # Check if the defender has active defense
-        conn = sqlite3.connect('belgrade_game.db')
+        conn = sqlite3.connect('novi_sad_game.db')
         cursor = conn.cursor()
         cursor.execute(
             """
@@ -1675,7 +1741,7 @@ def process_coordinated_defense(district_id, defense_power, initiator_id, partic
                 expires_at = datetime.datetime.combine(tomorrow, datetime.time(13, 0))
 
         # Record defense bonuses for each participant
-        conn = sqlite3.connect('belgrade_game.db')
+        conn = sqlite3.connect('novi_sad_game.db')
         cursor = conn.cursor()
 
         for participant in participants:
@@ -1951,3 +2017,20 @@ async def send_cycle_notification(context: ContextTypes.DEFAULT_TYPE, is_morning
                     logger.error(f"Failed to send cycle notification to player {player_id}: {e}")
     except Exception as e:
         logger.error(f"Error during cycle notification: {e}", exc_info=True)
+
+
+def process_action_attack(player_id, district_id, resources_used):
+    """Process an attack action on a district."""
+    response = {}
+    
+    # Get player's language
+    lang = get_player_language(player_id)
+    
+    # Get player's districts
+    player_districts = get_player_districts(player_id)
+    
+    # Check if district is already controlled by player
+    if any(d['district_id'] == district_id for d in player_districts):
+        response['success'] = False
+        response['message'] = get_text("error_attack_own_district", lang)
+        return response

@@ -34,26 +34,26 @@ class TestGetDistrictByLocation(unittest.TestCase):
     
     def test_location_in_district(self):
         """Test location within a district boundary."""
-        # Test location in Stari Grad
-        location_data = {"latitude": 44.8184, "longitude": 20.4586}
+        # Test location in Stari Grad (Novi Sad)
+        location_data = {"latitude": 45.2551, "longitude": 19.8426}
         result = get_district_by_location(location_data)
         self.assertEqual(result, "stari_grad")
         
-        # Test location in Vracar
-        location_data = {"latitude": 44.7989, "longitude": 20.4774}
+        # Test location in Liman
+        location_data = {"latitude": 45.2415, "longitude": 19.8339}
         result = get_district_by_location(location_data)
-        self.assertEqual(result, "vracar")
+        self.assertEqual(result, "liman")
     
     def test_location_outside_districts(self):
         """Test location outside all district boundaries but still within reasonable range."""
         # A location that's outside specific boundaries but close enough to return the nearest district
-        location_data = {"latitude": 44.85, "longitude": 20.41}  # North of Zemun
+        location_data = {"latitude": 45.2651, "longitude": 19.8300}  # Near Detelinara
         result = get_district_by_location(location_data)
-        self.assertEqual(result, "zemun")
+        self.assertEqual(result, "detelinara")
     
     def test_location_too_far(self):
         """Test location too far from any district."""
-        # A location that's very far from Belgrade
+        # A location that's very far from Novi Sad
         location_data = {"latitude": 45.5, "longitude": 19.5}
         result = get_district_by_location(location_data)
         self.assertIsNone(result)

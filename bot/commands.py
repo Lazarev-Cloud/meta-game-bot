@@ -175,7 +175,7 @@ async def admin_add_resources(update: Update, context: ContextTypes.DEFAULT_TYPE
 
     # Directly update resources in the database to ensure consistency
     try:
-        conn = sqlite3.connect('belgrade_game.db')
+        conn = sqlite3.connect('novi_sad_game.db')
         cursor = conn.cursor()
 
         # Get current amount
@@ -242,7 +242,7 @@ async def admin_set_control(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Verify district exists
     district = None
     try:
-        conn = sqlite3.connect('belgrade_game.db')
+        conn = sqlite3.connect('novi_sad_game.db')
         cursor = conn.cursor()
         cursor.execute("SELECT district_id, name FROM districts WHERE district_id = ?", (district_id,))
         district = cursor.fetchone()
@@ -256,7 +256,7 @@ async def admin_set_control(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # Update control directly in the database
     try:
-        conn = sqlite3.connect('belgrade_game.db')
+        conn = sqlite3.connect('novi_sad_game.db')
         cursor = conn.cursor()
 
         cursor.execute(
@@ -429,7 +429,7 @@ async def admin_list_players(update: Update, context: ContextTypes.DEFAULT_TYPE)
         return
 
     try:
-        conn = sqlite3.connect('belgrade_game.db')
+        conn = sqlite3.connect('novi_sad_game.db')
         cursor = conn.cursor()
 
         cursor.execute("""
@@ -489,7 +489,7 @@ async def admin_reset_actions(update: Update, context: ContextTypes.DEFAULT_TYPE
     try:
         player_id = int(args[0])
 
-        conn = sqlite3.connect('belgrade_game.db')
+        conn = sqlite3.connect('novi_sad_game.db')
         cursor = conn.cursor()
 
         # Check if player exists
@@ -528,7 +528,7 @@ async def admin_reset_all_actions(update: Update, context: ContextTypes.DEFAULT_
         return
 
     try:
-        conn = sqlite3.connect('belgrade_game.db')
+        conn = sqlite3.connect('novi_sad_game.db')
         cursor = conn.cursor()
 
         # Reset actions for all players
@@ -630,7 +630,7 @@ async def admin_set_ideology(update: Update, context: ContextTypes.DEFAULT_TYPE)
                                                      default="Ideology score must be between -5 and +5."))
             return
 
-        conn = sqlite3.connect('belgrade_game.db')
+        conn = sqlite3.connect('novi_sad_game.db')
         cursor = conn.cursor()
 
         # Check if player exists
@@ -932,7 +932,7 @@ async def view_district_command(update: Update, context: ContextTypes.DEFAULT_TY
 def get_districts_for_selection(lang="en"):
     """Get list of districts for selection menu."""
     try:
-        conn = sqlite3.connect('belgrade_game.db')
+        conn = sqlite3.connect('novi_sad_game.db')
         cursor = conn.cursor()
         cursor.execute("SELECT district_id, name FROM districts ORDER BY name")
         districts = cursor.fetchall()
@@ -952,7 +952,7 @@ async def politicians_command(update: Update, context: ContextTypes.DEFAULT_TYPE
 
     # Get list of politicians for buttons
     import sqlite3
-    conn = sqlite3.connect('belgrade_game.db')
+    conn = sqlite3.connect('novi_sad_game.db')
     cursor = conn.cursor()
     cursor.execute("SELECT politician_id, name FROM politicians WHERE is_international = 0 ORDER BY name")
     politicians = cursor.fetchall()
@@ -1637,48 +1637,103 @@ def get_district_by_location(location_data):
         
         logger.info(f"Looking up district for location: {lat}, {lon}")
         
-        # Sample geo boundaries for Belgrade districts (approximate)
-        # In a production environment, these would be stored in the database with proper polygon data
+        # Novi Sad district boundaries based on the game rules
         district_boundaries = {
             'stari_grad': {
-                'center': (44.8184, 20.4586),
+                'center': (45.2551, 19.8451),  # Center of Novi Sad old town
                 'radius': 0.015,  # roughly 1.5km
-                'name': 'Stari Grad'
+                'name': 'Stari Grad',
+                'resources': {
+                    'influence': 2,
+                    'information': 2,
+                    'resources': 0,
+                    'force': 0
+                },
+                'description': 'Historical and administrative center'
             },
-            'vracar': {
-                'center': (44.7989, 20.4774),
-                'radius': 0.012,
-                'name': 'Vračar'
-            },
-            'savski_venac': {
-                'center': (44.8020, 20.4555),
+            'liman': {
+                'center': (45.2420, 19.8330),  # Liman area
                 'radius': 0.018,
-                'name': 'Savski Venac'
+                'name': 'Liman',
+                'resources': {
+                    'influence': 1,
+                    'information': 3,
+                    'resources': 0,
+                    'force': 0
+                },
+                'description': 'University and research district'
             },
-            'novi_beograd': {
-                'center': (44.8152, 20.4115),
-                'radius': 0.025,
-                'name': 'Novi Beograd'
-            },
-            'zemun': {
-                'center': (44.8430, 20.4011),
-                'radius': 0.022,
-                'name': 'Zemun'
-            },
-            'palilula': {
-                'center': (44.8156, 20.4861),
+            'petrovaradin': {
+                'center': (45.2513, 19.8725),  # Petrovaradin area
                 'radius': 0.020,
-                'name': 'Palilula'
+                'name': 'Petrovaradin',
+                'resources': {
+                    'influence': 1,
+                    'resources': 1,
+                    'information': 1,
+                    'force': 1
+                },
+                'description': 'Historical fortress, cultural heritage'
             },
-            'vozdovac': {
-                'center': (44.7784, 20.4791),
-                'radius': 0.023,
-                'name': 'Voždovac'
+            'podbara': {
+                'center': (45.2670, 19.8490),  # Podbara area
+                'radius': 0.018,
+                'name': 'Podbara',
+                'resources': {
+                    'resources': 3,
+                    'influence': 1,
+                    'information': 0,
+                    'force': 0
+                },
+                'description': 'Commercial district, market area'
             },
-            'cukarica': {
-                'center': (44.7840, 20.4142),
-                'radius': 0.025,
-                'name': 'Čukarica'
+            'detelinara': {
+                'center': (45.2680, 19.8310),  # Detelinara area
+                'radius': 0.020,
+                'name': 'Detelinara',
+                'resources': {
+                    'force': 2,
+                    'resources': 2,
+                    'influence': 0,
+                    'information': 0
+                },
+                'description': 'Working-class residential area'
+            },
+            'grbavica': {
+                'center': (45.2480, 19.8320),  # Grbavica area
+                'radius': 0.015,
+                'name': 'Grbavica',
+                'resources': {
+                    'influence': 1,
+                    'resources': 1,
+                    'information': 1,
+                    'force': 1
+                },
+                'description': 'Densely populated residential area'
+            },
+            'novo_naselje': {
+                'center': (45.2430, 19.8090),  # Novo Naselje area
+                'radius': 0.022,
+                'name': 'Novo Naselje',
+                'resources': {
+                    'resources': 2,
+                    'force': 2,
+                    'influence': 0,
+                    'information': 0
+                },
+                'description': 'Modern residential district'
+            },
+            'salajka': {
+                'center': (45.2730, 19.8350),  # Salajka area
+                'radius': 0.017,
+                'name': 'Salajka',
+                'resources': {
+                    'force': 3,
+                    'resources': 1,
+                    'influence': 0,
+                    'information': 0
+                },
+                'description': 'Industrial zone, shadow economy'
             }
         }
         
@@ -1778,7 +1833,7 @@ async def presence_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if not district_id:
                 await processing_message.edit_text(
                     get_text("location_not_in_district", lang, 
-                            default="📍 Your location could not be matched to any district in Belgrade.")
+                            default="📍 Your location could not be matched to any district in Novi Sad.")
                 )
                 return
             

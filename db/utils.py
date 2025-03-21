@@ -8,7 +8,7 @@ import os
 logger = logging.getLogger(__name__)
 
 # Constants for database configuration
-DB_PATH = os.environ.get('GAME_DB_PATH', 'belgrade_game.db')
+DB_PATH = os.environ.get('GAME_DB_PATH', 'novi_sad_game.db')
 MAX_RETRIES = int(os.environ.get('DB_MAX_RETRIES', '5'))
 RETRY_BASE_DELAY = float(os.environ.get('DB_RETRY_BASE_DELAY', '0.5'))
 DB_BUSY_TIMEOUT = int(os.environ.get('DB_BUSY_TIMEOUT', '5000'))

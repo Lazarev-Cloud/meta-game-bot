@@ -7,6 +7,7 @@ import time
 import os
 import random
 from db.utils import get_db_connection, release_db_connection
+import uuid
 
 # Define action constants locally to avoid circular import
 ACTION_ATTACK = "attack"
@@ -15,7 +16,7 @@ ACTION_DEFENSE = "defense"
 logger = logging.getLogger(__name__)
 
 # Constants for database configuration
-DB_PATH = os.environ.get('GAME_DB_PATH', 'belgrade_game.db')
+DB_PATH = os.environ.get('GAME_DB_PATH', 'novi_sad_game.db')
 MAX_RETRIES = int(os.environ.get('DB_MAX_RETRIES', '5'))
 RETRY_BASE_DELAY = float(os.environ.get('DB_RETRY_BASE_DELAY', '0.5'))
 DB_BUSY_TIMEOUT = int(os.environ.get('DB_BUSY_TIMEOUT', '5000'))
@@ -950,3 +951,8 @@ def get_coordinated_action_details(conn, action_id):
         'cycle': action[7],
         'status': action[8]
     }
+
+# Function to generate a unique ID for various database records
+def generate_id():
+    """Generate a unique ID for database records."""
+    return str(uuid.uuid4())

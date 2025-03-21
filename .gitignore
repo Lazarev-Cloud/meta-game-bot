@@ -174,3 +174,4 @@ cython_debug/
 .pypirc
 /.idea
 belgrade_game.db
+*.db

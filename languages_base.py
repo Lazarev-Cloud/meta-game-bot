@@ -8,10 +8,10 @@ logger = logging.getLogger(__name__)
 TRANSLATIONS = {
     "en": {
         # Basic translations
-        "welcome": "Welcome to the Belgrade Game! This is a strategic role-playing game set in 1990s Yugoslavia.",
+        "welcome": "Welcome to the Novi Sad Game! This is a strategic role-playing game set in 1990s Yugoslavia.",
         "not_registered": "You are not registered. Use /start to begin the game.",
-        "registration_successful": "Registration successful! Welcome to the Belgrade Game.",
-        "help_title": "Help - Belgrade Game Bot",
+        "registration_successful": "Registration successful! Welcome to the Novi Sad Game.",
+        "help_title": "Help - Novi Sad Game Bot",
         "status_title": "Player Status",
         "resources_title": "Your Resources",
         "district_title": "District Information",
@@ -96,7 +96,7 @@ TRANSLATIONS = {
         "what_next": "What would you like to do?",
         "action_button": "🎯 Actions",
         "status_button": "📊 Status",
-        "districts_button": "🏙️ Districts",
+        "districts_button": "👥 Districts",
         "politicians_button": "👥 Politicians",
         "join_button": "🤝 Join Actions",
         "language_button": "🌐 Language",
@@ -114,8 +114,8 @@ TRANSLATIONS = {
         "quick_actions_status": "⚡ Quick Actions: {count}",
         
         # District and politician views
-        "districts_info": "Districts of Belgrade",
-        "politicians_info": "Politicians of Belgrade",
+        "districts_info": "Districts of Novi Sad",
+        "politicians_info": "Politicians of Novi Sad",
         "no_open_actions": "There are no open coordinated actions available to join.",
         "available_actions": "Available coordinated actions to join:",
         "option_not_available": "This option is not available.",
@@ -234,10 +234,10 @@ TRANSLATIONS = {
     },
     "ru": {
         # Russian translations
-        "welcome": "Добро пожаловать в Белградскую Игру! Это стратегическая ролевая игра, действие которой происходит в Югославии 1990-х годов.",
+        "welcome": "Добро пожаловать в игру Нови-Сад! Это стратегическая ролевая игра, действие которой происходит в Югославии 1990-х годов.",
         "not_registered": "Вы не зарегистрированы. Используйте /start, чтобы начать игру.",
-        "registration_successful": "Регистрация успешна! Добро пожаловать в Белградскую Игру.",
-        "help_title": "Помощь - Бот Белградской Игры",
+        "registration_successful": "Регистрация успешна! Добро пожаловать в игру Нови-Сад.",
+        "help_title": "Помощь - Бот Нови-Сада",
         "status_title": "Статус игрока",
         "resources_title": "Ваши ресурсы",
         "district_title": "Информация о районе",
@@ -340,8 +340,8 @@ TRANSLATIONS = {
         "quick_actions_status": "⚡ Быстрые действия: {count}",
         
         # District and politician views
-        "districts_info": "Районы Белграда",
-        "politicians_info": "Политики Белграда",
+        "districts_info": "Районы Нови-Сада",
+        "politicians_info": "Политики Нови-Сада",
         "no_open_actions": "Нет доступных координированных действий для присоединения.",
         "available_actions": "Доступные координированные действия для присоединения:",
         "option_not_available": "Эта опция недоступна.",
@@ -456,14 +456,49 @@ TRANSLATIONS = {
         "cycle_evening_en": "🌃 Good evening! A new cycle has begun. Your operations have been reset and resources replenished.",
         "cycle_evening_ru": "🌃 Добрый вечер! Начался новый цикл. Ваши операции были сброшены, а ресурсы пополнены.",
         "action_expired_en": "⌛ Your coordinated action has expired. You can start a new one using the /act command.",
-        "action_expired_ru": "⌛ Срок вашего координированного действия истек. Вы можете начать новое, используя команду /act."
+        "action_expired_ru": "⌛ Срок вашего координированного действия истек. Вы можете начать новое, используя команду /act.",
+        
+        # Action feedback messages
+        "influence_success": "Успешно повышено влияние в {target}",
+        "influence_partial": "Частично повышено влияние в {target}",
+        "influence_failure": "Не удалось повысить влияние в {target}",
+        "attack_success": "Успешная атака на {target}",
+        "attack_partial": "Частично успешная атака на {target}",
+        "attack_failure": "Неудачная атака на {target}",
+        "attack_uncontrolled": "Заявлен неконтролируемый район {target}",
+        "defense_success": "Защитные меры успешно установлены для {target}",
+        "defense_partial": "Защитные меры частично установлены для {target}",
+        "defense_failure": "Не удалось установить защитные меры для {target}",
+        "recon_success": "Разведка {target} завершена",
+        "support_success": "Действие поддержки в {target} завершено",
+        "info_success": "Информация распространена о {target}",
+        "physical_presence_bonus": "Применен бонус физического присутствия (+20 CP). Истекает через {time_remaining} минут",
+        "physical_presence_registered": "Физическое присутствие зарегистрировано в районе. Истекает в {formatted_time}",
+        
+        # District types and additional district descriptions
+        "district_type_residential": "Жилой район",
+        "district_type_commercial": "Коммерческий район",
+        "district_type_industrial": "Промышленный район",
+        "district_type_government": "Правительственный район",
+        "district_type_cultural": "Культурный район",
+        "district_type_historical": "Исторический район",
+        
+        # Additional time-related translations
+        "time_remaining_minutes": "{minutes} минут",
+        "time_remaining_hours": "{hours} часов",
+        "time_remaining_days": "{days} дней",
+        "expires_soon": "Скоро истекает",
+        "expired": "Истек",
+        
+        # Districts of Novi Sad
+        "districts_info_novi_sad": "Районы Нови-Сада"
     },
     "sr": {
         # Serbian translations
-        "welcome": "Добродошли у Београдску игру! Ово је стратешка игра улога смештена у Југославији деведесетих.",
+        "welcome": "Добродошли у игру Нови Сад! Ово је стратешка игра улога која се одвија у Југославији 1990-их.",
         "not_registered": "Нисте регистровани. Користите /start да започнете игру.",
-        "registration_successful": "Регистрација успешна! Добродошли у Београдску игру.",
-        "help_title": "Помоћ - Бот Београдске Игре",
+        "registration_successful": "Регистрација успешна! Добродошли у игру Нови Сад.",
+        "help_title": "Помоћ - Нови Сад бот за игру",
         "status_title": "Статус играча",
         "resources_title": "Ваши ресурси",
         "district_title": "Информације о округу",
@@ -793,7 +828,41 @@ TRANSLATIONS = {
         "admin_list_players_title": "Регистровани играчи",
         "admin_help_desc": "Прикажи ову поруку административне помоћи",
         "admin_news_desc": "Додај вест",
-        "admin_cycle_desc": "Ручно обради циклус игре"
+        "admin_cycle_desc": "Ручно обради циклус игре",
+        # Action feedback messages
+        "influence_success": "Успешно повећан утицај у {target}",
+        "influence_partial": "Делимично повећан утицај у {target}",
+        "influence_failure": "Није успело повећање утицаја у {target}",
+        "attack_success": "Успешан напад на {target}",
+        "attack_partial": "Делимично успешан напад на {target}",
+        "attack_failure": "Неуспешан напад на {target}",
+        "attack_uncontrolled": "Тражен неконтролисани округ {target}",
+        "defense_success": "Одбрамбене мере успешно постављене за {target}",
+        "defense_partial": "Одбрамбене мере делимично постављене за {target}",
+        "defense_failure": "Није успело постављање одбрамбених мера за {target}",
+        "recon_success": "Извиђање {target} завршено",
+        "support_success": "Акција подршке у {target} завршена",
+        "info_success": "Информација проширена о {target}",
+        "physical_presence_bonus": "Примењен бонус физичког присуства (+20 CP). Истиче за {time_remaining} минута",
+        "physical_presence_registered": "Физичко присуство регистровано у округу. Истиче у {formatted_time}",
+        
+        # District types and additional district descriptions
+        "district_type_residential": "Стамбени округ",
+        "district_type_commercial": "Комерцијални округ",
+        "district_type_industrial": "Индустријски округ",
+        "district_type_government": "Владин округ",
+        "district_type_cultural": "Културни округ",
+        "district_type_historical": "Историјски округ",
+        
+        # Additional time-related translations
+        "time_remaining_minutes": "{minutes} минута",
+        "time_remaining_hours": "{hours} сати",
+        "time_remaining_days": "{days} дана",
+        "expires_soon": "Ускоро истиче",
+        "expired": "Истекло",
+        
+        # Districts of Novi Sad
+        "districts_info_novi_sad": "Окрузи Новог Сада"
     }
 }
 
@@ -801,14 +870,20 @@ TRANSLATIONS = {
 RESOURCE_NAMES = {
     "en": {
         "influence": "Influence",
-        "resources": "Resources",
+        "resources": "Gotovina",
         "information": "Information",
         "force": "Force"
     },
     "ru": {
         "influence": "Влияние",
-        "resources": "Ресурсы",
+        "resources": "Готовина",
         "information": "Информация",
+        "force": "Сила"
+    },
+    "sr": {
+        "influence": "Утицај",
+        "resources": "Готовина",
+        "information": "Информација",
         "force": "Сила"
     }
 }
@@ -822,6 +897,10 @@ CYCLE_NAMES = {
     "ru": {
         "morning": "Утренний",
         "evening": "Вечерний"
+    },
+    "sr": {
+        "morning": "Јутро",
+        "evening": "Вече"
     }
 }
 
@@ -842,6 +921,48 @@ ACTION_NAMES = {
         "recon": "Разведка",
         "info": "Сбор информации",
         "support": "Поддержка"
+    },
+    "sr": {
+        "influence": "Утицај",
+        "attack": "Напад",
+        "defense": "Одбрана",
+        "recon": "Извиђање",
+        "info": "Прикупљање информација",
+        "support": "Подршка"
+    }
+}
+
+# District names
+DISTRICT_NAMES = {
+    "en": {
+        "stari_grad": "Stari Grad",
+        "novi_beograd": "Novi Beograd",
+        "zemun": "Zemun",
+        "savski_venac": "Savski Venac",
+        "vozdovac": "Voždovac",
+        "cukarica": "Čukarica",
+        "palilula": "Palilula",
+        "vracar": "Vračar"
+    },
+    "ru": {
+        "stari_grad": "Старый город",
+        "novi_beograd": "Новый Белград",
+        "zemun": "Земун",
+        "savski_venac": "Савски Венац",
+        "vozdovac": "Вождовац",
+        "cukarica": "Чукарица",
+        "palilula": "Палилула",
+        "vracar": "Врачар"
+    },
+    "sr": {
+        "stari_grad": "Стари Град",
+        "novi_beograd": "Нови Београд",
+        "zemun": "Земун",
+        "savski_venac": "Савски Венац",
+        "vozdovac": "Вождовац",
+        "cukarica": "Чукарица",
+        "palilula": "Палилула",
+        "vracar": "Врачар"
     }
 }
 
@@ -933,6 +1054,15 @@ def get_action_name(action, lang="en"):
 def get_district_name(district_id, lang="en"):
     """Get the localized name for a district."""
     try:
+        # First check if we have a localized name in our dictionary
+        if lang in DISTRICT_NAMES and district_id in DISTRICT_NAMES[lang]:
+            return DISTRICT_NAMES[lang][district_id]
+        
+        # If not found in current language, try English
+        if "en" in DISTRICT_NAMES and district_id in DISTRICT_NAMES["en"]:
+            return DISTRICT_NAMES["en"][district_id]
+            
+        # As a fallback, get the name from the database
         import sqlite3
         conn = sqlite3.connect('belgrade_game.db')
         cursor = conn.cursor()
@@ -941,9 +1071,8 @@ def get_district_name(district_id, lang="en"):
         conn.close()
         
         if result:
-            # Currently, we don't have localized district names, just return the name from the database
             return result[0]
         return district_id
     except Exception as e:
         logger.error(f"Error getting district name for {district_id}: {e}")
-        return district_id 
+        return district_id
