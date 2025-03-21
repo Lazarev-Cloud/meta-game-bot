@@ -3,13 +3,14 @@ import json
 import logging
 import random
 import sqlite3
-
+from telegram.ext import ContextTypes
 from db.queries import (
     update_district_control, distribute_district_resources,
     get_district_control, get_district_info, add_news, get_news, get_player_resources, get_player_language,
-    get_player_districts, refresh_player_actions
+    get_player_districts, refresh_player_actions, db_transaction
 )
-from languages import get_text, get_cycle_name
+from db.utils import get_db_connection, release_db_connection
+from languages import get_text, get_cycle_name, get_action_name, get_resource_name
 
 logger = logging.getLogger(__name__)
 
@@ -22,6 +23,10 @@ ACTION_DEFENSE = "defense"
 QUICK_ACTION_RECON = "recon"
 QUICK_ACTION_INFO = "info"
 QUICK_ACTION_SUPPORT = "support"
+
+# Group actions by type for validation
+MAIN_ACTIONS = [ACTION_INFLUENCE, ACTION_ATTACK, ACTION_DEFENSE]
+QUICK_ACTIONS = [QUICK_ACTION_RECON, QUICK_ACTION_INFO, QUICK_ACTION_SUPPORT]
 
 # Action cost definitions - Map each action type to its typical resource costs
 ACTION_COSTS = {
@@ -433,35 +438,380 @@ def apply_physical_presence_bonus(player_id, district_id, action_type):
         dict: Bonus information
     """
     # Check if this is a main action
-    if action_type not in [ACTION_INFLUENCE, ACTION_ATTACK, ACTION_DEFENSE]:
-        return {"applied": False, "bonus": 0}
+    if action_type not in MAIN_ACTIONS:
+        return {"applied": False, "bonus": 0, "message": "Bonus only applies to main actions"}
 
-    # In a real implementation, you would check if the player is physically present
-    # For now, we'll use a placeholder check based on the player's recent activity
     try:
         conn = sqlite3.connect('belgrade_game.db')
         cursor = conn.cursor()
 
-        # Check for a record of physical presence
+        # Check for a valid and not expired record of physical presence
+        # Presence expires after 6 hours
+        expiry_time = (datetime.datetime.now() - datetime.timedelta(hours=6)).isoformat()
+        
         cursor.execute(
             """
-            SELECT is_present FROM player_presence 
+            SELECT is_present, timestamp FROM player_presence 
             WHERE player_id = ? AND district_id = ? AND timestamp > ?
             """,
-            (player_id, district_id, (datetime.datetime.now() - datetime.timedelta(hours=6)).isoformat())
+            (player_id, district_id, expiry_time)
         )
-        presence = cursor.fetchone()
+        presence_record = cursor.fetchone()
+
+        if presence_record and presence_record[0]:
+            # Calculate time remaining on presence bonus
+            timestamp = datetime.datetime.fromisoformat(presence_record[1])
+            expires_at = timestamp + datetime.timedelta(hours=6)
+            now = datetime.datetime.now()
+            time_remaining = max(0, (expires_at - now).total_seconds() // 60)  # Minutes remaining
+            
+            # Apply +20 CP bonus
+            return {
+                "applied": True, 
+                "bonus": 20,
+                "message": f"Physical presence bonus applied (+20 CP). Expires in {int(time_remaining)} minutes.",
+                "expires_at": expires_at.isoformat()
+            }
 
         conn.close()
-
-        if presence and presence[0]:
-            # Apply +20 CP bonus
-            return {"applied": True, "bonus": 20}
+        return {"applied": False, "bonus": 0, "message": "No physical presence detected"}
 
     except Exception as e:
         logger.error(f"Error checking physical presence: {e}")
+        return {"applied": False, "bonus": 0, "message": f"Error: {str(e)}"}
 
-    return {"applied": False, "bonus": 0}
+
+def register_player_presence(player_id, district_id, location_data=None):
+    """
+    Register a player as physically present in a district.
+    
+    Args:
+        player_id: The player ID
+        district_id: The district ID
+        location_data: Optional location data from Telegram (latitude/longitude)
+        
+    Returns:
+        dict: Result of the operation
+    """
+    if not player_id or not district_id:
+        logger.error("Missing player_id or district_id for presence registration")
+        return {
+            "success": False,
+            "message": "Missing required information for presence registration."
+        }
+    
+    conn = None
+    
+    try:
+        # Validate the location if provided
+        if location_data:
+            valid_location = verify_location_in_district(location_data, district_id)
+            if not valid_location:
+                return {
+                    "success": False,
+                    "message": "Your location is not within this district."
+                }
+        
+        # Validate that district exists
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute("SELECT district_id FROM districts WHERE district_id = ?", (district_id,))
+        if not cursor.fetchone():
+            return {
+                "success": False,
+                "message": "District not found."
+            }
+            
+        # Validate that player exists
+        cursor.execute("SELECT player_id FROM players WHERE player_id = ?", (player_id,))
+        if not cursor.fetchone():
+            return {
+                "success": False, 
+                "message": "Player not registered."
+            }
+            
+        # Begin transaction
+        cursor.execute("BEGIN IMMEDIATE")
+        
+        now = datetime.datetime.now().isoformat()
+        
+        # Check if record already exists
+        cursor.execute(
+            "SELECT * FROM player_presence WHERE player_id = ? AND district_id = ?",
+            (player_id, district_id)
+        )
+        
+        if cursor.fetchone():
+            # Update existing record
+            cursor.execute(
+                """
+                UPDATE player_presence 
+                SET is_present = 1, timestamp = ? 
+                WHERE player_id = ? AND district_id = ?
+                """,
+                (now, player_id, district_id)
+            )
+            
+            # Add log for refreshed presence
+            logger.info(f"Refreshed player {player_id} presence in district {district_id}")
+        else:
+            # Create new record
+            cursor.execute(
+                """
+                INSERT INTO player_presence (player_id, district_id, timestamp, is_present)
+                VALUES (?, ?, ?, 1)
+                """,
+                (player_id, district_id, now)
+            )
+            
+            # Log new presence registration
+            logger.info(f"New player {player_id} presence registered in district {district_id}")
+            
+        # Commit transaction
+        cursor.execute("COMMIT")
+        
+        # Calculate expiry time
+        expires_at = datetime.datetime.now() + datetime.timedelta(hours=6)
+        formatted_time = expires_at.strftime("%H:%M:%S on %Y-%m-%d")
+        
+        return {
+            "success": True,
+            "message": f"Physical presence registered in district. Expires at {formatted_time}.",
+            "expires_at": expires_at.isoformat()
+        }
+        
+    except sqlite3.Error as e:
+        # Handle database errors
+        if conn:
+            try:
+                # Rollback transaction on error
+                conn.execute("ROLLBACK")
+                logger.warning(f"Rolled back transaction: {str(e)}")
+            except Exception as rollback_e:
+                logger.error(f"Error rolling back transaction: {str(rollback_e)}")
+                
+        error_msg = str(e).lower()
+        user_friendly_msg = "Database error occurred while registering presence."
+        
+        if "database is locked" in error_msg:
+            user_friendly_msg = "The system is busy. Please try again in a moment."
+        elif "no such table" in error_msg:
+            user_friendly_msg = "System error: Missing required database table."
+        elif "constraint failed" in error_msg:
+            user_friendly_msg = "Data validation error. Please try again."
+            
+        logger.error(f"Database error registering presence: {str(e)}")
+        return {
+            "success": False,
+            "message": user_friendly_msg
+        }
+    except Exception as e:
+        # Handle other errors
+        logger.error(f"Error registering physical presence: {e}")
+        return {
+            "success": False,
+            "message": "An error occurred while registering your presence. Please try again."
+        }
+    finally:
+        # Ensure connection is returned to the pool
+        if conn:
+            release_db_connection(conn)
+
+
+def verify_location_in_district(location_data, district_id):
+    """
+    Verify if the provided location is within the specified district.
+    
+    Args:
+        location_data: Location data (latitude/longitude)
+        district_id: District ID to check against
+        
+    Returns:
+        bool: True if location is in district, False otherwise
+    """
+    if not location_data or not district_id:
+        logger.warning("Missing location data or district ID for verification")
+        return False
+        
+    try:
+        # Validate location data format
+        if 'latitude' not in location_data or 'longitude' not in location_data:
+            logger.warning("Location data missing latitude or longitude")
+            return False
+            
+        lat = location_data['latitude']
+        lon = location_data['longitude']
+        
+        # Ensure coordinates are in valid ranges
+        if not (-90 <= lat <= 90) or not (-180 <= lon <= 180):
+            logger.warning(f"Invalid coordinates: {lat}, {lon}")
+            return False
+            
+        # Belgrade boundaries approximation (simplified for demo)
+        belgrade_bounds = {
+            'min_lat': 44.7,
+            'max_lat': 44.9,
+            'min_lon': 20.3,
+            'max_lon': 20.6
+        }
+        
+        # First verify within Belgrade
+        if (belgrade_bounds['min_lat'] <= lat <= belgrade_bounds['max_lat'] and
+            belgrade_bounds['min_lon'] <= lon <= belgrade_bounds['max_lon']):
+            
+            # District-specific bounds (approximate)
+            district_bounds = {
+                'stari_grad': {'min_lat': 44.8, 'max_lat': 44.83, 'min_lon': 20.45, 'max_lon': 20.48},
+                'novi_beograd': {'min_lat': 44.8, 'max_lat': 44.84, 'min_lon': 20.38, 'max_lon': 20.43},
+                'zemun': {'min_lat': 44.84, 'max_lat': 44.88, 'min_lon': 20.37, 'max_lon': 20.42},
+                'savski_venac': {'min_lat': 44.78, 'max_lat': 44.81, 'min_lon': 20.44, 'max_lon': 20.47},
+                'vozdovac': {'min_lat': 44.75, 'max_lat': 44.79, 'min_lon': 20.48, 'max_lon': 20.53},
+                'cukarica': {'min_lat': 44.77, 'max_lat': 44.8, 'min_lon': 20.36, 'max_lon': 20.41},
+                'palilula': {'min_lat': 44.81, 'max_lat': 44.85, 'min_lon': 20.47, 'max_lon': 20.52},
+                'vracar': {'min_lat': 44.79, 'max_lat': 44.81, 'min_lon': 20.46, 'max_lon': 20.49}
+            }
+            
+            # If we have bounds for this district, check against them
+            if district_id in district_bounds:
+                bounds = district_bounds[district_id]
+                return (bounds['min_lat'] <= lat <= bounds['max_lat'] and
+                        bounds['min_lon'] <= lon <= bounds['max_lon'])
+            else:
+                # If we don't have specific bounds, use the quadrant approach as fallback
+                conn = sqlite3.connect('belgrade_game.db')
+                cursor = conn.cursor()
+                
+                # Get district's area code to verify it matches the location quadrant
+                cursor.execute("SELECT district_id FROM districts WHERE district_id = ?", (district_id,))
+                result = cursor.fetchone()
+                conn.close()
+                
+                if not result:
+                    logger.warning(f"District {district_id} not found in database")
+                    return False
+                
+                # Belgrade center coordinates (approximate)
+                belgrade_center_lat = 44.8125
+                belgrade_center_lon = 20.4612
+                
+                # Determine which quadrant the location is in
+                quadrant_districts = {
+                    "NE": ['palilula', 'vracar'],
+                    "NW": ['zemun', 'novi_beograd'],
+                    "SE": ['stari_grad', 'savski_venac'],
+                    "SW": ['cukarica', 'vozdovac']
+                }
+                
+                if lat > belgrade_center_lat and lon > belgrade_center_lon:
+                    return district_id in quadrant_districts["NE"]
+                elif lat > belgrade_center_lat and lon <= belgrade_center_lon:
+                    return district_id in quadrant_districts["NW"]
+                elif lat <= belgrade_center_lat and lon > belgrade_center_lon:
+                    return district_id in quadrant_districts["SE"]
+                else:
+                    return district_id in quadrant_districts["SW"]
+        else:
+            logger.warning(f"Location {lat}, {lon} is outside Belgrade boundaries")
+            return False
+            
+    except Exception as e:
+        logger.error(f"Error verifying location in district: {e}")
+        return False
+
+
+def get_player_presence_status(player_id):
+    """
+    Get the player's current physical presence status in districts.
+    
+    Args:
+        player_id: Telegram user ID
+        
+    Returns:
+        list: List of districts where player is physically present, 
+              with expiry time and resources information
+    """
+    if not player_id:
+        return []
+        
+    conn = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        now = datetime.datetime.now().isoformat()
+        
+        # Get active presence records for player
+        cursor.execute("""
+            SELECT district_id, expires_at, location_data 
+            FROM player_presence 
+            WHERE player_id = ? AND expires_at > ?
+        """, (player_id, now))
+        
+        presence_records = cursor.fetchall()
+        
+        if not presence_records:
+            return []
+            
+        # Format presence data for display
+        formatted_records = []
+        
+        for record in presence_records:
+            district_id, expires_at, location_data_str = record
+            
+            # Get district info
+            district_info = get_district_info(district_id)
+            
+            if not district_info:
+                continue
+                
+            # Extract district name from district info
+            district_name = district_info[1]  # Index 1 is the name
+            
+            # Calculate time remaining
+            expires_datetime = datetime.datetime.fromisoformat(expires_at)
+            time_delta = expires_datetime - datetime.datetime.now()
+            
+            # Format time remaining
+            hours, remainder = divmod(time_delta.seconds, 3600)
+            minutes, _ = divmod(remainder, 60)
+            time_remaining = f"{hours}h {minutes}m"
+            
+            # Get player's control points in this district
+            cursor.execute("""
+                SELECT control_points FROM district_control 
+                WHERE player_id = ? AND district_id = ?
+            """, (player_id, district_id))
+            control_row = cursor.fetchone()
+            control_points = control_row[0] if control_row else 0
+            
+            # Calculate resources available for collection
+            resources_available = {
+                "influence": district_info[3] or 0,  # influence_resources
+                "resources": district_info[4] or 0,  # economic_resources
+                "information": district_info[5] or 0,  # information_resources
+                "force": district_info[6] or 0   # force_resources
+            }
+            
+            # Add to formatted records
+            formatted_records.append({
+                "district_id": district_id,
+                "district_name": district_name,
+                "time_remaining": time_remaining,
+                "control_points": control_points,
+                "resources_available": resources_available,
+                "expires_at": expires_at,
+                "location_data": json.loads(location_data_str) if location_data_str else None
+            })
+            
+        return formatted_records
+        
+    except Exception as e:
+        logger.error(f"Database error getting presence status: {e}")
+        return []
+    finally:
+        if conn:
+            release_db_connection(conn)
 
 
 def process_international_politicians():
@@ -1430,3 +1780,174 @@ def process_defense(district_id, resources):
     except Exception as e:
         logger.error(f"Error processing defense: {e}")
         return {"success": False, "message": str(e)}
+
+
+def get_next_cycle_time(is_morning=True):
+    """Calculate the next time for a morning (8:00) or evening (20:00) cycle."""
+    now = datetime.datetime.now()
+    target_hour = 8 if is_morning else 20
+    
+    # Create a datetime for today at the target hour
+    target_time = now.replace(hour=target_hour, minute=0, second=0, microsecond=0)
+    
+    # If that time has already passed today, move to tomorrow
+    if now >= target_time:
+        target_time += datetime.timedelta(days=1)
+    
+    # Calculate seconds until that time
+    time_diff = (target_time - now).total_seconds()
+    return time_diff
+
+
+async def morning_cycle(context: ContextTypes.DEFAULT_TYPE):
+    """Run the morning cycle tasks: distributing resources, resetting actions."""
+    try:
+        logger.info("Starting morning cycle...")
+        
+        # Notify users
+        await send_cycle_notification(context, is_morning=True)
+        
+        # Reset player operations
+        reset_player_operations()
+        
+        # Distribute resources
+        distribute_resources()
+        
+        # Create news about the cycle
+        create_cycle_news(is_morning=True)
+        
+        logger.info("Morning cycle completed successfully")
+    except Exception as e:
+        logger.error(f"Error during morning cycle: {e}", exc_info=True)
+
+
+async def evening_cycle(context: ContextTypes.DEFAULT_TYPE):
+    """Run the evening cycle tasks: distributing resources, resetting actions."""
+    try:
+        logger.info("Starting evening cycle...")
+        
+        # Notify users
+        await send_cycle_notification(context, is_morning=False)
+        
+        # Reset player operations
+        reset_player_operations()
+        
+        # Distribute resources
+        distribute_resources()
+        
+        # Create news about the cycle
+        create_cycle_news(is_morning=False)
+        
+        logger.info("Evening cycle completed successfully")
+    except Exception as e:
+        logger.error(f"Error during evening cycle: {e}", exc_info=True)
+
+
+async def cleanup_expired_actions(context: ContextTypes.DEFAULT_TYPE):
+    """Clean up expired coordinated actions."""
+    try:
+        logger.info("Cleaning up expired coordinated actions...")
+        
+        # Get expired actions and notify their initiators
+        from db.queries import cleanup_expired_actions as db_cleanup
+        expired_count = db_cleanup()
+        
+        if expired_count > 0:
+            logger.info(f"Cleaned up {expired_count} expired coordinated actions")
+        else:
+            logger.info("No expired coordinated actions found")
+            
+    except Exception as e:
+        logger.error(f"Error during cleanup of expired actions: {e}", exc_info=True)
+
+
+@db_transaction
+def reset_player_operations(cursor):
+    """Reset the operations_left counter for all players."""
+    cursor.execute("UPDATE players SET main_actions_left = 3, quick_actions_left = 3")
+    logger.info("Reset actions for all players")
+
+
+@db_transaction
+def distribute_resources(cursor):
+    """Distribute resources to players based on district control."""
+    # Get all players
+    cursor.execute("SELECT player_id FROM players")
+    players = cursor.fetchall()
+    
+    for player_id in [p[0] for p in players]:
+        # Count controlled districts
+        cursor.execute("""
+            SELECT COUNT(*) FROM district_control 
+            WHERE player_id = ? AND control_points > 30
+        """, (player_id,))
+        district_count = cursor.fetchone()[0]
+        
+        # Base resource amount
+        base_amount = 5
+        
+        # Calculate resource amounts based on district control
+        # More districts = more resources
+        influence = base_amount + (district_count * 3)
+        information = base_amount + (district_count * 2)
+        force = base_amount + (district_count * 2)
+        
+        # Update player resources
+        cursor.execute(
+            """
+            UPDATE resources 
+            SET influence = influence + ?, 
+                information = information + ?, 
+                force = force + ?
+            WHERE player_id = ?
+            """, 
+            (influence, information, force, player_id)
+        )
+        
+        logger.info(f"Distributed resources to player {player_id}: I:{influence} S:{information} F:{force}")
+
+
+@db_transaction
+def create_cycle_news(cursor, is_morning=True):
+    """Create a news entry for the game cycle."""
+    cycle_type = "Morning" if is_morning else "Evening"
+    
+    # Create news entry
+    cursor.execute(
+        """
+        INSERT INTO news (content) 
+        VALUES (?)
+        """,
+        (
+            f"The {cycle_type.lower()} cycle has begun. All players have received resources and actions have been reset.",
+        )
+    )
+    
+    logger.info(f"Created news entry for {cycle_type.lower()} cycle")
+
+
+async def send_cycle_notification(context: ContextTypes.DEFAULT_TYPE, is_morning=True):
+    """Send notifications to all players about the new cycle."""
+    try:
+        # Connect to database
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            
+            # Get all players
+            cursor.execute("SELECT player_id, lang FROM players")
+            players = cursor.fetchall()
+            
+            cycle_type = "cycle_morning" if is_morning else "cycle_evening"
+            
+            # Send notifications
+            for player_id, lang in players:
+                try:
+                    await context.bot.send_message(
+                        chat_id=player_id,
+                        text=get_text(cycle_type, lang)
+                    )
+                    logger.info(f"Sent cycle notification to player {player_id}")
+                except Exception as e:
+                    logger.error(f"Failed to send cycle notification to player {player_id}: {e}")
+    except Exception as e:
+        logger.error(f"Error during cycle notification: {e}", exc_info=True)

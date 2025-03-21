@@ -8,7 +8,8 @@ import logging
 import sqlite3
 from typing import Dict, Any, Optional, Union, List
 
-from languages import get_text
+# Import only constants from languages_base to avoid circular imports
+from languages_base import TRANSLATIONS
 
 logger = logging.getLogger(__name__)
 
@@ -251,27 +252,6 @@ ADMIN_TRANSLATIONS = {
     }
 }
 
-
-# To add these translations to the main translations dictionary
-def update_admin_translations():
-    """Update the main translations dictionary with admin translations"""
-    from languages import TRANSLATIONS
-
-    for lang in ADMIN_TRANSLATIONS:
-        if lang in TRANSLATIONS:
-            # Update existing language with admin translations
-            for key, value in ADMIN_TRANSLATIONS[lang].items():
-                TRANSLATIONS[lang][key] = value
-
-    logger.info("Admin translations added")
-
-
-# Call this function when initializing language support
-def init_admin_language_support():
-    """Initialize admin language support"""
-    update_admin_translations()
-    logger.info("Admin language support initialized")
-
 def update_translations():
     """
     Update the main translations dictionary with additional translations
@@ -279,8 +259,6 @@ def update_translations():
     This function must be called before translations are used to ensure all
     new translations are available
     """
-    from languages import TRANSLATIONS
-
     for lang in ADDITIONAL_TRANSLATIONS:
         if lang in TRANSLATIONS:
             # Update existing language with new translations
@@ -292,6 +270,37 @@ def update_translations():
 
     logger.info("Translations updated with additional entries")
 
+def update_admin_translations():
+    """Update the main translations dictionary with admin translations"""
+    for lang in ADMIN_TRANSLATIONS:
+        if lang in TRANSLATIONS:
+            # Update existing language with admin translations
+            for key, value in ADMIN_TRANSLATIONS[lang].items():
+                TRANSLATIONS[lang][key] = value
+
+    logger.info("Admin translations added")
+
+# Define the local_get_text function at the module level
+def local_get_text(key, lang="en", default=None):
+    """
+    Local version of get_text to avoid circular imports
+    
+    Args:
+        key: The translation key
+        lang: Language code
+        default: Default text if translation is missing
+    
+    Returns:
+        Translated text
+    """
+    if lang not in TRANSLATIONS:
+        lang = "en"
+    text = TRANSLATIONS[lang].get(key)
+    if text is None:
+        text = TRANSLATIONS["en"].get(key)
+    if text is None:
+        return default if default is not None else f"[Missing: {key}]"
+    return text
 
 def get_translated_keyboard(keyboard_items: List[Dict[str, str]], lang: str = "en") -> List[Dict[str, str]]:
     """
@@ -304,17 +313,14 @@ def get_translated_keyboard(keyboard_items: List[Dict[str, str]], lang: str = "e
     Returns:
         List of translated keyboard items
     """
-    from languages import get_text
-
     translated_items = []
     for item in keyboard_items:
         translated_item = item.copy()
         if 'text' in item:
-            translated_item['text'] = get_text(item['text'], lang, item['text'])
+            translated_item['text'] = local_get_text(item['text'], lang, item['text'])
         translated_items.append(translated_item)
 
     return translated_items
-
 
 def detect_language_from_message(message_text: str) -> str:
     """
@@ -335,7 +341,6 @@ def detect_language_from_message(message_text: str) -> str:
 
     return "en"
 
-
 def format_resource_list(resources: Dict[str, int], lang: str = "en") -> str:
     """
     Format a dictionary of resources as a readable string
@@ -347,7 +352,8 @@ def format_resource_list(resources: Dict[str, int], lang: str = "en") -> str:
     Returns:
         Formatted string
     """
-    from languages import get_resource_name
+    # Import locally to avoid circular imports
+    from languages_base import get_resource_name
 
     formatted_parts = []
     for resource_type, amount in resources.items():
@@ -356,10 +362,9 @@ def format_resource_list(resources: Dict[str, int], lang: str = "en") -> str:
             formatted_parts.append(f"{amount} {resource_name}")
 
     if not formatted_parts:
-        return get_text("none", lang, default="None")
+        return local_get_text("none", lang, default="None")
 
     return ", ".join(formatted_parts)
-
 
 def get_ordinal_suffix(num: int, lang: str = "en") -> str:
     """
@@ -385,8 +390,8 @@ def get_ordinal_suffix(num: int, lang: str = "en") -> str:
 
     return f"{num}{suffix}"
 
-
 def init_language_support():
     """Initialize language support by updating translations"""
     update_translations()
+    update_admin_translations()
     logger.info("Language support initialized")

@@ -10,7 +10,7 @@ import logging
 import sqlite3
 import random
 from typing import Dict, List, Tuple, Optional, Any
-from languages import format_ideology
+from languages import get_text, format_ideology, get_resource_name, get_action_name
 logger = logging.getLogger(__name__)
 
 

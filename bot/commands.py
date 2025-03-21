@@ -1,7 +1,11 @@
 import sqlite3
 import logging
 import datetime
-from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
+import re
+import random
+import html
+from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton, KeyboardButton, ReplyKeyboardMarkup
+from telegram.constants import ParseMode
 from telegram.ext import (
     CommandHandler, MessageHandler, filters,
     ConversationHandler, ContextTypes
@@ -24,8 +28,9 @@ from game.politicians import (
 )
 from game.actions import (
     process_game_cycle, get_current_cycle, get_cycle_deadline, get_cycle_results_time,
-    ACTION_ATTACK, ACTION_DEFENSE
+    ACTION_ATTACK, ACTION_DEFENSE, register_player_presence, get_player_presence_status
 )
+from utils import format_resources
 
 logger = logging.getLogger(__name__)
 
@@ -36,18 +41,74 @@ WAITING_INFO_CONTENT = "WAITING_INFO_CONTENT"
 
 # Command handlers
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Start the conversation and ask for player name."""
+    """Start the conversation and register the user if needed."""
     user = update.effective_user
-    register_player(user.id, user.username)
+    lang = get_player_language(user.id)
 
-    # Default to English for new users
-    lang = "en"
-
-    await update.message.reply_text(
-        get_text("welcome", lang, user_name=user.first_name)
-    )
-
-    return WAITING_NAME
+    # Check if player is already registered
+    player = get_player(user.id)
+    if player:
+        # Player is already registered, show status and action buttons
+        resources = get_player_resources(user.id)
+        
+        # Create a message with status info
+        status_text = (
+            f"<b>{get_text('welcome_back', lang, default='Welcome back')} {player['name']}!</b>\n\n"
+            f"<b>{get_text('status_title', lang)}:</b>\n"
+            f"{format_resources(resources, lang)}\n\n"
+            f"{get_text('what_next', lang, default='What would you like to do?')}"
+        )
+        
+        # Create main action buttons
+        keyboard = [
+            [
+                InlineKeyboardButton(get_text('action_button', lang, default='🎯 Actions'), callback_data="main_menu:actions"),
+                InlineKeyboardButton(get_text('status_button', lang, default='📊 Status'), callback_data="main_menu:status")
+            ],
+            [
+                InlineKeyboardButton(get_text('districts_button', lang, default='🏙️ Districts'), callback_data="main_menu:districts"),
+                InlineKeyboardButton(get_text('politicians_button', lang, default='👥 Politicians'), callback_data="main_menu:politicians")
+            ],
+            [
+                InlineKeyboardButton(get_text('join_button', lang, default='🤝 Join Actions'), callback_data="main_menu:join"),
+                InlineKeyboardButton(get_text('language_button', lang, default='🌐 Language'), callback_data="main_menu:language")
+            ],
+            [
+                InlineKeyboardButton(get_text('news_button', lang, default='📰 News'), callback_data="main_menu:news"),
+                InlineKeyboardButton(get_text('help_button', lang, default='❓ Help'), callback_data="main_menu:help")
+            ]
+        ]
+        
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await update.message.reply_text(
+            text=status_text,
+            parse_mode='HTML',
+            reply_markup=reply_markup
+        )
+    else:
+        # New player registration
+        register_player(user.id, user.username or "", lang)
+        
+        # Send welcome message with language selection buttons
+        welcome_text = get_text('welcome', lang)
+        
+        keyboard = [
+            [
+                InlineKeyboardButton(get_text('language_en', lang, default='English 🇺🇸'), callback_data="language:en"),
+                InlineKeyboardButton(get_text('language_ru', lang, default='Русский 🇷🇺'), callback_data="language:ru")
+            ],
+            [
+                InlineKeyboardButton(get_text('set_name_button', lang, default='Set your character name'), callback_data="set_name:start")
+            ]
+        ]
+        
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await update.message.reply_text(
+            text=welcome_text,
+            reply_markup=reply_markup
+        )
 
 
 async def set_name_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -272,29 +333,88 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     player = get_player(user.id)
     player_id = user.id if player else None
 
-    # Basic commands for all users
-    help_text = (
-        f"<b>{get_text('help_title', lang)}</b>\n\n"
-        f"{get_text('help_basic', lang)}\n\n"
-        f"{get_text('help_action', lang)}\n\n"
-        f"<b>{get_text('coordinated_actions_heading', lang, default='Coordinated Actions:')}</b>\n"
-        f"{get_text('coordinated_actions_help_text', lang, default='• Use the \"Join\" option from the main action menu to join someone\'s action\n• Create a coordinated action using \"Attack\" or \"Defense\" menu options\n• The more players join, the stronger the action will be')}\n\n"
-        f"{get_text('help_resource', lang, default='*Resource Commands:*\n• /resources - View your current resources\n• /convert_resource [type] [amount] - Convert resources\n• /exchange - Interactive resource exchange menu\n• /check_income - Check your expected resource income')}\n\n"
-        f"{get_text('help_political', lang)}\n\n"
-    )
+    # Determine if this is a new user
+    is_new_user = player is None
 
-    # Add player ID information
-    if player_id:
-        help_text += f"<b>{get_text('player_id_title', lang, default='Your Player ID:')}</b> {player_id}\n\n"
+    # Create a clear, user-friendly help text with emojis
+    if is_new_user:
+        # Quick start guide for new users
+        help_text = (
+            f"<b>🎮 {get_text('welcome', lang)}</b>\n\n"
+            f"<b>🚀 {get_text('quick_start_guide', lang, default='Quick Start Guide:')}</b>\n"
+            f"1️⃣ {get_text('quick_start_1', lang, default='Type /start to register and begin playing')}\n"
+            f"2️⃣ {get_text('quick_start_2', lang, default='Choose your language using /language')}\n"
+            f"3️⃣ {get_text('quick_start_3', lang, default='Set your character name when prompted')}\n"
+            f"4️⃣ {get_text('quick_start_4', lang, default='Use /status to view your resources')}\n"
+            f"5️⃣ {get_text('quick_start_5', lang, default='Start playing with /act to perform actions')}\n\n"
+            f"<b>❓ {get_text('need_more_help', lang, default='Need more help?')}</b>\n"
+            f"{get_text('contact_admin', lang, default='Contact the game administrator for assistance.')}\n\n"
+        )
+    else:
+        # Help for registered users - organized by categories
+        help_text = f"<b>🎮 {get_text('help_title', lang)}</b>\n\n"
+        
+        # Basic commands section
+        help_text += (
+            f"<b>📋 {get_text('basic_commands', lang, default='Basic Commands:')}</b>\n"
+            f"• /start - {get_text('start_command_help', lang)}\n"
+            f"• /help - {get_text('help_command_help', lang)}\n"
+            f"• /status - {get_text('status_command_help', lang)}\n"
+            f"• /language - {get_text('language_command_help', lang)}\n\n"
+        )
+        
+        # Game actions section
+        help_text += (
+            f"<b>🎯 {get_text('game_actions', lang, default='Game Actions:')}</b>\n"
+            f"• /act - {get_text('act_command_help', lang)}\n"
+            f"• /join - {get_text('join_command_help', lang)}\n\n"
+        )
+        
+        # Information section
+        help_text += (
+            f"<b>🔍 {get_text('information_commands', lang, default='Information Commands:')}</b>\n"
+            f"• /districts - {get_text('districts_command_help', lang)}\n"
+            f"• /politicians - {get_text('politicians_command_help', lang)}\n"
+            f"• /news - {get_text('news_command_help', lang)}\n\n"
+        )
+
+        # Coordinated actions explanation
+        help_text += (
+            f"<b>🤝 {get_text('coordinated_actions_heading', lang, default='Coordinated Actions:')}</b>\n"
+            f"{get_text('coordinated_actions_help_text', lang, default='• Use /join to see available coordinated actions\n• Create a coordinated action with the "Attack" or "Defense" option when using /act\n• The more players join, the stronger the action will be')}\n\n"
+        )
+
+        # Resources explanation
+        help_text += (
+            f"<b>💰 {get_text('resources_heading', lang, default='Resources:')}</b>\n"
+            f"{get_text('resources_help_text', lang, default='• You get resources from districts you control\n• Different actions require different resources\n• Plan your resource usage carefully')}\n\n"
+        )
+
+        # Game cycles explanation
+        help_text += (
+            f"<b>🕒 {get_text('game_cycles_heading', lang, default='Game Cycles:')}</b>\n"
+            f"{get_text('game_cycles_help_text', lang, default='• The game has morning and evening cycles\n• Your actions refresh at the start of each cycle\n• Resources are distributed at the start of each cycle')}\n\n"
+        )
+
+        # Add player ID information
+        if player_id:
+            help_text += f"<b>🆔 {get_text('player_id_title', lang, default='Your Player ID:')}</b> {player_id}\n\n"
 
     # Add admin hint for admins
     if is_admin:
         help_text += (
-            f"<b>Admin Commands:</b>\n"
-            f"Use /admin_help to see all admin commands.\n\n"
+            f"<b>⚙️ {get_text('admin_commands', lang, default='Admin Commands:')}</b>\n"
+            f"{get_text('admin_help_hint', lang, default='Use /admin_help to see all admin commands.')}\n\n"
         )
 
-    help_text += get_text('help_footer', lang)
+    # Add footer with tips
+    help_text += (
+        f"<b>💡 {get_text('tips_heading', lang, default='Helpful Tips:')}</b>\n"
+        f"{get_text('help_tips', lang, default='• Form alliances with other players\n• Watch the news for important events\n• Balance your resource usage carefully')}\n\n"
+    )
+
+    # Add contact information
+    help_text += get_text('help_footer', lang, default="If you need assistance, contact the game administrator.")
 
     await update.message.reply_text(help_text, parse_mode='HTML')
 
@@ -439,6 +559,9 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(get_text("not_registered", lang))
         return
 
+    # Check if actions should refresh
+    update_action_counts(user.id)
+
     character_name = player[2] or get_text("unnamed", lang, default="Unnamed")
     ideology_score = player[3]
 
@@ -454,13 +577,19 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"*{get_text('status_title', lang, character_name=character_name)}*\n"
         f"{get_text('status_ideology', lang, ideology=ideology, score=ideology_score)}\n\n"
 
-        f"{get_text('status_resources', lang, influence=resources['influence'], resources=resources['resources'], information=resources['information'], force=resources['force'])}\n\n"
+        f"*{get_text('resources_title', lang)}*\n"
+        f"🔵 {get_resource_name('influence', lang)}: {resources['influence']}\n"
+        f"💰 {get_resource_name('resources', lang)}: {resources['resources']}\n"
+        f"🔍 {get_resource_name('information', lang)}: {resources['information']}\n"
+        f"👊 {get_resource_name('force', lang)}: {resources['force']}\n\n"
 
-        f"{get_text('status_actions', lang, main=actions['main'], quick=actions['quick'])}\n\n"
+        f"*{get_text('remaining_actions', lang)}*\n"
+        f"{get_text('main_actions_status', lang, count=actions['main'])}\n"
+        f"{get_text('quick_actions_status', lang, count=actions['quick'])}\n\n"
     )
 
     if districts:
-        status_text += f"{get_text('status_districts', lang)}\n"
+        status_text += f"*{get_text('status_districts', lang)}*\n"
         for district in districts:
             district_id, name, control = district
 
@@ -470,7 +599,7 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             status_text += f"{name}: {control} {get_text('control_points', lang, count=control)} - {control_status}\n"
     else:
-        status_text += f"{get_text('status_no_districts', lang)}\n"
+        status_text += f"*{get_text('status_no_districts', lang)}*\n"
 
     await update.message.reply_text(status_text, parse_mode='Markdown')
 
@@ -1073,6 +1202,39 @@ async def language_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
+async def set_name_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle the command to set a player's character name."""
+    user = update.effective_user
+    lang = get_player_language(user.id)
+    
+    # Check if player is registered
+    player = get_player(user.id)
+    if not player:
+        await update.message.reply_text(get_text("not_registered", lang))
+        return
+    
+    # If player already has a name, confirm they want to change it
+    if player[2]:  # player[2] contains the character name
+        keyboard = [
+            [
+                InlineKeyboardButton(get_text("yes", lang, default="Yes"), callback_data="set_name:start"),
+                InlineKeyboardButton(get_text("no", lang, default="No"), callback_data="back_to_main_menu")
+            ]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await update.message.reply_text(
+            get_text("name_change_confirm", lang, default="You already have a character name. Do you want to change it?"),
+            reply_markup=reply_markup
+        )
+    else:
+        # Start name setting process
+        await update.message.reply_text(
+            get_text("enter_character_name", lang, default="Please enter your character name:")
+        )
+        return WAITING_NAME
+
+
 async def receive_info_content(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle receiving information content for quick info action."""
     user = update.effective_user
@@ -1167,6 +1329,9 @@ async def join_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not player:
         await update.message.reply_text(get_text("not_registered", lang))
         return
+
+    # Check if actions should refresh
+    update_action_counts(user.id)
 
     # Check if player has main actions left (coordinated actions use main actions)
     actions = get_remaining_actions(user.id)
@@ -1312,6 +1477,15 @@ async def exchange_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # Create buttons for resource exchange options
     keyboard = []
+    
+    # Create color indicators for resource amounts
+    def get_resource_indicator(amount):
+        if amount < 5:
+            return "🔴"  # Red for low
+        elif amount < 10:
+            return "🟡"  # Yellow for medium
+        else:
+            return "🟢"  # Green for high
 
     # Resources → Influence (2:1)
     if resources['resources'] >= 2:
@@ -1362,12 +1536,18 @@ async def exchange_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     reply_markup = InlineKeyboardMarkup(keyboard)
 
+    # Add colored indicators to resource counts
+    influence_indicator = get_resource_indicator(resources['influence'])
+    resources_indicator = get_resource_indicator(resources['resources']) 
+    information_indicator = get_resource_indicator(resources['information'])
+    force_indicator = get_resource_indicator(resources['force'])
+
     resource_text = (
         f"*{get_text('resources_title', lang)}*\n\n"
-        f"🔵 {get_resource_name('influence', lang)}: {resources['influence']}\n"
-        f"💰 {get_resource_name('resources', lang)}: {resources['resources']}\n"
-        f"🔍 {get_resource_name('information', lang)}: {resources['information']}\n"
-        f"👊 {get_resource_name('force', lang)}: {resources['force']}\n\n"
+        f"{influence_indicator} 🔵 {get_resource_name('influence', lang)}: {resources['influence']}\n"
+        f"{resources_indicator} 💰 {get_resource_name('resources', lang)}: {resources['resources']}\n"
+        f"{information_indicator} 🔍 {get_resource_name('information', lang)}: {resources['information']}\n"
+        f"{force_indicator} 👊 {get_resource_name('force', lang)}: {resources['force']}\n\n"
         f"{get_text('exchange_instructions', lang, default='Select a resource exchange option:')}"
     )
 
@@ -1436,58 +1616,400 @@ async def list_coordinated_actions_command(update: Update, context: ContextTypes
     await update.message.reply_text(response, parse_mode='Markdown')
 
 
-def register_commands(application):
-    """Register all command handlers."""
-    # Create conversation handler for /start command
-    conv_handler = ConversationHandler(
-        entry_points=[CommandHandler("start", start_command)],
-        states={
-            "WAITING_NAME": [MessageHandler(filters.TEXT & ~filters.COMMAND, set_name_handler)],
-            "WAITING_INFO_CONTENT": [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_info_content)]
-        },
-        fallbacks=[CommandHandler("cancel", cancel_handler)]
+def get_resource_indicator(amount):
+    """Return a colored indicator emoji based on resource amount."""
+    if amount < 5:
+        return "🔴"  # Red for low
+    elif amount < 10:
+        return "🟡"  # Yellow for medium
+    else:
+        return "🟢"  # Green for high
+
+
+def get_district_by_location(location_data):
+    """
+    Get the district ID for a given location.
+    
+    Args:
+        location_data: Location data containing latitude/longitude
+        
+    Returns:
+        str: District ID or None if no matching district
+    """
+    try:
+        if not location_data or 'latitude' not in location_data or 'longitude' not in location_data:
+            logger.error("Invalid location data provided")
+            return None
+            
+        lat = location_data['latitude']
+        lon = location_data['longitude']
+        
+        logger.info(f"Looking up district for location: {lat}, {lon}")
+        
+        # Sample geo boundaries for Belgrade districts (approximate)
+        # In a production environment, these would be stored in the database with proper polygon data
+        district_boundaries = {
+            'stari_grad': {
+                'center': (44.8184, 20.4586),
+                'radius': 0.015,  # roughly 1.5km
+                'name': 'Stari Grad'
+            },
+            'vracar': {
+                'center': (44.7989, 20.4774),
+                'radius': 0.012,
+                'name': 'Vračar'
+            },
+            'savski_venac': {
+                'center': (44.8020, 20.4555),
+                'radius': 0.018,
+                'name': 'Savski Venac'
+            },
+            'novi_beograd': {
+                'center': (44.8152, 20.4115),
+                'radius': 0.025,
+                'name': 'Novi Beograd'
+            },
+            'zemun': {
+                'center': (44.8430, 20.4011),
+                'radius': 0.022,
+                'name': 'Zemun'
+            },
+            'palilula': {
+                'center': (44.8156, 20.4861),
+                'radius': 0.020,
+                'name': 'Palilula'
+            },
+            'vozdovac': {
+                'center': (44.7784, 20.4791),
+                'radius': 0.023,
+                'name': 'Voždovac'
+            },
+            'cukarica': {
+                'center': (44.7840, 20.4142),
+                'radius': 0.025,
+                'name': 'Čukarica'
+            }
+        }
+        
+        # Function to calculate distance between two coordinates (Haversine formula)
+        def calculate_distance(lat1, lon1, lat2, lon2):
+            from math import radians, sin, cos, sqrt, atan2
+            
+            # Convert latitude and longitude from degrees to radians
+            lat1, lon1, lat2, lon2 = map(radians, [lat1, lon1, lat2, lon2])
+            
+            # Haversine formula
+            dlon = lon2 - lon1
+            dlat = lat2 - lat1
+            a = sin(dlat/2)**2 + cos(lat1) * cos(lat2) * sin(dlon/2)**2
+            c = 2 * atan2(sqrt(a), sqrt(1-a))
+            radius = 6371  # Radius of earth in kilometers
+            distance = radius * c
+            
+            return distance
+        
+        # Find the closest district
+        closest_district = None
+        min_distance = float('inf')
+        
+        for district_id, boundary in district_boundaries.items():
+            center_lat, center_lon = boundary['center']
+            distance = calculate_distance(lat, lon, center_lat, center_lon)
+            
+            # If within radius, consider it a match
+            if distance <= boundary['radius']:
+                logger.info(f"Location is within {boundary['name']} district (distance: {distance:.3f}km)")
+                
+                # If multiple districts match, choose the closest one
+                if distance < min_distance:
+                    min_distance = distance
+                    closest_district = district_id
+        
+        # If no district is within the specific radius constraints but we need to return something
+        if not closest_district:
+            logger.info("Location not within any district radius, finding nearest district")
+            for district_id, boundary in district_boundaries.items():
+                center_lat, center_lon = boundary['center']
+                distance = calculate_distance(lat, lon, center_lat, center_lon)
+                
+                if distance < min_distance:
+                    min_distance = distance
+                    closest_district = district_id
+            
+            # Only return if reasonably close (within 10km)
+            if min_distance > 10.0:
+                logger.warning(f"Location too far from any district (nearest: {min_distance:.3f}km)")
+                closest_district = None
+                
+        if closest_district:
+            logger.info(f"Matched location to district: {closest_district}")
+            
+        return closest_district
+        
+    except Exception as e:
+        logger.error(f"Error finding district by location: {e}")
+        return None
+
+
+async def presence_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Register physical presence in a district using location sharing."""
+    user = update.effective_user
+    lang = get_player_language(user.id)
+    
+    # Check if player is registered
+    player = get_player(user.id)
+    if not player:
+        await update.message.reply_text(get_text("not_registered", lang))
+        return
+    
+    # Check if any actions need to be refreshed
+    update_action_counts(user.id)
+    
+    # Check if message contains location data
+    if update.message.location:
+        try:
+            # Show processing message
+            processing_message = await update.message.reply_text(
+                get_text("processing_location", lang, default="📍 Processing your location...")
+            )
+            
+            location_data = {
+                "latitude": update.message.location.latitude,
+                "longitude": update.message.location.longitude
+            }
+            
+            # Log received location data
+            logger.info(f"Received location data from user {user.id}: {location_data['latitude']}, {location_data['longitude']}")
+            
+            # Get nearest district
+            district_id = get_district_by_location(location_data)
+            
+            if not district_id:
+                await processing_message.edit_text(
+                    get_text("location_not_in_district", lang, 
+                            default="📍 Your location could not be matched to any district in Belgrade.")
+                )
+                return
+            
+            # Register presence in the district
+            result = register_player_presence(user.id, district_id, location_data)
+            
+            # Get district name
+            district_info = get_district_info(district_id)
+            district_name = district_info[1] if district_info else district_id  # Index 1 should be the name
+            
+            if result["success"]:
+                # Parse the expiry time for a more user-friendly message
+                expires_at = datetime.datetime.fromisoformat(result["expires_at"])
+                hours_remaining = int((expires_at - datetime.datetime.now()).total_seconds() / 3600)
+                minutes_remaining = int(((expires_at - datetime.datetime.now()).total_seconds() % 3600) / 60)
+                time_message = f"{hours_remaining}h {minutes_remaining}m"
+                
+                # Get presence benefits explanation
+                benefits_message = get_text("presence_benefits", lang, 
+                                          default="Being physically present gives +20 Control Points to main actions in this district.")
+                
+                # Create success message with district name and expiry time
+                success_message = (
+                    f"✅ {get_text('presence_registered_district', lang, default='You are now registered as present in {district}.', district=district_name)}\n\n"
+                    f"⏱️ {get_text('presence_duration', lang, default='Duration: {time}', time=time_message)}\n\n"
+                    f"📊 {benefits_message}"
+                )
+                
+                # Edit the processing message with the success message
+                await processing_message.edit_text(success_message)
+                
+                # Keyboard to check current presence
+                keyboard = [
+                    [InlineKeyboardButton(
+                        get_text("check_presence_status", lang, default="📍 Check My Status"),
+                        callback_data="check_presence"
+                    )]
+                ]
+                reply_markup = InlineKeyboardMarkup(keyboard)
+                
+                # Send district info with reply markup
+                await update.message.reply_text(
+                    get_text("view_district_prompt", lang, 
+                            default="Would you like to check your presence status?"),
+                    reply_markup=reply_markup
+                )
+            else:
+                # Edit the processing message with the error message
+                await processing_message.edit_text(
+                    f"❌ {get_text('presence_registration_failed', lang, default='Failed to register your presence: {reason}', reason=result['message'])}"
+                )
+                
+                # Offer to try again
+                keyboard = [
+                    [KeyboardButton(
+                        get_text("try_again", lang, default="📍 Try Again"),
+                        request_location=True
+                    )]
+                ]
+                reply_markup = ReplyKeyboardMarkup(keyboard, one_time_keyboard=True)
+                
+                await update.message.reply_text(
+                    get_text("location_try_again", lang, default="Would you like to try sharing your location again?"),
+                    reply_markup=reply_markup
+                )
+        
+        except Exception as e:
+            logger.error(f"Error processing location for user {user.id}: {e}")
+            await update.message.reply_text(
+                get_text("error_processing_location", lang, 
+                        default="An error occurred while processing your location. Please try again later.")
+            )
+    else:
+        # Request location sharing with a better explanation
+        explanation = get_text("location_explanation", lang, 
+                              default="Physical presence in a district gives you a +20 Control Point bonus to all main actions there for 6 hours.")
+        
+        instruction = get_text("location_instruction", lang,
+                              default="Please share your location to register your physical presence.")
+        
+        keyboard = [
+            [KeyboardButton(
+                get_text("share_location", lang, default="📍 Share my location"),
+                request_location=True
+            )]
+        ]
+        reply_markup = ReplyKeyboardMarkup(keyboard, one_time_keyboard=True, resize_keyboard=True)
+        
+        # Send explanation and request location
+        await update.message.reply_text(f"ℹ️ {explanation}\n\n📱 {instruction}", reply_markup=reply_markup)
+
+
+async def check_presence_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Check current physical presence status."""
+    user = update.effective_user
+    lang = get_player_language(user.id)
+    
+    # Check if player is registered
+    player = get_player(user.id)
+    if not player:
+        await update.message.reply_text(get_text("not_registered", lang))
+        return
+    
+    # Show loading message
+    loading_message = await update.message.reply_text(
+        get_text("checking_presence", lang, default="📍 Checking your presence status...")
     )
-    application.add_handler(conv_handler)
-
-    # Add basic command handlers
-    application.add_handler(CommandHandler("help", help_command))
-    application.add_handler(CommandHandler("status", status_command))
-    application.add_handler(CommandHandler("map", map_command))
-    application.add_handler(CommandHandler("time", time_command))
-    application.add_handler(CommandHandler("news", news_command))
-
-    # Action handlers
-    application.add_handler(CommandHandler("action", action_command))
-    application.add_handler(CommandHandler("quick_action", quick_action_command))
-    application.add_handler(CommandHandler("cancel_action", cancel_action_command))
-    application.add_handler(CommandHandler("actions_left", actions_left_command))
-    application.add_handler(CommandHandler("join", join_command))
-    application.add_handler(CommandHandler("coordinated_actions", list_coordinated_actions_command))
-
-    # District and politician handlers
-    application.add_handler(CommandHandler("view_district", view_district_command))
-    application.add_handler(CommandHandler("politicians", politicians_command))
-    application.add_handler(CommandHandler("politician_status", politician_status_command))
-    application.add_handler(CommandHandler("international", international_command))
-
-    # Resource handlers
-    application.add_handler(CommandHandler("resources", resources_command))
-    application.add_handler(CommandHandler("convert_resource", convert_resource_command))
-    application.add_handler(CommandHandler("check_income", check_income_command))
-    application.add_handler(CommandHandler("exchange", exchange_command))
-
-    # Language handler
-    application.add_handler(CommandHandler("language", language_command))
-
-    # Admin command handlers
-    application.add_handler(CommandHandler("admin_help", admin_help_command))
-    application.add_handler(CommandHandler("admin_add_news", admin_add_news))
-    application.add_handler(CommandHandler("admin_process_cycle", admin_process_cycle))
-    application.add_handler(CommandHandler("admin_add_resources", admin_add_resources))
-    application.add_handler(CommandHandler("admin_set_control", admin_set_control))
-    application.add_handler(CommandHandler("admin_list_players", admin_list_players))
-    application.add_handler(CommandHandler("admin_reset_actions", admin_reset_actions))
-    application.add_handler(CommandHandler("admin_reset_all_actions", admin_reset_all_actions))
-    application.add_handler(CommandHandler("admin_set_ideology", admin_set_ideology))
-
-    logger.info("Command handlers registered")
+    
+    try:
+        # Get player's presence status
+        from game.actions import get_player_presence_status
+        presence_records = get_player_presence_status(user.id)
+        
+        if not presence_records:
+            await loading_message.edit_text(
+                get_text("no_active_presence", lang,
+                        default="📍 You are not currently registered as physically present in any district.")
+            )
+            
+            # Offer to register presence
+            keyboard = [
+                [KeyboardButton(
+                    get_text("share_location", lang, default="📍 Share my location"),
+                    request_location=True
+                )]
+            ]
+            reply_markup = ReplyKeyboardMarkup(keyboard, one_time_keyboard=True, resize_keyboard=True)
+            
+            await update.message.reply_text(
+                get_text("register_presence_prompt", lang,
+                        default="Would you like to register your physical presence now?"),
+                reply_markup=reply_markup
+            )
+            return
+        
+        # Format presence information
+        presence_text = f"🗺️ *{get_text('active_presence_title', lang, default='Your Active Physical Presence')}*\n\n"
+        
+        for record in presence_records:
+            district_name = record['district_name']
+            district_id = record['district_id']
+            time_remaining = record['time_remaining']
+            control = record.get('control_points', 0)
+            
+            # Create resource info string
+            resources = record['resources_available']
+            resource_text = ""
+            if any(resources.values()):
+                resource_text = get_text("district_resources", lang, default="Resources:") + " "
+                resource_icons = []
+                
+                if resources['influence'] > 0:
+                    resource_icons.append(f"🔵×{resources['influence']}")
+                if resources['resources'] > 0:
+                    resource_icons.append(f"💰×{resources['resources']}")
+                if resources['information'] > 0:
+                    resource_icons.append(f"🔍×{resources['information']}")
+                if resources['force'] > 0:
+                    resource_icons.append(f"👊×{resources['force']}")
+                    
+                resource_text += ", ".join(resource_icons)
+            
+            # Format control level with icon
+            if control >= 75:
+                control_icon = "🟢"  # Green for high control
+            elif control >= 40:
+                control_icon = "🟡"  # Yellow for medium control
+            elif control > 0:
+                control_icon = "🟠"  # Orange for low control
+            else:
+                control_icon = "⚪"  # White for no control
+                
+            presence_text += (
+                f"🏙️ *{district_name}*\n"
+                f"⏱️ {get_text('expires_in', lang, default='Expires in')}: {time_remaining}\n"
+                f"{control_icon} {get_text('control_level', lang, default='Control')}: {control}%\n"
+            )
+            
+            if resource_text:
+                presence_text += f"{resource_text}\n"
+                
+            presence_text += "\n"
+        
+        # Add explanation of benefits
+        presence_text += (
+            f"ℹ️ {get_text('presence_benefits', lang, default='Physical presence gives you a +20 Control Point bonus when performing main actions in these districts.')}"
+        )
+        
+        # Create inline keyboard for district actions
+        keyboard = []
+        
+        # Add button for each district
+        for record in presence_records:
+            district_id = record['district_id']
+            district_name = record['district_name']
+            keyboard.append([
+                InlineKeyboardButton(
+                    get_text("view_district_button", lang, default="View {district}", district=district_name),
+                    callback_data=f"view_district:{district_id}"
+                )
+            ])
+        
+        # Add refresh button
+        keyboard.append([
+            InlineKeyboardButton(
+                get_text("refresh_presence", lang, default="🔄 Refresh Status"), 
+                callback_data="refresh_presence"
+            )
+        ])
+        
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        # Send the presence status with interactive buttons
+        await loading_message.edit_text(
+            presence_text,
+            reply_markup=reply_markup,
+            parse_mode=ParseMode.MARKDOWN
+        )
+        
+    except Exception as e:
+        logger.error(f"Error checking presence status for user {user.id}: {e}")
+        await loading_message.edit_text(
+            get_text("presence_check_error", lang, 
+                    default="An error occurred while checking your presence status. Please try again later.")
+        )

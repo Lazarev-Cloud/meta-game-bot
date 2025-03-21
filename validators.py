@@ -9,16 +9,20 @@ Contains functions for validating user input and game data
 import logging
 import re
 import sqlite3
+import os
 from typing import Union, Tuple, List, Dict, Any
+from datetime import datetime, timedelta
+
+from game.actions import MAIN_ACTIONS, QUICK_ACTIONS
 
 logger = logging.getLogger(__name__)
 
 # Valid resource types
 VALID_RESOURCE_TYPES = ["influence", "resources", "information", "force"]
 
-# Valid action types
-VALID_MAIN_ACTIONS = ["influence", "attack", "defense"]
-VALID_QUICK_ACTIONS = ["recon", "info", "support"]
+# Constants for validation
+VALID_MAIN_ACTIONS = MAIN_ACTIONS
+VALID_QUICK_ACTIONS = QUICK_ACTIONS
 
 
 def validate_resource_type(resource_type: str) -> bool:

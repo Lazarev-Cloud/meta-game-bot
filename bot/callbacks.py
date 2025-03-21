@@ -1,27 +1,31 @@
 import logging
 import sqlite3
+import json
 
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
+from telegram.constants import ParseMode
 from telegram.ext import CallbackQueryHandler, ContextTypes, ConversationHandler
 
-from languages import get_text, get_player_language, set_player_language, get_action_name, get_resource_name
+from languages import get_text, get_player_language, set_player_language, get_action_name, get_resource_name, get_cycle_name
 from db.queries import (
-    get_player_resources, update_player_resources,
-    get_remaining_actions, use_action, add_action,
-    update_district_control, create_coordinated_action,
-    get_open_coordinated_actions, get_coordinated_action_participants, get_coordinated_action_details,
-    join_coordinated_action
-)
-from game.actions import (
-    ACTION_INFLUENCE, ACTION_ATTACK, ACTION_DEFENSE,
-    QUICK_ACTION_RECON, QUICK_ACTION_INFO, QUICK_ACTION_SUPPORT
+    get_player, get_player_language, get_player_resources, set_player_language,
+    set_player_name, update_player_resources, get_coordinated_action_details,
+    join_coordinated_action, get_open_coordinated_actions, get_district_info,
+    get_politician_info, get_coordinated_action_participants, exchange_resources,
+    cancel_action, get_district_players, get_remaining_actions, update_action_counts,
+    get_player_districts, get_news, add_news, add_action, use_action
 )
 from game.districts import (
-    format_district_info, get_district_by_id
+    format_district_info, get_district_by_name, generate_text_map, get_all_districts
 )
 from game.politicians import (
-    format_politician_info, get_politician_by_id
+    get_politician_by_name, format_politician_info, format_politicians_list, get_all_politicians
 )
+from game.actions import (
+    ACTION_ATTACK, ACTION_DEFENSE, get_current_cycle, get_cycle_deadline, get_cycle_results_time,
+    get_player_presence_status
+)
+from utils import format_resources, notify_player, log_game_event
 
 # Enable logging
 logging.basicConfig(
@@ -165,6 +169,21 @@ async def exchange_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # Get updated resources
     updated_resources = get_player_resources(user.id)
+    
+    # Add colored indicators for resource display
+    def get_resource_indicator(amount):
+        if amount < 5:
+            return "🔴"  # Red for low
+        elif amount < 10:
+            return "🟡"  # Yellow for medium
+        else:
+            return "🟢"  # Green for high
+            
+    # Create resource indicators
+    influence_indicator = get_resource_indicator(updated_resources['influence'])
+    resources_indicator = get_resource_indicator(updated_resources['resources']) 
+    information_indicator = get_resource_indicator(updated_resources['information'])
+    force_indicator = get_resource_indicator(updated_resources['force'])
 
     # Format response
     exchange_text = get_text("conversion_success", lang,
@@ -174,10 +193,10 @@ async def exchange_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     resource_text = (
         f"*{get_text('resources_title', lang)}*\n\n"
-        f"🔵 {get_resource_name('influence', lang)}: {updated_resources['influence']}\n"
-        f"💰 {get_resource_name('resources', lang)}: {updated_resources['resources']}\n"
-        f"🔍 {get_resource_name('information', lang)}: {updated_resources['information']}\n"
-        f"👊 {get_resource_name('force', lang)}: {updated_resources['force']}\n\n"
+        f"{influence_indicator} 🔵 {get_resource_name('influence', lang)}: {updated_resources['influence']}\n"
+        f"{resources_indicator} 💰 {get_resource_name('resources', lang)}: {updated_resources['resources']}\n"
+        f"{information_indicator} 🔍 {get_resource_name('information', lang)}: {updated_resources['information']}\n"
+        f"{force_indicator} 👊 {get_resource_name('force', lang)}: {updated_resources['force']}\n\n"
         f"{exchange_text}"
     )
 
@@ -195,7 +214,7 @@ async def exchange_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await query.edit_message_text(
         resource_text,
-        parse_mode='Markdown',
+        parse_mode=ParseMode.MARKDOWN,
         reply_markup=InlineKeyboardMarkup(keyboard) if keyboard else None
     )
 
@@ -210,6 +229,21 @@ async def exchange_again_callback(update: Update, context: ContextTypes.DEFAULT_
 
     # Get player's current resources
     resources = get_player_resources(user.id)
+    
+    # Add colored indicators for resource display
+    def get_resource_indicator(amount):
+        if amount < 5:
+            return "🔴"  # Red for low
+        elif amount < 10:
+            return "🟡"  # Yellow for medium
+        else:
+            return "🟢"  # Green for high
+            
+    # Create resource indicators
+    influence_indicator = get_resource_indicator(resources['influence'])
+    resources_indicator = get_resource_indicator(resources['resources']) 
+    information_indicator = get_resource_indicator(resources['information'])
+    force_indicator = get_resource_indicator(resources['force'])
 
     # Create buttons for resource exchange options
     keyboard = []
@@ -265,97 +299,20 @@ async def exchange_again_callback(update: Update, context: ContextTypes.DEFAULT_
 
     resource_text = (
         f"*{get_text('resources_title', lang)}*\n\n"
-        f"🔵 {get_resource_name('influence', lang)}: {resources['influence']}\n"
-        f"💰 {get_resource_name('resources', lang)}: {resources['resources']}\n"
-        f"🔍 {get_resource_name('information', lang)}: {resources['information']}\n"
-        f"👊 {get_resource_name('force', lang)}: {resources['force']}\n\n"
+        f"{influence_indicator} 🔵 {get_resource_name('influence', lang)}: {resources['influence']}\n"
+        f"{resources_indicator} 💰 {get_resource_name('resources', lang)}: {resources['resources']}\n"
+        f"{information_indicator} 🔍 {get_resource_name('information', lang)}: {resources['information']}\n"
+        f"{force_indicator} 👊 {get_resource_name('force', lang)}: {resources['force']}\n\n"
         f"{get_text('exchange_instructions', lang, default='Select a resource exchange option:')}"
     )
 
     await query.edit_message_text(
         resource_text,
-        parse_mode='Markdown',
+        parse_mode=ParseMode.MARKDOWN,
         reply_markup=reply_markup
     )
 
 
-async def join_resource_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle resource selection for joining a coordinated action."""
-    query = update.callback_query
-    user = query.from_user
-    lang = get_player_language(user.id)
-
-    await query.answer()
-
-    try:
-        # Parse callback data
-        parts = query.data.split(":")
-        if len(parts) < 4:
-            await query.edit_message_text(get_text("action_error", lang))
-            return
-
-        action_id = int(parts[1])
-        resource_type = parts[2]
-        resource_amount = int(parts[3])
-
-        # Get action details
-        action_details = get_coordinated_action_details(action_id)
-        if not action_details:
-            await query.edit_message_text(get_text("action_not_found", lang))
-            return
-
-        action_type = action_details['action_type']
-        target_type = action_details['target_type']
-        target_id = action_details['target_id']
-
-        # Get target name
-        if target_type == "district":
-            from game.districts import get_district_by_id
-            target_info = get_district_by_id(target_id)
-            target_name = target_info['name'] if target_info else target_id
-        elif target_type == "politician":
-            from game.politicians import get_politician_by_id
-            target_info = get_politician_by_id(target_id)
-            target_name = target_info['name'] if target_info else target_id
-        else:
-            target_name = target_id
-
-        # Validate resources
-        player_resources = get_player_resources(user.id)
-        if player_resources.get(resource_type, 0) < resource_amount:
-            await query.edit_message_text(
-                get_text("insufficient_resources", lang, resource_type=get_resource_name(resource_type, lang))
-            )
-            return
-
-        # Create resource dictionary
-        resources_dict = {resource_type: resource_amount}
-
-        # Join the action
-        success, message = join_coordinated_action(user.id, action_id, resources_dict)
-
-        if success:
-            # Deduct resources
-            update_player_resources(user.id, resource_type, -resource_amount)
-
-            # Use a main action
-            use_action(user.id, True)  # True for main action
-
-            # Format response
-            resources_display = f"{resource_amount} {get_resource_name(resource_type, lang)}"
-
-            await query.edit_message_text(
-                get_text("joined_coordinated_action", lang,
-                         action_type=get_action_name(action_type, lang),
-                         target=target_name,
-                         resources=resources_display)
-            )
-        else:
-            await query.edit_message_text(message)
-
-    except Exception as e:
-        logger.error(f"Error in join_resource_callback: {e}")
-        await query.edit_message_text(get_text("action_error", lang))
 
 
 async def process_quick_action(query, action_type, target_type, target_id):
@@ -550,7 +507,7 @@ async def show_district_info(query, district_id):
 
         await query.edit_message_text(
             text=district_info,
-            parse_mode='Markdown',
+            parse_mode=ParseMode.MARKDOWN,
             reply_markup=reply_markup
         )
     else:
@@ -584,7 +541,7 @@ async def show_politician_info(query, politician_id):
 
         await query.edit_message_text(
             text=politician_info,
-            parse_mode='Markdown',
+            parse_mode=ParseMode.MARKDOWN,
             reply_markup=reply_markup
         )
     else:
@@ -702,7 +659,7 @@ async def process_politician_info(query, politician_id):
         # Send the detailed information
         await query.edit_message_text(
             text=info_text,
-            parse_mode='Markdown'
+            parse_mode=ParseMode.MARKDOWN
         )
 
     except Exception as e:
@@ -754,51 +711,57 @@ async def process_politician_undermine(query, politician_id):
 
 def register_callbacks(application):
     """Register all callback handlers."""
-    # Action type callbacks
-    application.add_handler(CallbackQueryHandler(select_action_type_callback, pattern=r"^action_type:"))
-    application.add_handler(CallbackQueryHandler(action_join_callback, pattern=r"^action_type:join$"))
-    application.add_handler(CallbackQueryHandler(quick_action_type_callback, pattern=r"^quick_action_type:"))
-
-    # Handle action mode selection (regular vs coordinated)
-    application.add_handler(CallbackQueryHandler(handle_action_mode_selection, pattern=r"^action_regular:"))
-    application.add_handler(CallbackQueryHandler(handle_action_mode_selection, pattern=r"^action_coordinated:"))
-
-    # District and resource selection
-    application.add_handler(CallbackQueryHandler(district_selection_callback, pattern=r"^district_select:"))
-    application.add_handler(CallbackQueryHandler(resource_selection_callback, pattern=r"^resource:"))
-    application.add_handler(CallbackQueryHandler(submit_action_callback, pattern=r"^submit:"))
-
-    # Join actions
-    application.add_handler(CallbackQueryHandler(join_action_callback, pattern=r"^join_action:"))
-    application.add_handler(CallbackQueryHandler(join_resource_callback, pattern=r"^join_resource:"))
-    application.add_handler(CallbackQueryHandler(join_submit_callback, pattern=r"^join_submit$"))
-
-    # Exchange resources
-    application.add_handler(CallbackQueryHandler(exchange_callback, pattern=r"^exchange:"))
-    application.add_handler(CallbackQueryHandler(exchange_again_callback, pattern=r"^exchange_again$"))
-
-    # View details
-    application.add_handler(CallbackQueryHandler(view_district_callback, pattern=r"^view_district:"))
-    application.add_handler(CallbackQueryHandler(view_politician_callback, pattern=r"^view_politician:"))
-
-    # Direct district actions
-    application.add_handler(CallbackQueryHandler(district_action_callback, pattern=r"^action_influence:"))
-    application.add_handler(CallbackQueryHandler(district_action_callback, pattern=r"^action_attack:"))
-    application.add_handler(CallbackQueryHandler(district_action_callback, pattern=r"^action_defend:"))
-    application.add_handler(CallbackQueryHandler(district_action_callback, pattern=r"^quick_recon:"))
-    application.add_handler(CallbackQueryHandler(district_action_callback, pattern=r"^quick_support:"))
-
+    # Basic callbacks
+    application.add_handler(CallbackQueryHandler(language_callback, pattern="^language:"))
+    application.add_handler(CallbackQueryHandler(set_name_callback, pattern="^set_name:"))
+    
+    # Action callbacks
+    application.add_handler(CallbackQueryHandler(action_callback, pattern="^action_type:"))
+    application.add_handler(CallbackQueryHandler(action_target_callback, pattern="^target:"))
+    application.add_handler(CallbackQueryHandler(submit_action_callback, pattern="^submit:"))
+    application.add_handler(CallbackQueryHandler(cancel_action_callback, pattern="^action_cancel$"))
+    
+    # Join action callbacks
+    application.add_handler(CallbackQueryHandler(join_action_callback, pattern="^join_action:"))
+    application.add_handler(CallbackQueryHandler(join_resource_callback, pattern="^join_resource:"))
+    application.add_handler(CallbackQueryHandler(join_submit_callback, pattern="^join_submit$"))
+    
+    # Resource handling
+    application.add_handler(CallbackQueryHandler(exchange_callback, pattern="^exchange:"))
+    application.add_handler(CallbackQueryHandler(exchange_again_callback, pattern="^exchange_again:"))
+    application.add_handler(CallbackQueryHandler(resource_callback, pattern="^resource:"))
+    application.add_handler(CallbackQueryHandler(confirm_action_callback, pattern="^confirm:"))
+    
+    # Quick actions
+    application.add_handler(CallbackQueryHandler(quick_action_type_callback, pattern="^quick_action_type:"))
+    application.add_handler(CallbackQueryHandler(quick_district_selection_callback, pattern="^quick_district:"))
+    
     # Politician actions
-    application.add_handler(CallbackQueryHandler(pol_influence_callback, pattern=r"^pol_influence:"))
-    application.add_handler(CallbackQueryHandler(pol_info_callback, pattern=r"^pol_info:"))
-    application.add_handler(CallbackQueryHandler(pol_undermine_callback, pattern=r"^pol_undermine:"))
-
-    # Language selection
-    application.add_handler(CallbackQueryHandler(language_selection_callback, pattern=r"^lang:"))
-
-    # Cancel action
-    application.add_handler(CallbackQueryHandler(cancel_action_callback, pattern=r"^action_cancel$"))
-
+    application.add_handler(CallbackQueryHandler(pol_influence_callback, pattern="^pol_influence:"))
+    application.add_handler(CallbackQueryHandler(pol_info_callback, pattern="^pol_info:"))
+    application.add_handler(CallbackQueryHandler(pol_undermine_callback, pattern="^pol_undermine:"))
+    
+    # View callbacks
+    application.add_handler(CallbackQueryHandler(view_district_callback, pattern="^view_district:"))
+    application.add_handler(CallbackQueryHandler(view_politician_callback, pattern="^view_politician:"))
+    
+    # Action handling
+    application.add_handler(CallbackQueryHandler(handle_district_action, pattern="^district_action:"))
+    application.add_handler(CallbackQueryHandler(handle_politician_action, pattern="^politician_action:"))
+    
+    # Menu callbacks
+    application.add_handler(CallbackQueryHandler(main_menu_callback, pattern="^main_menu:"))
+    application.add_handler(CallbackQueryHandler(back_to_main_menu_callback, pattern="^back_to_main_menu$"))
+    
+    # Physical presence and location callbacks
+    application.add_handler(CallbackQueryHandler(refresh_presence_callback, pattern="^refresh_presence$"))
+    application.add_handler(CallbackQueryHandler(check_presence_callback, pattern="^check_presence$"))
+    
+    # Other callbacks
+    application.add_handler(CallbackQueryHandler(join_action_callback, pattern=r'^join_action_id:'))
+    application.add_handler(CallbackQueryHandler(join_submit_callback, pattern=r'^join_submit:'))
+    application.add_handler(CallbackQueryHandler(district_action_callback, pattern=r'^district_action:'))
+    
     logger.info("Callback handlers registered")
 
 
@@ -897,6 +860,8 @@ async def action_join_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         get_text("coordinated_actions_title", lang),
         reply_markup=reply_markup
     )
+
+
 
 
 async def submit_action_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1027,20 +992,100 @@ async def district_selection_callback(update: Update, context: ContextTypes.DEFA
     )
 
 
-async def language_selection_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle language selection callback."""
+async def language_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle language selection button."""
     query = update.callback_query
-    user = query.from_user
-
     await query.answer()
-
-    # Extract language choice from callback data
-    language = query.data.split(":")[1]
-    set_player_language(user.id, language)
-
-    # Confirm language change in the selected language
-    response_text = get_text("language_changed", language)
-    await query.edit_message_text(response_text)
+    
+    user_id = update.effective_user.id
+    
+    try:
+        # Parse the callback data
+        callback_data = query.data.split(':')
+        if len(callback_data) != 2:
+            # Default to current language for error message
+            current_lang = get_player_language(user_id)
+            logger.warning(f"Invalid language callback data: {query.data}")
+            await query.message.reply_text(get_text("error_occurred", current_lang))
+            return
+        
+        lang_code = callback_data[1]
+        
+        # Check if language is supported
+        supported_languages = {"en": "English 🇺🇸", "ru": "Русский 🇷🇺"}
+        if lang_code not in supported_languages:
+            current_lang = get_player_language(user_id)
+            await query.message.edit_text(
+                get_text("language_not_supported", current_lang, default="Sorry, this language is not supported yet."),
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton(get_text("back_button", current_lang, default="Back"), 
+                                        callback_data="back_to_main_menu")]
+                ])
+            )
+            return
+        
+        # Set the player's language
+        set_player_language(user_id, lang_code)
+        
+        # Get player info
+        player = get_player(user_id)
+        
+        # If the player is new and doesn't have a name yet, prompt to set name
+        if player and not player['name']:
+            # Display name selection options
+            keyboard = []
+            
+            # Common names based on selected language
+            if lang_code == "en":
+                common_names = ["Alex", "Sam", "Jordan", "Taylor", "Morgan", "Casey"]
+            elif lang_code == "ru":
+                common_names = ["Алексей", "Михаил", "Иван", "Анна", "Елена", "Мария"]
+            else:
+                common_names = ["Alex", "Sam", "Jordan", "Taylor", "Morgan", "Casey"]
+            
+            # Create rows of 2 names
+            row = []
+            for i, name in enumerate(common_names):
+                row.append(InlineKeyboardButton(name, callback_data=f"set_name:name_{name}"))
+                if (i + 1) % 2 == 0:
+                    keyboard.append(row)
+                    row = []
+            
+            # Add any remaining names
+            if row:
+                keyboard.append(row)
+            
+            # Add custom name option and back button
+            keyboard.append([InlineKeyboardButton(
+                get_text("custom_name", lang_code, default="Enter Custom Name"), 
+                callback_data="set_name:start"
+            )])
+            
+            await query.message.edit_text(
+                get_text("language_set_select_name", lang_code, 
+                        default="Language set! Please select or enter your character name:"),
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
+            
+        else:
+            # Show confirmation and return to main menu
+            await query.message.edit_text(
+                get_text("language_set", lang_code, 
+                        language=supported_languages[lang_code]),
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton(
+                        get_text("back_to_main_menu", lang_code, default="Back to Main Menu"), 
+                        callback_data="back_to_main_menu"
+                    )]
+                ])
+            )
+        
+    except Exception as e:
+        logger.error(f"Error in language_callback: {e}", exc_info=True)
+        # Try to use English as fallback for the error message
+        await query.message.reply_text(
+            get_text("error_occurred", "en", default="An error occurred. Please try again.")
+        )
 
 
 async def resource_selection_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1247,21 +1292,135 @@ async def pol_undermine_callback(update: Update, context: ContextTypes.DEFAULT_T
 
 
 async def view_district_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle view district action."""
+    """Handle viewing district details."""
     query = update.callback_query
     await query.answer()
     
-    district_id = query.data.split(":")[1]
-    await show_district_info(query, district_id)
+    user_id = update.effective_user.id
+    lang = get_player_language(user_id)
+    
+    try:
+        # Parse the callback data
+        callback_data = query.data.split(':')
+        if len(callback_data) != 2:
+            logger.warning(f"Invalid view_district callback data: {query.data}")
+            await query.message.reply_text(get_text("error_occurred", lang))
+            return
+        
+        district_id = int(callback_data[1])
+        
+        # Get district info
+        district = get_district_by_id(district_id)
+        if not district:
+            await query.message.edit_text(get_text("district_not_found", lang))
+            return
+        
+        district_name = district['name']
+        
+        # Format district info
+        district_info = format_district_info(district_id, lang)
+        if not district_info:
+            await query.message.edit_text(get_text("error_retrieving_district", lang, default="Error retrieving district information."))
+            return
+        
+        # Build action buttons for this district
+        keyboard = [
+            [
+                InlineKeyboardButton(get_text("attack_button", lang), 
+                                   callback_data=f"district_action:attack_{district_id}"),
+                InlineKeyboardButton(get_text("defense_button", lang), 
+                                   callback_data=f"district_action:defense_{district_id}")
+            ],
+            [
+                InlineKeyboardButton(get_text("recon_button", lang, default="👁️ Reconnaissance"), 
+                                   callback_data=f"district_action:recon_{district_id}"),
+                InlineKeyboardButton(get_text("info_button", lang, default="ℹ️ Information"), 
+                                   callback_data=f"district_action:info_{district_id}")
+            ],
+            [
+                InlineKeyboardButton(get_text("back_to_districts", lang, default="Back to Districts"), 
+                                   callback_data="main_menu:districts"),
+                InlineKeyboardButton(get_text("back_to_main", lang, default="Main Menu"), 
+                                   callback_data="back_to_main_menu")
+            ]
+        ]
+        
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        # Show district info with action buttons
+        await query.message.edit_text(
+            text=district_info,
+            reply_markup=reply_markup,
+            parse_mode=ParseMode.MARKDOWN
+        )
+        
+    except Exception as e:
+        logger.error(f"Error in view_district_callback: {e}", exc_info=True)
+        await query.message.reply_text(get_text("error_occurred", lang))
 
 
 async def view_politician_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle view politician action."""
+    """Handle viewing politician details."""
     query = update.callback_query
     await query.answer()
     
-    politician_id = int(query.data.split(":")[1])
-    await show_politician_info(query, politician_id)
+    user_id = update.effective_user.id
+    lang = get_player_language(user_id)
+    
+    try:
+        # Parse the callback data
+        callback_data = query.data.split(':')
+        if len(callback_data) != 2:
+            logger.warning(f"Invalid view_politician callback data: {query.data}")
+            await query.message.reply_text(get_text("error_occurred", lang))
+            return
+        
+        politician_name = callback_data[1]
+        
+        # Get politician info
+        politician = get_politician_by_name(politician_name)
+        if not politician:
+            await query.message.edit_text(get_text("politician_not_found", lang))
+            return
+        
+        # Format politician info
+        politician_info = format_politician_info(politician_name, lang)
+        if not politician_info:
+            await query.message.edit_text(get_text("error_retrieving_politician", lang, default="Error retrieving politician information."))
+            return
+        
+        # Build action buttons for this politician
+        keyboard = [
+            [
+                InlineKeyboardButton(get_text("influence_button", lang, default="🗣️ Influence"), 
+                                   callback_data=f"pol_influence:{politician_name}"),
+                InlineKeyboardButton(get_text("info_gathering_button", lang, default="🔍 Gather Intel"), 
+                                   callback_data=f"pol_info:{politician_name}")
+            ],
+            [
+                InlineKeyboardButton(get_text("undermine_button", lang, default="💥 Undermine"), 
+                                   callback_data=f"pol_undermine:{politician_name}")
+            ],
+            [
+                InlineKeyboardButton(get_text("back_to_politicians", lang, default="Back to Politicians"), 
+                                   callback_data="main_menu:politicians"),
+                InlineKeyboardButton(get_text("back_to_main", lang, default="Main Menu"), 
+                                   callback_data="back_to_main_menu")
+            ]
+        ]
+        
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        # Show politician info with action buttons
+        await query.message.edit_text(
+            text=politician_info,
+            reply_markup=reply_markup,
+            parse_mode=ParseMode.MARKDOWN
+        )
+        
+    except Exception as e:
+        logger.error(f"Error in view_politician_callback: {e}", exc_info=True)
+        await query.message.reply_text(get_text("error_occurred", lang))
 
 
 # In bot/callbacks.py - Add these functions
@@ -1353,100 +1512,6 @@ async def show_join_resource_selection(query, action_type, target_name, lang):
     )
 
 
-async def join_resource_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle resource selection for joining actions."""
-    query = update.callback_query
-    user = query.from_user
-    lang = get_player_language(user.id)
-
-    await query.answer()
-
-    # Parse callback data
-    resource_type = query.data.split(":")[1]
-
-    # Get user data
-    if not hasattr(context, 'user_data') or user.id not in context.user_data or 'joining_action' not in \
-            context.user_data[user.id]:
-        await query.edit_message_text(get_text("action_error", lang))
-        return
-
-    joining_action = context.user_data[user.id]['joining_action']
-    action_type = joining_action['action_type']
-    target_name = joining_action['target_name']
-
-    # Initialize selected resources if not present
-    if 'selected_resources' not in context.user_data[user.id]:
-        context.user_data[user.id]['selected_resources'] = []
-
-    # Add the selected resource
-    context.user_data[user.id]['selected_resources'].append(resource_type)
-
-    # Limit to max 2 resources
-    if len(context.user_data[user.id]['selected_resources']) > 2:
-        context.user_data[user.id]['selected_resources'] = context.user_data[user.id]['selected_resources'][-2:]
-
-    # Get resources count
-    resource_counts = {}
-    for res in context.user_data[user.id]['selected_resources']:
-        if res in resource_counts:
-            resource_counts[res] += 1
-        else:
-            resource_counts[res] = 1
-
-    # Format selected resources for display
-    selected_text = []
-    for res_type, count in resource_counts.items():
-        selected_text.append(f"{count} {get_resource_name(res_type, lang)}")
-
-    selected_resources_text = ", ".join(selected_text)
-
-    # Check if player has the resources
-    player_resources = get_player_resources(user.id)
-    can_submit = True
-
-    for res_type, count in resource_counts.items():
-        if player_resources.get(res_type, 0) < count:
-            can_submit = False
-            break
-
-    # Prepare resource selection keyboard
-    keyboard = [
-        [
-            InlineKeyboardButton("Influence", callback_data=f"join_resource:influence"),
-            InlineKeyboardButton("Resources", callback_data=f"join_resource:resources")
-        ],
-        [
-            InlineKeyboardButton("Information", callback_data=f"join_resource:information"),
-            InlineKeyboardButton("Force", callback_data=f"join_resource:force")
-        ]
-    ]
-
-    # Add submit button if resources are selected and player has them
-    if context.user_data[user.id]['selected_resources'] and can_submit:
-        keyboard.append([
-            InlineKeyboardButton(get_text("action_submit", lang), callback_data=f"join_submit")
-        ])
-
-    # Add cancel button
-    keyboard.append([
-        InlineKeyboardButton(get_text("action_cancel", lang), callback_data="action_cancel")
-    ])
-
-    reply_markup = InlineKeyboardMarkup(keyboard)
-
-    # Update message with selected resources
-    message_text = get_text("select_resources_join", lang,
-                            action_type=get_action_name(action_type, lang),
-                            target_name=target_name,
-                            default=f"Select resources to join {action_type} action on {target_name}:")
-
-    if selected_resources_text:
-        message_text += f"\n\n{get_text('selected', lang, default='Selected')}: {selected_resources_text}"
-
-    await query.edit_message_text(
-        text=message_text,
-        reply_markup=reply_markup
-    )
 
 
 async def join_submit_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1533,43 +1598,561 @@ async def join_submit_callback(update: Update, context: ContextTypes.DEFAULT_TYP
                      action_type=get_action_name(action_type, lang),
                      resources=resources_text)
         )
+        
+        # Optionally notify the initiator that someone has joined
+        try:
+            initiator_id = action['initiator_id']
+            initiator_lang = get_player_language(initiator_id)
+            
+            # Get the player's name for the notification
+            player_info = get_player(user.id)
+            player_name = player_info[2] if player_info and len(player_info) > 2 else str(user.id)
+            
+            # Send notification to the action initiator
+            await context.bot.send_message(
+                chat_id=initiator_id,
+                text=get_text(
+                    "player_joined_your_action", 
+                    initiator_lang,
+                    default="{player} has joined your {action_type} action targeting {target} with {resources}!",
+                    player=player_name,
+                    action_type=get_action_name(action_type, initiator_lang),
+                    target=target_name,
+                    resources=resources_text
+                )
+            )
+        except Exception as notify_error:
+            # Just log the error, don't let it affect the main flow
+            logger.warning(f"Failed to notify initiator about new participant: {notify_error}")
     else:
-        await query.edit_message_text(message)
+        # Handle specific error cases with user-friendly messages
+        if "expired" in message.lower():
+            await query.edit_message_text(get_text("coordinated_action_expired", lang))
+        elif "closed" in message.lower():
+            await query.edit_message_text(get_text("action_closed", lang, default="This action is no longer accepting participants."))
+        else:
+            await query.edit_message_text(message)
 
     # Clear user data
     context.user_data[user.id] = {}
 
 
 async def district_action_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle direct actions from district view."""
+    """Handle district-specific actions selected via inline buttons."""
+    query = update.callback_query
+    await query.answer()
+    
+    user_id = update.effective_user.id
+    lang = get_player_language(user_id)
+    
+    try:
+        # Parse the callback data
+        callback_data = query.data.split(':')
+        if len(callback_data) != 2:
+            logger.warning(f"Invalid district action callback data: {query.data}")
+            await query.message.reply_text(get_text("error_occurred", lang))
+            return
+        
+        action_info = data[1].split('_')
+        if len(action_info) != 2:
+            logger.warning(f"Invalid district action format: {data[1]}")
+            await query.message.reply_text(get_text("error_occurred", lang))
+            return
+            
+        action_type = action_info[0]
+        district_id = int(action_info[1])
+        
+        # Get district information
+        district = get_district_by_id(district_id)
+        if not district:
+            await query.message.edit_text(get_text("district_not_found", lang))
+            return
+        
+        # Get player information and remaining actions
+        player = get_player(user_id)
+        remaining_actions = get_remaining_actions(user_id)
+        
+        # Check if player has actions left (main actions for attack/defense, quick for recon/info)
+        is_main_action = action_type in ["attack", "defense"]
+        if is_main_action and remaining_actions['main'] <= 0:
+            await query.message.edit_text(get_text("no_main_actions", lang))
+            return
+        elif not is_main_action and remaining_actions['quick'] <= 0:
+            await query.message.edit_text(get_text("no_quick_actions", lang))
+            return
+        
+        # Determine resource type based on action
+        resource_type = ""
+        if action_type == "attack":
+            resource_type = "force"
+        elif action_type == "defense":
+            resource_type = "influence"
+        elif action_type == "recon":
+            resource_type = "information"
+        elif action_type == "info":
+            resource_type = "information"
+        else:
+            await query.message.edit_text(get_text("invalid_action", lang))
+            return
+        
+        # Get player resources
+        resources = get_player_resources(user_id)
+        available = resources.get(resource_type, 0)
+        
+        # Check if player has resources
+        if available <= 0:
+            await query.message.edit_text(get_text("no_resources", lang))
+            return
+        
+        # For main actions (attack/defense), show resource selection keyboard
+        if is_main_action:
+            keyboard = []
+            # Create buttons for different resource amounts
+            for amount in [1, 2, 5, 10]:
+                if amount <= available:
+                    keyboard.append([
+                        InlineKeyboardButton(
+                            f"{amount} {resource_type.capitalize()}", 
+                            callback_data=f"resource:{action_type}:district:{district_id}:{resource_type}:{amount}"
+                        )
+                    ])
+            
+            # Add navigation buttons
+            keyboard.append([
+                InlineKeyboardButton(
+                    get_text("back_to_districts", lang), 
+                    callback_data="main_menu:districts"
+                )
+            ])
+            keyboard.append([
+                InlineKeyboardButton(
+                    get_text("back_to_main", lang), 
+                    callback_data="back_to_main_menu"
+                )
+            ])
+            
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            
+            await query.message.edit_text(
+                get_text("select_resources_for_action", lang).format(
+                    resource_type=resource_type,
+                    action=action_type,
+                    target=district['name'],
+                    available=available
+                ),
+                reply_markup=reply_markup
+            )
+        else:
+            # For quick actions (recon/info), process directly with 1 resource
+            # Deduct resource
+            update_player_resources(user_id, resource_type, -1)
+            
+            # Use quick action
+            update_action_counts(user_id, main_action=False)
+            
+            # Record the action
+            resources_dict = {resource_type: 1}
+            add_action(user_id, action_type, "district", district_id, resources_dict)
+            
+            # Show success message
+            keyboard = [
+                [
+                    InlineKeyboardButton(
+                        get_text("view_district_again", lang), 
+                        callback_data=f"view_district:{district_id}"
+                    )
+                ],
+                [
+                    InlineKeyboardButton(
+                        get_text("back_to_main", lang), 
+                        callback_data="back_to_main_menu"
+                    )
+                ]
+            ]
+            
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            
+            await query.message.edit_text(
+                get_text("action_success", lang).format(
+                    action=action_type,
+                    target=district['name']
+                ),
+                reply_markup=reply_markup
+            )
+    
+    except Exception as e:
+        logger.error(f"Error handling district action: {e}", exc_info=True)
+        await query.message.reply_text(get_text("error_occurred", lang))
+
+
+async def handle_politician_action(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle actions on politicians."""
+    query = update.callback_query
+    await query.answer()
+    
+    user_id = update.effective_user.id
+    lang = get_player_language(user_id)
+    
+    try:
+        # Parse callback data: politician_action:action_type:politician_name
+        data = query.data.split(':')
+        if len(data) != 2:
+            logger.warning(f"Invalid politician_action callback data: {query.data}")
+            await query.message.reply_text(get_text("error_occurred", lang))
+            return
+        
+        action_info = data[1].split('_')
+        if len(action_info) < 2:
+            logger.warning(f"Invalid politician action format: {data[1]}")
+            await query.message.reply_text(get_text("error_occurred", lang))
+            return
+            
+        action_type = action_info[0]
+        politician_name = data[1][len(action_type)+1:]  # Extract name after action_type_
+        
+        # Get politician information
+        politician = get_politician_by_name(politician_name)
+        if not politician:
+            await query.message.edit_text(get_text("politician_not_found", lang))
+            return
+        
+        # Get player information and remaining actions
+        player = get_player(user_id)
+        remaining_actions = get_remaining_actions(user_id)
+        
+        # Check if player has actions left (main actions for influence/undermine, quick for info)
+        is_main_action = action_type in ["influence", "undermine"]
+        if is_main_action and remaining_actions['main'] <= 0:
+            await query.message.edit_text(get_text("no_main_actions", lang))
+            return
+        elif not is_main_action and remaining_actions['quick'] <= 0:
+            await query.message.edit_text(get_text("no_quick_actions", lang))
+            return
+        
+        # Determine resource type based on action
+        resource_type = ""
+        if action_type == "influence":
+            resource_type = "influence"
+        elif action_type == "undermine":
+            resource_type = "information"
+        elif action_type == "info":
+            resource_type = "information"
+        else:
+            await query.message.edit_text(get_text("invalid_action", lang))
+            return
+        
+        # Get player resources
+        resources = get_player_resources(user_id)
+        available = resources.get(resource_type, 0)
+        
+        # Check if player has resources
+        if available <= 0:
+            await query.message.edit_text(get_text("no_resources", lang))
+            return
+        
+        # For main actions (influence/undermine), show resource selection keyboard
+        if is_main_action:
+            keyboard = []
+            # Create buttons for different resource amounts
+            for amount in [1, 2, 5, 10]:
+                if amount <= available:
+                    keyboard.append([
+                        InlineKeyboardButton(
+                            f"{amount} {resource_type.capitalize()}", 
+                            callback_data=f"resource:{action_type}:politician:{politician_name}:{resource_type}:{amount}"
+                        )
+                    ])
+            
+            # Add navigation buttons
+            keyboard.append([
+                InlineKeyboardButton(
+                    get_text("back_to_politicians", lang), 
+                    callback_data="main_menu:politicians"
+                )
+            ])
+            keyboard.append([
+                InlineKeyboardButton(
+                    get_text("back_to_main", lang), 
+                    callback_data="back_to_main_menu"
+                )
+            ])
+            
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            
+            await query.message.edit_text(
+                get_text("select_resources_for_action", lang).format(
+                    resource_type=resource_type,
+                    action=action_type,
+                    target=politician_name,
+                    available=available
+                ),
+                reply_markup=reply_markup
+            )
+        else:
+            # For quick actions (info), process directly with 1 resource
+            # Deduct resource
+            update_player_resources(user_id, resource_type, -1)
+            
+            # Use quick action
+            update_action_counts(user_id, main_action=False)
+            
+            # Record the action
+            resources_dict = {resource_type: 1}
+            add_action(user_id, action_type, "politician", politician_name, resources_dict)
+            
+            # Show success message
+            keyboard = [
+                [
+                    InlineKeyboardButton(
+                        get_text("view_politician_again", lang, default="View Politician Again"), 
+                        callback_data=f"view_politician:{politician_name}"
+                    )
+                ],
+                [
+                    InlineKeyboardButton(
+                        get_text("back_to_main", lang), 
+                        callback_data="back_to_main_menu"
+                    )
+                ]
+            ]
+            
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            
+            await query.message.edit_text(
+                get_text("action_success", lang).format(
+                    action=action_type,
+                    target=politician_name
+                ),
+                reply_markup=reply_markup
+            )
+    
+    except Exception as e:
+        logger.error(f"Error handling politician action: {e}", exc_info=True)
+        await query.message.reply_text(get_text("error_occurred", lang))
+
+
+async def refresh_presence_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle refreshing presence status."""
     query = update.callback_query
     user = query.from_user
     lang = get_player_language(user.id)
+    
+    await query.answer(get_text("refreshing", lang, default="Refreshing your status..."))
+    
+    try:
+        # Call the check_presence_command logic
+        presence_records = get_player_presence_status(user.id)
+        
+        if not presence_records:
+            await query.edit_message_text(
+                get_text("no_active_presence", lang,
+                        default="📍 You are not currently registered as physically present in any district.")
+            )
+            return
+        
+        # Format presence information
+        presence_text = f"🗺️ *{get_text('active_presence_title', lang, default='Your Active Physical Presence')}*\n\n"
+        
+        for record in presence_records:
+            district_name = record['district_name']
+            district_id = record['district_id']
+            time_remaining = record['time_remaining']
+            control = record.get('control_points', 0)
+            
+            # Create resource info string
+            resources = record['resources_available']
+            resource_text = ""
+            if any(resources.values()):
+                resource_text = get_text("district_resources", lang, default="Resources:") + " "
+                resource_icons = []
+                
+                if resources['influence'] > 0:
+                    resource_icons.append(f"🔵×{resources['influence']}")
+                if resources['resources'] > 0:
+                    resource_icons.append(f"💰×{resources['resources']}")
+                if resources['information'] > 0:
+                    resource_icons.append(f"🔍×{resources['information']}")
+                if resources['force'] > 0:
+                    resource_icons.append(f"👊×{resources['force']}")
+                    
+                resource_text += ", ".join(resource_icons)
+            
+            # Format control level with icon
+            if control >= 75:
+                control_icon = "🟢"  # Green for high control
+            elif control >= 40:
+                control_icon = "🟡"  # Yellow for medium control
+            elif control > 0:
+                control_icon = "🟠"  # Orange for low control
+            else:
+                control_icon = "⚪"  # White for no control
+                
+            presence_text += (
+                f"🏙️ *{district_name}*\n"
+                f"⏱️ {get_text('expires_in', lang, default='Expires in')}: {time_remaining}\n"
+                f"{control_icon} {get_text('control_level', lang, default='Control')}: {control}%\n"
+            )
+            
+            if resource_text:
+                presence_text += f"{resource_text}\n"
+                
+            presence_text += "\n"
+        
+        # Add explanation of benefits
+        presence_text += (
+            f"ℹ️ {get_text('presence_benefits', lang, default='Physical presence gives you a +20 Control Point bonus when performing main actions in these districts.')}"
+        )
+        
+        # Create inline keyboard for district actions
+        keyboard = []
+        
+        # Add button for each district
+        for record in presence_records:
+            district_id = record['district_id']
+            district_name = record['district_name']
+            keyboard.append([
+                InlineKeyboardButton(
+                    get_text("view_district_button", lang, default="View {district}", district=district_name),
+                    callback_data=f"view_district:{district_id}"
+                )
+            ])
+        
+        # Add refresh button
+        keyboard.append([
+            InlineKeyboardButton(
+                get_text("refresh_presence", lang, default="🔄 Refresh Status"), 
+                callback_data="refresh_presence"
+            )
+        ])
+        
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        # Update the message with refreshed info
+        await query.edit_message_text(
+            presence_text,
+            reply_markup=reply_markup,
+            parse_mode=ParseMode.MARKDOWN
+        )
+    
+    except Exception as e:
+        logger.error(f"Error refreshing presence status: {e}")
+        await query.edit_message_text(
+            get_text("presence_check_error", lang, 
+                    default="An error occurred while checking your presence status. Please try again later.")
+        )
 
+async def check_presence_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle checking presence status from a button."""
+    query = update.callback_query
     await query.answer()
-
-    parts = query.data.split(":")
-    action_id = parts[0]
-    district_id = parts[1]
     
-    # Initialize user data if needed
-    if not hasattr(context, 'user_data'):
-        context.user_data = {}
+    # Call the check_presence_command logic but as a button press
+    user = query.from_user
+    lang = get_player_language(user.id)
     
-    if user.id not in context.user_data:
-        context.user_data[user.id] = {}
+    # Show temporary message
+    await query.edit_message_text(
+        get_text("checking_presence", lang, default="📍 Checking your presence status...")
+    )
     
-    if action_id.startswith("action_"):
-        # Main action (influence, attack, defend)
-        action_type = action_id.replace("action_", "")
-        context.user_data[user.id]['action_type'] = action_type
-        await show_resource_selection(query, action_type, district_id)
+    try:
+        # Get player's presence status
+        presence_records = get_player_presence_status(user.id)
+        
+        if not presence_records:
+            await query.edit_message_text(
+                get_text("no_active_presence", lang,
+                        default="📍 You are not currently registered as physically present in any district.")
+            )
+            return
+        
+        # Format presence information
+        presence_text = f"🗺️ *{get_text('active_presence_title', lang, default='Your Active Physical Presence')}*\n\n"
+        
+        for record in presence_records:
+            district_name = record['district_name']
+            district_id = record['district_id']
+            time_remaining = record['time_remaining']
+            control = record.get('control_points', 0)
+            
+            # Create resource info string
+            resources = record['resources_available']
+            resource_text = ""
+            if any(resources.values()):
+                resource_text = get_text("district_resources", lang, default="Resources:") + " "
+                resource_icons = []
+                
+                if resources['influence'] > 0:
+                    resource_icons.append(f"🔵×{resources['influence']}")
+                if resources['resources'] > 0:
+                    resource_icons.append(f"💰×{resources['resources']}")
+                if resources['information'] > 0:
+                    resource_icons.append(f"🔍×{resources['information']}")
+                if resources['force'] > 0:
+                    resource_icons.append(f"👊×{resources['force']}")
+                    
+                resource_text += ", ".join(resource_icons)
+            
+            # Format control level with icon
+            if control >= 75:
+                control_icon = "🟢"  # Green for high control
+            elif control >= 40:
+                control_icon = "🟡"  # Yellow for medium control
+            elif control > 0:
+                control_icon = "🟠"  # Orange for low control
+            else:
+                control_icon = "⚪"  # White for no control
+                
+            presence_text += (
+                f"🏙️ *{district_name}*\n"
+                f"⏱️ {get_text('expires_in', lang, default='Expires in')}: {time_remaining}\n"
+                f"{control_icon} {get_text('control_level', lang, default='Control')}: {control}%\n"
+            )
+            
+            if resource_text:
+                presence_text += f"{resource_text}\n"
+                
+            presence_text += "\n"
+        
+        # Add explanation of benefits
+        presence_text += (
+            f"ℹ️ {get_text('presence_benefits', lang, default='Physical presence gives you a +20 Control Point bonus when performing main actions in these districts.')}"
+        )
+        
+        # Create inline keyboard for district actions
+        keyboard = []
+        
+        # Add button for each district
+        for record in presence_records:
+            district_id = record['district_id']
+            district_name = record['district_name']
+            keyboard.append([
+                InlineKeyboardButton(
+                    get_text("view_district_button", lang, default="View {district}", district=district_name),
+                    callback_data=f"view_district:{district_id}"
+                )
+            ])
+        
+        # Add refresh button
+        keyboard.append([
+            InlineKeyboardButton(
+                get_text("refresh_presence", lang, default="🔄 Refresh Status"), 
+                callback_data="refresh_presence"
+            )
+        ])
+        
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        # Update the message with presence info
+        await query.edit_message_text(
+            presence_text,
+            reply_markup=reply_markup,
+            parse_mode=ParseMode.MARKDOWN
+        )
     
-    elif action_id.startswith("quick_"):
-        # Quick action (recon, support)
-        action_type = action_id.replace("quick_", "")
-        context.user_data[user.id]['quick_action_type'] = action_type
-        await process_quick_action(query, action_type, "district", district_id)
-    
-    else:
-        await query.edit_message_text(get_text("action_error", lang))
+    except Exception as e:
+        logger.error(f"Error checking presence status from button: {e}")
+        await query.edit_message_text(
+            get_text("presence_check_error", lang, 
+                    default="An error occurred while checking your presence status. Please try again later.")
+        )

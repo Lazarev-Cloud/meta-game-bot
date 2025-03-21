@@ -1,199 +1,142 @@
-# Belgrade Game Telegram Bot
+# Belgrade Game Bot
 
-A feature-rich Telegram bot implementation of a political strategy game set in 1998 Belgrade, Yugoslavia. Players compete for control of city districts, manage resources, interact with politicians, and deal with international influences.
+A Telegram bot for playing a multiplayer strategic game set in Belgrade. Players compete for control of districts, influence politicians, and manage resources in a dynamic game world.
 
-![Version](https://img.shields.io/badge/version-0.0.1-yellow)
-![Python](https://img.shields.io/badge/python-3.8%2B-green)
-![License](https://img.shields.io/badge/license-MIT-orange)
+## 🎮 Game Overview
 
-## Game Overview
+Belgrade Game is a multiplayer strategy game where players:
 
-The Belgrade Game is set in September 1998, where players act as political actors in Belgrade, the capital of the Federal Republic of Yugoslavia. The city serves as a microcosm for the political, social, and economic forces at play in the country.
+- Control districts throughout Belgrade
+- Influence politicians to gain advantages
+- Gather intelligence on opponents
+- Coordinate with other players on joint actions
+- Manage and distribute resources strategically
 
-### Core Game Mechanics
+The game runs in cycles (morning and evening), with each cycle resetting player actions and distributing resources based on controlled territories.
 
-- **District Control:** Control districts to gain resources and influence
-- **Resource Management:** Manage four resource types (Influence, Resources, Information, Force)
-- **Political Interactions:** Develop relationships with local and international politicians
-- **International Events:** Deal with external forces affecting the political landscape
-- **Cycle-based Gameplay:** Strategic actions in morning and evening cycles
-- **Multilingual Support:** Play in English or Russian
-
-## Screenshots
-
-*Screenshots will be added after deployment*
-
-## Setup and Installation
+## 📋 Setup Instructions
 
 ### Prerequisites
 
 - Python 3.8 or higher
-- A Telegram Bot Token from [@BotFather](https://t.me/BotFather)
+- Telegram account
+- Bot token from [@BotFather](https://t.me/botfather)
 
-### Installation Steps
+### Installation
 
-1. **Clone the repository**
+1. Clone this repository:
+   ```bash
+   git clone https://github.com/yourusername/belgrade-game-bot.git
+   cd belgrade-game-bot
+   ```
 
-```bash
-git clone https://github.com/Lazarev-Cloud/meta-game-bot.git
-cd meta-game-bot
-```
+2. Install required dependencies:
+   ```bash
+   pip install -r requirements.txt
+   ```
 
-2. **Install dependencies**
+3. Create a `config.py` file with your bot token:
+   ```python
+   TOKEN = "your_telegram_bot_token"
+   ADMIN_IDS = [123456789]  # Your Telegram user ID for admin access
+   ```
 
-```bash
-pip install -r requirements.txt
-```
+4. Initialize the database and language system:
+   ```bash
+   python main.py
+   ```
 
-3. **Configure the bot**
-
-- Copy `config.py.example` to `config.py`
-- Update `config.py` with your Telegram Bot Token and admin IDs
-
-```python
-# config.py
-TOKEN = "YOUR_BOT_TOKEN_HERE"
-ADMIN_IDS = [
-    123456789,  # Replace with your Telegram user ID
-]
-```
-
-4. **Run the bot**
+### Running the Bot
 
 ```bash
 python main.py
 ```
 
-## Game Commands
+The bot will automatically:
+- Set up the database if it doesn't exist
+- Initialize the language system
+- Register all commands and callbacks
+- Schedule regular jobs for game cycles and maintenance
 
-### Basic Commands
+## 🎯 Game Mechanics
 
-- `/start` - Begin the game and register your character
-- `/help` - Display command list
-- `/status` - Check resources and district control
-- `/map` - View the current control map
-- `/time` - Show current game cycle and time
-- `/news` - Display recent news
-- `/language` - Change interface language (English/Russian)
+### Resources
 
-### Action Commands
+Players manage four main resources:
+- **Influence**: Used for political actions
+- **Surveillance**: Used for intelligence gathering
+- **Force**: Used for direct confrontations
+- **Wealth**: Used for economic actions
 
-- `/action` - Submit a main action (influence, attack, defense)
-- `/quick_action` - Submit a quick action (recon, spread info, support)
-- `/cancel_action` - Cancel your last pending action
-- `/actions_left` - Check your remaining actions
-- `/view_district [district]` - View information about a district
+Resources are distributed at the start of each game cycle based on controlled districts.
 
-### Resource Commands
+### Actions
 
-- `/resources` - View your current resources
-- `/convert_resource [type] [amount]` - Convert resources
-- `/check_income` - Check your expected resource income
+Players can perform various actions:
+- **Attack**: Challenge another player's control over a district
+- **Defend**: Bolster defense in a controlled district
+- **Influence**: Attempt to gain control over politicians
+- **Gather Intelligence**: Learn about other players' activities
+- **Support**: Help another player's action
 
-### Political Commands
+### Coordinated Actions
 
-- `/politicians` - List available politicians
-- `/politician_status [name]` - Get information about a politician
-- `/international` - Information about international politicians
+Players can initiate or join coordinated actions:
+1. The initiator creates an action with specific resource requirements
+2. Other players can join by contributing their resources
+3. The action's strength increases with more participants
+4. Actions expire if not completed within a time limit
 
-### Admin Commands
+## 🌐 Multilingual Support
 
-- `/admin_add_news [title] [content]` - Add a news item
-- `/admin_process_cycle` - Manually process a game cycle
-- `/admin_add_resources [player_id] [resource_type] [amount]` - Add resources
-- `/admin_set_control [player_id] [district_id] [control_points]` - Set district control
+The bot supports multiple languages:
+- English
+- Serbian
+- More can be added via the language system
 
-## Technical Details
+Players can change their language with the `/language` command.
+
+## 👨‍💻 Developer Guide
 
 ### Project Structure
 
-```
-meta-game-bot/
-├── bot/                  # Bot functionality
-│   ├── __init__.py
-│   ├── callbacks.py      # Callback handlers
-│   └── commands.py       # Command handlers
-├── db/                   # Database operations
-│   ├── __init__.py
-│   ├── queries.py        # Database queries
-│   └── schema.py         # Database schema
-├── game/                 # Game logic
-│   ├── __init__.py
-│   ├── actions.py        # Game actions
-│   ├── districts.py      # District functionality
-│   ├── district_utils.py # District utilities
-│   ├── politicians.py    # Politician functionality
-│   └── politician_utils.py # Politician utilities
-├── config.py             # Configuration
-├── language_utils.py     # Language utilities
-├── languages.py          # Language translations
-├── languages_update.py   # Additional translations
-├── main.py               # Main entry point
-├── validators.py         # Input validators
-├── requirements.txt      # Dependencies
-├── test_bot.py           # Test script
-└── README.md             # Documentation
-```
-
-### Technologies Used
-
-- **python-telegram-bot**: Telegram Bot API wrapper
-- **SQLite**: Lightweight database
-- **Multilingual support**: Fully localized in English and Russian
+- **main.py**: Application entry point
+- **bot/**: Command and callback handlers
+- **db/**: Database access and queries
+- **game_jobs.py**: Scheduled game tasks
+- **languages_base.py**: Base translations
+- **languages_update.py**: Language utilities
+- **error_handlers.py**: Error management
 
 ### Database Schema
 
-The bot uses SQLite with the following main tables:
+The database uses SQLite with tables for:
+- Players and their resources
+- Districts and their controllers
+- Politicians and their allegiances
+- Coordinated actions and participants
+- Game news and events
 
-- `players`: Player information
-- `resources`: Player resources
-- `districts`: Belgrade districts
-- `district_control`: Player control over districts
-- `politicians`: Local and international politicians
-- `actions`: Player actions
-- `news`: In-game news
-- `politician_relationships`: Relationships between players and politicians
+The schema is automatically updated with new versions via the migration system.
 
-## Game Rules Overview
+### Adding Features
 
-### Districts and Control
+1. Define database schema changes in `main.py` migrations
+2. Add translations in `languages_base.py`
+3. Implement game logic in appropriate modules
+4. Register new commands/callbacks in `main.py`
 
-- Each district represents different political and social forces
-- 60+ control points are needed to fully control a district
-- 80+ control points provide enhanced benefits
-- Districts lose 5 control points per cycle if inactive
+## 🔧 Administration
 
-### Actions and Resources
+Admin commands (only available to users listed in ADMIN_IDS):
+- `/admin_help`: View admin commands
+- Various commands for game management and monitoring
 
-- **Main Actions**: Influence, Attack, Defense
-- **Quick Actions**: Reconnaissance, Spread Information, Support
-- **Resources**: Influence, Resources, Information, Force
-- Actions refresh every 3 hours
-- Controlled districts provide resources each cycle
+## 📝 License
 
-### Politicians and Ideology
+[MIT License](LICENSE)
 
-- Politicians have ideology scores from -5 (reformist) to +5 (conservative)
-- Players also have ideology scores affecting compatibility
-- Higher compatibility increases action success rates
-- International politicians randomly affect the game each cycle
+## 🙏 Acknowledgements
 
-## Contributing
-
-Contributions are welcome! Please feel free to submit a Pull Request.
-
-1. Fork the project
-2. Create your feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add some amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
-
-## License
-
-This project is licensed under the MIT License - see the LICENSE file for details.
-
-## Acknowledgements
-
-- Based on the Belgrade Game ruleset by lazarev.cloud
-- Powered by the python-telegram-bot library
-- Thanks to all contributors and testers
+- [python-telegram-bot](https://github.com/python-telegram-bot/python-telegram-bot) library
+- Contributors and testers who helped improve the game

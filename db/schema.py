@@ -61,8 +61,8 @@ def setup_database():
             username TEXT,
             character_name TEXT,
             ideology_score INTEGER DEFAULT 0,
-            main_actions_left INTEGER DEFAULT 1,
-            quick_actions_left INTEGER DEFAULT 2,
+            main_actions_left INTEGER DEFAULT 3,
+            quick_actions_left INTEGER DEFAULT 3,
             last_action_refresh TEXT,
             language TEXT DEFAULT 'en'
         )

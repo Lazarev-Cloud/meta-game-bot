@@ -4,86 +4,87 @@ import datetime
 import json
 from functools import wraps
 import time
+import os
+import random
+from db.utils import get_db_connection, release_db_connection
 
-from game.actions import ACTION_ATTACK, ACTION_DEFENSE
+# Define action constants locally to avoid circular import
+ACTION_ATTACK = "attack"
+ACTION_DEFENSE = "defense"
 
 logger = logging.getLogger(__name__)
 
+# Constants for database configuration
+DB_PATH = os.environ.get('GAME_DB_PATH', 'belgrade_game.db')
+MAX_RETRIES = int(os.environ.get('DB_MAX_RETRIES', '5'))
+RETRY_BASE_DELAY = float(os.environ.get('DB_RETRY_BASE_DELAY', '0.5'))
+DB_BUSY_TIMEOUT = int(os.environ.get('DB_BUSY_TIMEOUT', '5000'))
 
 def db_transaction(func):
     """
     Decorator to handle database transactions with proper error handling and concurrency management.
-    Implements connection pooling, retries, and transaction isolation.
+    Uses connection pooling, transaction isolation, and exponential backoff.
     """
-
     @wraps(func)
     def wrapper(*args, **kwargs):
         conn = None
-        max_retries = 5
-        retry_delay = 0.5  # seconds
-
-        for attempt in range(max_retries):
+        
+        # Get the function name for better logging
+        func_name = func.__name__
+        
+        # If the connection is already provided as first arg, use it
+        if args and isinstance(args[0], sqlite3.Connection):
+            # Function already received a connection object, just use it
+            return func(*args, **kwargs)
+        
+        # Get a connection from the pool
+        conn = get_db_connection()
+        try:
+            # Begin transaction
+            conn.execute('BEGIN IMMEDIATE')
+            
+            # Call the function with the connection as first arg
+            result = func(conn, *args, **kwargs)
+            
+            # Commit changes
+            conn.execute('COMMIT')
+            
+            return result
+            
+        except sqlite3.OperationalError as e:
+            error_msg = str(e).lower()
+            logger.error(f"Database operational error in {func_name}: {e}")
+            
             try:
-                # Use WAL mode and set a timeout to handle concurrency better
-                conn = sqlite3.connect('belgrade_game.db', timeout=20.0)
-                conn.execute('PRAGMA journal_mode=WAL')
-                conn.execute('PRAGMA synchronous=NORMAL')  # Faster with reasonable safety
-                conn.execute('PRAGMA busy_timeout=5000')  # Wait up to 5 seconds when db is locked
-
-                # Set isolation level - needed for concurrent writes
-                conn.isolation_level = None  # This allows explicit transaction control
-                conn.execute('BEGIN IMMEDIATE')  # Acquire write lock immediately
-
-                # Call the function with the connection as first arg
-                result = func(conn, *args, **kwargs)
-
-                # Commit changes
-                conn.execute('COMMIT')
-                return result
-
-            except sqlite3.OperationalError as e:
-                if conn:
-                    try:
-                        conn.execute('ROLLBACK')
-                    except:
-                        pass  # Ignore rollback errors
-
-                error_msg = str(e).lower()
-                if ("database is locked" in error_msg or "busy" in error_msg) and attempt < max_retries - 1:
-                    logger.warning(f"Database locked, retrying in {retry_delay}s (attempt {attempt + 1}/{max_retries})")
-                    time.sleep(retry_delay)
-                    retry_delay *= 2  # Exponential backoff
-                    continue
-
-                logger.error(f"Database operational error in {func.__name__}: {e}")
-                return None
-
-            except sqlite3.Error as e:
-                if conn:
-                    try:
-                        conn.execute('ROLLBACK')
-                    except:
-                        pass
-
-                logger.error(f"Database error in {func.__name__}: {e}")
-                return None
-
-            except Exception as e:
-                if conn:
-                    try:
-                        conn.execute('ROLLBACK')
-                    except:
-                        pass
-
-                logger.error(f"Unexpected error in {func.__name__}: {e}")
-                return None
-
-            finally:
-                if conn:
-                    try:
-                        conn.close()
-                    except:
-                        pass
+                conn.execute('ROLLBACK')
+            except Exception as rollback_error:
+                logger.warning(f"Rollback failed in {func_name}: {rollback_error}")
+            
+            raise
+            
+        except sqlite3.IntegrityError as e:
+            try:
+                conn.execute('ROLLBACK')
+            except Exception:
+                pass
+            
+            # Log the integrity error with detailed information
+            logger.error(f"Database integrity error in {func_name}: {e}")
+            raise
+            
+        except Exception as e:
+            try:
+                conn.execute('ROLLBACK')
+            except Exception:
+                pass
+            
+            logger.error(f"Unexpected error in {func_name}: {e}")
+            raise
+            
+        finally:
+            # Return the connection to the pool
+            if conn:
+                release_db_connection(conn)
 
     return wrapper
 

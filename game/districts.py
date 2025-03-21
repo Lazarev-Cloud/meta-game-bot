@@ -3,6 +3,8 @@ from db.queries import (
     get_district_info, get_all_districts,
     get_district_control, update_district_control
 )
+from telegram.ext import ContextTypes
+from db.utils import get_db_connection
 
 logger = logging.getLogger(__name__)
 
@@ -171,3 +173,46 @@ def format_district_info(district_id, lang="en"):
             f"*{get_text('current_control', lang, default='Current Control')}:* {get_text('map_no_control', lang, default='No one has established control yet.')}")
 
     return "\n".join(district_text)
+
+
+async def update_district_defenses(context: ContextTypes.DEFAULT_TYPE):
+    """Update district defense levels based on recent activity."""
+    try:
+        logger.info("Updating district defense levels...")
+        
+        # Connect to database
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            
+            # Get all districts
+            cursor.execute("SELECT id FROM districts")
+            districts = cursor.fetchall()
+            
+            for district_id in [d[0] for d in districts]:
+                # Check if district has defense entry
+                cursor.execute(
+                    "SELECT defense_level FROM district_defense WHERE district_id = ?", 
+                    (district_id,)
+                )
+                result = cursor.fetchone()
+                
+                if result:
+                    # District has defense entry, update it
+                    current_level = result[0]
+                    # Natural decay of defense levels over time (reduce by 5%)
+                    new_level = max(0, int(current_level * 0.95))
+                    cursor.execute(
+                        "UPDATE district_defense SET defense_level = ?, last_updated = CURRENT_TIMESTAMP WHERE district_id = ?",
+                        (new_level, district_id)
+                    )
+                else:
+                    # District doesn't have defense entry, create it
+                    cursor.execute(
+                        "INSERT INTO district_defense (district_id, defense_level) VALUES (?, 0)",
+                        (district_id,)
+                    )
+            
+            conn.commit()
+            logger.info("District defense levels updated")
+    except Exception as e:
+        logger.error(f"Error updating district defense levels: {e}", exc_info=True)
