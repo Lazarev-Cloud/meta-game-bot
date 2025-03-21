@@ -15,7 +15,7 @@ from languages import get_text, set_player_language, get_player_language
 logger = logging.getLogger(__name__)
 
 # Supported languages
-SUPPORTED_LANGUAGES = ["en", "ru"]
+SUPPORTED_LANGUAGES = ["en", "ru", "sr"]
 
 
 async def detect_user_language(update: Update) -> str:

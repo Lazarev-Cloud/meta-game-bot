@@ -5,7 +5,7 @@ import sqlite3
 
 from languages_base import (
     TRANSLATIONS, RESOURCE_NAMES, CYCLE_NAMES, ACTION_NAMES,
-    get_text, get_resource_name, get_cycle_name, get_action_name
+    get_text, get_resource_name, get_cycle_name, get_action_name, get_district_name
 )
 from languages_update import (
     update_translations, update_admin_translations, 

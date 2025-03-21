@@ -3,7 +3,8 @@ import sqlite3
 import json
 from datetime import datetime, timedelta
 
-from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton, ParseMode
+from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
+from telegram.constants import ParseMode
 from telegram.ext import CallbackQueryHandler, ContextTypes, ConversationHandler
 
 from languages import get_text, get_player_language, set_player_language, get_action_name, get_resource_name, get_cycle_name, get_district_name
@@ -12,7 +13,7 @@ from db.queries import (
     set_player_name, update_player_resources, get_coordinated_action_details,
     join_coordinated_action, get_open_coordinated_actions, get_district_info,
     get_politician_info, get_coordinated_action_participants, exchange_resources,
-    cancel_action, get_district_players, get_remaining_actions, update_action_counts,
+    cancel_last_action, get_remaining_actions, update_action_counts,
     get_player_districts, get_news, add_news, add_action, use_action,
     get_district_control, update_politician_friendliness
 )
@@ -20,13 +21,14 @@ from game.districts import (
     format_district_info, get_district_by_name, generate_text_map, get_all_districts
 )
 from game.politicians import (
-    get_politician_by_name, format_politician_info, format_politicians_list, get_all_politicians, get_politician_stats
+    get_politician_by_name, format_politician_info, format_politicians_list, get_all_politicians
 )
 from game.actions import (
     ACTION_ATTACK, ACTION_DEFENSE, get_current_cycle, get_cycle_deadline, get_cycle_results_time,
     get_player_presence_status, calculate_participant_power, process_join_with_resources
 )
 from utils import format_resources, notify_player, log_game_event
+from bot.commands import get_districts_for_selection
 
 # Enable logging
 logging.basicConfig(
@@ -731,7 +733,7 @@ def register_callbacks(application):
     
     # Resource handling
     application.add_handler(CallbackQueryHandler(exchange_callback, pattern="^exchange:"))
-    application.add_handler(CallbackQueryHandler(exchange_again_callback, pattern="^exchange_again:"))
+    application.add_handler(CallbackQueryHandler(exchange_again_callback, pattern="^exchange_again$"))
     application.add_handler(CallbackQueryHandler(resource_callback, pattern="^resource:"))
     application.add_handler(CallbackQueryHandler(confirm_action_callback, pattern="^confirm:"))
     
@@ -2159,3 +2161,648 @@ async def check_presence_callback(update: Update, context: ContextTypes.DEFAULT_
             get_text("presence_check_error", lang, 
                     default="An error occurred while checking your presence status. Please try again later.")
         )
+
+async def set_name_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle setting name callback."""
+    query = update.callback_query
+    user = query.from_user
+    lang = get_player_language(user.id)
+    
+    await query.answer()
+    
+    # Check if player is registered
+    player = get_player(user.id)
+    if not player:
+        await query.edit_message_text(get_text("not_registered", lang))
+        return
+    
+    # Ask for the new name
+    await query.edit_message_text(
+        get_text("enter_character_name", lang, default="Please enter your character name:")
+    )
+    
+    # Set conversation state
+    return 1  # This should match the WAITING_NAME state in commands.py
+
+
+async def action_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle action type selection."""
+    query = update.callback_query
+    user = query.from_user
+    lang = get_player_language(user.id)
+    
+    await query.answer()
+    
+    # Parse the action type
+    parts = query.data.split(":")
+    if len(parts) != 2:
+        await query.edit_message_text(get_text("error_invalid_data", lang))
+        return
+    
+    action_type = parts[1]
+    
+    # Add option to create a coordinated action for attack and defense
+    if action_type in [ACTION_ATTACK, ACTION_DEFENSE]:
+        keyboard = [
+            [InlineKeyboardButton(get_text("action_regular", lang), callback_data=f"action_regular:{action_type}")],
+            [InlineKeyboardButton(get_text("action_coordinated", lang), callback_data=f"action_coordinated:{action_type}")],
+            [InlineKeyboardButton(get_text("action_cancel", lang), callback_data="action_cancel")]
+        ]
+        
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await query.edit_message_text(
+            get_text("select_action_mode", lang, action_type=get_action_name(action_type, lang)),
+            reply_markup=reply_markup
+        )
+        return
+    
+    # For influence, proceed as normal
+    message_text = get_text("select_district", lang)
+    await show_district_selection(query, message_text)
+
+
+async def action_target_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle target selection for an action."""
+    query = update.callback_query
+    user = query.from_user
+    lang = get_player_language(user.id)
+    
+    await query.answer()
+    
+    # Parse the target information
+    parts = query.data.split(":")
+    if len(parts) < 3:
+        await query.edit_message_text(get_text("error_invalid_data", lang))
+        return
+    
+    target_type = parts[1]
+    target_id = parts[2]
+    
+    # Retrieve action type from context
+    if not context.user_data.get("action_type"):
+        await query.edit_message_text(get_text("error_no_action", lang))
+        return
+    
+    action_type = context.user_data["action_type"]
+    
+    # Show resource selection for this action
+    await show_resource_selection(query, action_type, target_id)
+
+
+async def resource_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle resource selection for an action."""
+    query = update.callback_query
+    user = query.from_user
+    lang = get_player_language(user.id)
+    
+    await query.answer()
+    
+    # Parse the resource information
+    parts = query.data.split(":")
+    if len(parts) < 4:
+        await query.edit_message_text(get_text("error_invalid_data", lang))
+        return
+    
+    resource_type = parts[1]
+    amount = int(parts[2])
+    target_id = parts[3]
+    
+    # Retrieve action type from context
+    if not context.user_data.get("action_type"):
+        await query.edit_message_text(get_text("error_no_action", lang))
+        return
+    
+    action_type = context.user_data["action_type"]
+    is_coordinated = context.user_data.get("is_coordinated", False)
+    
+    # Check if player has enough resources
+    resources = get_player_resources(user.id)
+    if resources[resource_type] < amount:
+        await query.edit_message_text(
+            get_text("not_enough_resources", lang, resource_type=get_resource_name(resource_type, lang))
+        )
+        return
+    
+    # Store selected resources in context
+    if "selected_resources" not in context.user_data:
+        context.user_data["selected_resources"] = {}
+    
+    context.user_data["selected_resources"][resource_type] = amount
+    context.user_data["target_id"] = target_id
+    
+    # Show confirmation
+    target_name = target_id
+    if target_type == "district":
+        district_info = get_district_info(target_id)
+        if district_info:
+            target_name = district_info[1]  # District name
+    elif target_type == "politician":
+        politician_info = get_politician_info(target_id)
+        if politician_info:
+            target_name = politician_info[1]  # Politician name
+    
+    # Format resources for display
+    resources_text = []
+    for res_type, res_amount in context.user_data["selected_resources"].items():
+        resources_text.append(f"{res_amount} {get_resource_name(res_type, lang)}")
+    
+    resources_display = ", ".join(resources_text)
+    
+    confirm_text = get_text(
+        "confirm_action", 
+        lang,
+        action_type=get_action_name(action_type, lang),
+        target=target_name,
+        resources=resources_display
+    )
+    
+    keyboard = [
+        [
+            InlineKeyboardButton(get_text("confirm", lang), callback_data=f"confirm:{action_type}:{target_id}"),
+            InlineKeyboardButton(get_text("action_cancel", lang), callback_data="action_cancel")
+        ]
+    ]
+    
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    await query.edit_message_text(confirm_text, reply_markup=reply_markup)
+
+
+async def confirm_action_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle action confirmation."""
+    query = update.callback_query
+    user = query.from_user
+    lang = get_player_language(user.id)
+    
+    await query.answer()
+    
+    # Parse confirmation data
+    parts = query.data.split(":")
+    if len(parts) < 3:
+        await query.edit_message_text(get_text("error_invalid_data", lang))
+        return
+    
+    action_type = parts[1]
+    target_id = parts[2]
+    target_type = "district"  # Default
+    
+    # Get data from context
+    selected_resources = context.user_data.get("selected_resources", {})
+    is_coordinated = context.user_data.get("is_coordinated", False)
+    
+    # Check if it's a politician action
+    if action_type in ["influence_politician", "info_politician", "undermine_politician"]:
+        target_type = "politician"
+    
+    # Process the action based on its type
+    if target_type == "district":
+        # Process district action
+        await process_main_action(query, action_type, target_type, target_id, selected_resources, is_coordinated)
+    elif target_type == "politician":
+        # Process politician action
+        if action_type == "influence_politician":
+            await process_politician_influence(query, target_id)
+        elif action_type == "info_politician":
+            await process_politician_info(query, target_id)
+        elif action_type == "undermine_politician":
+            await process_politician_undermine(query, target_id)
+    
+    # Clear context data
+    context.user_data.pop("action_type", None)
+    context.user_data.pop("selected_resources", None)
+    context.user_data.pop("is_coordinated", None)
+    context.user_data.pop("target_id", None)
+
+
+async def handle_district_action(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle district action processing."""
+    query = update.callback_query
+    user = query.from_user
+    lang = get_player_language(user.id)
+    
+    await query.answer()
+    
+    parts = query.data.split(":")
+    if len(parts) < 3:
+        await query.edit_message_text(get_text("error_invalid_data", lang))
+        return
+    
+    action_type = parts[1]
+    district_id = parts[2]
+    
+    # Handle different district action types
+    if action_type == "influence":
+        # Show resource selection for influence action
+        context.user_data["action_type"] = "influence"
+        context.user_data["is_coordinated"] = False
+        await show_resource_selection(query, "influence", district_id)
+    elif action_type == "attack":
+        # Show resource selection for attack action
+        context.user_data["action_type"] = ACTION_ATTACK
+        context.user_data["is_coordinated"] = False
+        await show_resource_selection(query, ACTION_ATTACK, district_id)
+    elif action_type == "defense":
+        # Show resource selection for defense action
+        context.user_data["action_type"] = ACTION_DEFENSE
+        context.user_data["is_coordinated"] = False
+        await show_resource_selection(query, ACTION_DEFENSE, district_id)
+    elif action_type == "recon":
+        # Process quick recon action
+        await process_quick_action(query, "recon", "district", district_id)
+    elif action_type == "support":
+        # Process quick support action
+        await process_quick_action(query, "support", "district", district_id)
+    else:
+        await query.edit_message_text(get_text("unknown_action", lang))
+
+
+async def join_resource_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle resource selection for joining an action."""
+    query = update.callback_query
+    user = query.from_user
+    lang = get_player_language(user.id)
+    
+    await query.answer()
+    
+    # Parse join resource data (format: join_resource:action_id:resource_type:amount)
+    parts = query.data.split(":")
+    if len(parts) != 4:
+        await query.edit_message_text(get_text("error_invalid_data", lang))
+        return
+    
+    action_id = int(parts[1])
+    resource_type = parts[2]
+    amount = int(parts[3])
+    
+    # Check if player has enough resources
+    resources = get_player_resources(user.id)
+    if resources[resource_type] < amount:
+        await query.edit_message_text(
+            get_text("not_enough_resources", lang, resource_type=get_resource_name(resource_type, lang))
+        )
+        return
+    
+    # Store the selected resource in context
+    context.user_data["join_action_id"] = action_id
+    context.user_data["join_resource_type"] = resource_type
+    context.user_data["join_resource_amount"] = amount
+    
+    # Get action details for confirmation
+    action_details = get_coordinated_action_details(action_id)
+    if not action_details:
+        await query.edit_message_text(get_text("action_not_found", lang))
+        return
+    
+    # Get target name
+    target_type = action_details.get("target_type", "unknown")
+    target_id = action_details.get("target_id", "unknown")
+    action_type = action_details.get("action_type", "unknown")
+    
+    if target_type == "district":
+        district_info = get_district_info(target_id)
+        target_name = district_info[1] if district_info else target_id
+    elif target_type == "politician":
+        politician_info = get_politician_info(target_id)
+        target_name = politician_info[1] if politician_info else target_id
+    else:
+        target_name = target_id
+    
+    # Show confirmation
+    confirm_text = get_text(
+        "confirm_join_action",
+        lang,
+        action_type=get_action_name(action_type, lang),
+        target=target_name,
+        resource_type=get_resource_name(resource_type, lang),
+        amount=amount
+    )
+    
+    keyboard = [
+        [
+            InlineKeyboardButton(get_text("confirm", lang), callback_data="join_submit"),
+            InlineKeyboardButton(get_text("action_cancel", lang), callback_data="action_cancel")
+        ]
+    ]
+    
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    await query.edit_message_text(confirm_text, reply_markup=reply_markup)
+
+
+async def main_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle main menu navigation."""
+    query = update.callback_query
+    user = query.from_user
+    lang = get_player_language(user.id)
+    
+    await query.answer()
+    
+    # Parse the menu selection
+    parts = query.data.split(":")
+    if len(parts) != 2:
+        await query.edit_message_text(get_text("error_invalid_data", lang))
+        return
+    
+    menu_item = parts[1]
+    
+    # Handle different menu selections
+    if menu_item == "actions":
+        # Show action types for selection
+        keyboard = [
+            [InlineKeyboardButton(get_text("action_influence", lang), callback_data=f"action_type:influence")],
+            [InlineKeyboardButton(get_text("action_attack", lang), callback_data=f"action_type:attack")],
+            [InlineKeyboardButton(get_text("action_defense", lang), callback_data=f"action_type:defense")],
+            [InlineKeyboardButton(get_text("action_join", lang, default="Join"), callback_data=f"action_type:join")],
+            [InlineKeyboardButton(get_text("back", lang), callback_data="back_to_main_menu")]
+        ]
+        
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await query.edit_message_text(
+            get_text("select_action_type", lang),
+            reply_markup=reply_markup
+        )
+    elif menu_item == "status":
+        # Show player status
+        player = get_player(user.id)
+        if not player:
+            await query.edit_message_text(get_text("not_registered", lang))
+            return
+        
+        # Update action counts
+        update_action_counts(user.id)
+        
+        # Format player status info
+        character_name = player[2] or get_text("unnamed", lang, default="Unnamed")
+        ideology_score = player[3]
+        
+        resources = get_player_resources(user.id)
+        districts = get_player_districts(user.id)
+        actions = get_remaining_actions(user.id)
+        
+        # Format ideology
+        from languages import format_ideology
+        ideology = format_ideology(ideology_score, lang)
+        
+        status_text = (
+            f"*{get_text('status_title', lang, character_name=character_name)}*\n"
+            f"{get_text('status_ideology', lang, ideology=ideology, score=ideology_score)}\n\n"
+            
+            f"*{get_text('resources_title', lang)}*\n"
+            f"🔵 {get_resource_name('influence', lang)}: {resources['influence']}\n"
+            f"💰 {get_resource_name('resources', lang)}: {resources['resources']}\n"
+            f"🔍 {get_resource_name('information', lang)}: {resources['information']}\n"
+            f"👊 {get_resource_name('force', lang)}: {resources['force']}\n\n"
+            
+            f"*{get_text('remaining_actions', lang)}*\n"
+            f"{get_text('main_actions_status', lang, count=actions['main'])}\n"
+            f"{get_text('quick_actions_status', lang, count=actions['quick'])}\n\n"
+        )
+        
+        if districts:
+            status_text += f"*{get_text('status_districts', lang)}*\n"
+            for district in districts:
+                district_id, name, control = district
+                
+                # Determine control status based on control points
+                from game.districts import get_control_status_text
+                control_status = get_control_status_text(control, lang)
+                
+                status_text += f"{name}: {control} {get_text('control_points', lang, count=control)} - {control_status}\n"
+        else:
+            status_text += f"*{get_text('status_no_districts', lang)}*\n"
+        
+        # Add back button
+        keyboard = [[InlineKeyboardButton(get_text("back", lang), callback_data="back_to_main_menu")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await query.edit_message_text(
+            status_text,
+            parse_mode=ParseMode.MARKDOWN,
+            reply_markup=reply_markup
+        )
+    elif menu_item == "districts":
+        # Show district selection
+        districts = get_districts_for_selection(lang)
+        keyboard = []
+        
+        for district_id, name in districts:
+            keyboard.append([InlineKeyboardButton(name, callback_data=f"view_district:{district_id}")])
+        
+        keyboard.append([InlineKeyboardButton(get_text("back", lang), callback_data="back_to_main_menu")])
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await query.edit_message_text(
+            get_text("select_district", lang),
+            reply_markup=reply_markup
+        )
+    elif menu_item == "politicians":
+        # Show politician selection
+        from game.politicians import format_politicians_list
+        politicians_text = format_politicians_list(is_international=False, lang=lang)
+        
+        # Get list of politicians for buttons
+        import sqlite3
+        conn = sqlite3.connect('belgrade_game.db')
+        cursor = conn.cursor()
+        cursor.execute("SELECT politician_id, name FROM politicians WHERE is_international = 0 ORDER BY name")
+        politicians = cursor.fetchall()
+        conn.close()
+        
+        if not politicians:
+            await query.edit_message_text(get_text("no_politicians", lang))
+            return
+        
+        # Create buttons
+        keyboard = []
+        for politician in politicians:
+            pol_id, name = politician
+            keyboard.append([InlineKeyboardButton(name, callback_data=f"view_politician:{pol_id}")])
+        
+        keyboard.append([InlineKeyboardButton(get_text("back", lang), callback_data="back_to_main_menu")])
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await query.edit_message_text(
+            politicians_text,
+            parse_mode='Markdown',
+            reply_markup=reply_markup
+        )
+    elif menu_item == "join":
+        # Show open coordinated actions
+        open_actions = get_open_coordinated_actions()
+        
+        if not open_actions:
+            keyboard = [[InlineKeyboardButton(get_text("back", lang), callback_data="back_to_main_menu")]]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            
+            await query.edit_message_text(
+                get_text("no_coordinated_actions", lang),
+                reply_markup=reply_markup
+            )
+            return
+        
+        # Format actions and create buttons
+        response = f"*{get_text('coordinated_actions_title', lang)}*\n\n"
+        keyboard = []
+        
+        for action in open_actions:
+            action_id = action[0]
+            initiator_name = action[8] or get_text("unnamed", lang)
+            action_type_raw = action[2]
+            action_type = get_action_name(action_type_raw, lang)
+            target_type = action[3]
+            target_id = action[4]
+            
+            # Get target name based on type
+            if target_type == "district":
+                from game.districts import get_district_by_id
+                target_info = get_district_by_id(target_id)
+                target_name = target_info['name'] if target_info else target_id
+            elif target_type == "politician":
+                from game.politicians import get_politician_by_id
+                target_info = get_politician_by_id(target_id)
+                target_name = target_info['name'] if target_info else target_id
+            else:
+                target_name = target_id
+            
+            # Get participants
+            participants = get_coordinated_action_participants(action_id)
+            participant_count = len(participants)
+            
+            # Add to response
+            response += f"*{get_text('action_id', lang)}: {action_id}*\n"
+            response += f"{get_text('action_type', lang)}: {action_type}\n"
+            response += f"{get_text('target', lang)}: {target_name} ({target_type})\n"
+            response += f"{get_text('initiator', lang)}: {initiator_name}\n"
+            response += f"{get_text('participants', lang)}: {participant_count}\n\n"
+            
+            # Add button to join this action
+            keyboard.append([
+                InlineKeyboardButton(
+                    f"{get_text('join_action', lang, default='Join')} #{action_id}: {action_type} {target_name}",
+                    callback_data=f"join_action_id:{action_id}"
+                )
+            ])
+        
+        keyboard.append([InlineKeyboardButton(get_text("back", lang), callback_data="back_to_main_menu")])
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await query.edit_message_text(
+            response,
+            parse_mode='Markdown',
+            reply_markup=reply_markup
+        )
+    elif menu_item == "language":
+        # Show language selection
+        keyboard = [
+            [
+                InlineKeyboardButton(get_text("language_button_en", lang), callback_data="language:en"),
+                InlineKeyboardButton(get_text("language_button_ru", lang), callback_data="language:ru")
+            ],
+            [InlineKeyboardButton(get_text("back", lang), callback_data="back_to_main_menu")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await query.edit_message_text(
+            get_text("language_select", lang),
+            reply_markup=reply_markup
+        )
+    elif menu_item == "news":
+        # Show recent news
+        news_items = get_news(limit=5, player_id=user.id)
+        
+        if not news_items:
+            keyboard = [[InlineKeyboardButton(get_text("back", lang), callback_data="back_to_main_menu")]]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            
+            await query.edit_message_text(
+                get_text("no_news", lang),
+                reply_markup=reply_markup
+            )
+            return
+        
+        news_text = f"*{get_text('news_title', lang)}*\n\n"
+        
+        for news_item in news_items:
+            news_id, title, content, timestamp, is_public, target_player, is_fake = news_item
+            news_time = datetime.datetime.fromisoformat(timestamp).strftime("%d/%m %H:%M")
+            
+            news_text += f"*{title}* - {news_time}\n"
+            news_text += f"{content}\n\n"
+        
+        keyboard = [[InlineKeyboardButton(get_text("back", lang), callback_data="back_to_main_menu")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await query.edit_message_text(
+            news_text,
+            parse_mode='Markdown',
+            reply_markup=reply_markup
+        )
+    elif menu_item == "help":
+        # Show help text
+        help_text = get_text("help_message", lang)
+        
+        keyboard = [[InlineKeyboardButton(get_text("back", lang), callback_data="back_to_main_menu")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await query.edit_message_text(
+            help_text,
+            parse_mode='Markdown',
+            reply_markup=reply_markup
+        )
+    else:
+        await query.edit_message_text(get_text("unknown_menu_item", lang))
+
+
+async def back_to_main_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Return to the main menu."""
+    query = update.callback_query
+    user = query.from_user
+    lang = get_player_language(user.id)
+    
+    await query.answer()
+    
+    # Get player information
+    player = get_player(user.id)
+    if not player:
+        await query.edit_message_text(get_text("not_registered", lang))
+        return
+    
+    resources = get_player_resources(user.id)
+    
+    # Create main menu
+    status_text = (
+        f"<b>{get_text('welcome_back', lang, default='Welcome back')} {player[2]}!</b>\n\n"
+        f"<b>{get_text('status_title', lang)}:</b>\n"
+        f"{format_resources(resources, lang)}\n\n"
+        f"{get_text('what_next', lang, default='What would you like to do?')}"
+    )
+    
+    # Create main action buttons
+    keyboard = [
+        [
+            InlineKeyboardButton(get_text('action_button', lang, default='🎯 Actions'), callback_data="main_menu:actions"),
+            InlineKeyboardButton(get_text('status_button', lang, default='📊 Status'), callback_data="main_menu:status")
+        ],
+        [
+            InlineKeyboardButton(get_text('districts_button', lang, default='🏙️ Districts'), callback_data="main_menu:districts"),
+            InlineKeyboardButton(get_text('politicians_button', lang, default='👥 Politicians'), callback_data="main_menu:politicians")
+        ],
+        [
+            InlineKeyboardButton(get_text('join_button', lang, default='🤝 Join Actions'), callback_data="main_menu:join"),
+            InlineKeyboardButton(get_text('language_button', lang, default='🌐 Language'), callback_data="main_menu:language")
+        ],
+        [
+            InlineKeyboardButton(get_text('news_button', lang, default='📰 News'), callback_data="main_menu:news"),
+            InlineKeyboardButton(get_text('help_button', lang, default='❓ Help'), callback_data="main_menu:help")
+        ]
+    ]
+    
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    await query.edit_message_text(
+        text=status_text,
+        parse_mode='HTML',
+        reply_markup=reply_markup
+    )

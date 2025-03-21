@@ -206,6 +206,41 @@ def get_player_resources(conn, player_id):
     return None
 
 
+@db_transaction
+def exchange_resources(conn, player_id, from_resource, to_resource, amount):
+    """
+    Exchange resources from one type to another.
+    
+    Args:
+        conn: Database connection
+        player_id: Player ID
+        from_resource: Source resource type
+        to_resource: Target resource type
+        amount: Amount to convert to target resource
+        
+    Returns:
+        dict: Updated resources or None if exchange failed
+    """
+    # Get current resources
+    resources = get_player_resources(conn, player_id)
+    if not resources:
+        return None
+    
+    # Calculate required amount (2:1 ratio by default)
+    required_amount = amount * 2
+    
+    # Check if player has enough resources
+    if resources[from_resource] < required_amount:
+        return None
+    
+    # Update resources
+    update_player_resources(conn, player_id, from_resource, -required_amount)
+    update_player_resources(conn, player_id, to_resource, amount)
+    
+    # Return updated resources
+    return get_player_resources(conn, player_id)
+
+
 # District-related queries
 @db_transaction
 def get_district_info(conn, district_id):
