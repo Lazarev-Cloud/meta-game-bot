@@ -175,3 +175,6 @@ cython_debug/
 /.idea
 belgrade_game.db
 *.db
+*.old
+*.db-shm
+*.db-wal

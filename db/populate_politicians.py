@@ -14,7 +14,7 @@ def populate_politicians():
     """Populate the politicians table with data from politicians.py definitions."""
     try:
         # Connect to the database
-        conn = sqlite3.connect('belgrade_game.db')
+        conn = sqlite3.connect('novi_sad_game.db')
         cursor = conn.cursor()
         
         # Check if politicians table exists

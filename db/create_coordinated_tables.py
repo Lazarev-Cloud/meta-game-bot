@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 def create_coordinated_tables():
     """Create the coordinated action tables if they don't exist."""
     try:
-        conn = sqlite3.connect('belgrade_game.db')
+        conn = sqlite3.connect('novi_sad_game.db')
         cursor = conn.cursor()
 
         # Check if tables already exist

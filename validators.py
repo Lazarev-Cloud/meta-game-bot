@@ -72,7 +72,7 @@ def validate_district_id(district_id: str) -> bool:
         bool: True if valid, False otherwise
     """
     try:
-        conn = sqlite3.connect('belgrade_game.db')
+        conn = sqlite3.connect('novi_sad_game.db')
         cursor = conn.cursor()
 
         cursor.execute("SELECT district_id FROM districts WHERE district_id = ?", (district_id,))
@@ -96,7 +96,7 @@ def validate_politician_id(politician_id: Union[str, int]) -> bool:
         bool: True if valid, False otherwise
     """
     try:
-        conn = sqlite3.connect('belgrade_game.db')
+        conn = sqlite3.connect('novi_sad_game.db')
         cursor = conn.cursor()
 
         # Convert to integer if it's a string
@@ -145,7 +145,7 @@ def validate_player_resources(player_id: int, resource_requirements: Dict[str, i
         bool: True if player has sufficient resources, False otherwise
     """
     try:
-        conn = sqlite3.connect('belgrade_game.db')
+        conn = sqlite3.connect('novi_sad_game.db')
         cursor = conn.cursor()
 
         for resource_type, amount in resource_requirements.items():
@@ -196,7 +196,7 @@ def validate_actions_left(player_id: int, is_main_action: bool = True) -> bool:
         bool: True if player has actions left, False otherwise
     """
     try:
-        conn = sqlite3.connect('belgrade_game.db')
+        conn = sqlite3.connect('novi_sad_game.db')
         cursor = conn.cursor()
 
         field = "main_actions_left" if is_main_action else "quick_actions_left"

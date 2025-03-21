@@ -18,7 +18,8 @@ from db.queries import (
     get_remaining_actions, update_action_counts, get_news,
     get_player_districts, add_news, use_action, get_district_info,
     join_coordinated_action, get_open_coordinated_actions,
-    get_coordinated_action_participants, get_coordinated_action_details
+    get_coordinated_action_participants, get_coordinated_action_details,
+    get_player_name
 )
 from game.districts import (
     generate_text_map, format_district_info, get_district_by_name
@@ -53,7 +54,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         # Create a message with status info
         status_text = (
-            f"<b>{get_text('welcome_back', lang, default='Welcome back')} {player['name']}!</b>\n\n"
+            f"<b>{get_text('welcome_back', lang, default='Welcome back')} {player['character_name'] or get_text('unnamed', lang, default='Unnamed Player')}!</b>\n\n"
             f"<b>{get_text('status_title', lang)}:</b>\n"
             f"{format_resources(resources, lang)}\n\n"
             f"{get_text('what_next', lang, default='What would you like to do?')}"
@@ -126,7 +127,7 @@ async def set_name_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     set_player_name(user.id, character_name)
 
     await update.message.reply_text(
-        get_text("name_set", lang, character_name=character_name)
+        get_text("name_set", lang, name=character_name)
     )
 
     return ConversationHandler.END
@@ -743,9 +744,31 @@ async def news_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     news_text = f"*{get_text('news_title', lang)}*\n\n"
 
     for news_item in news_items:
-        news_id, title, content, timestamp, is_public, target_player, is_fake = news_item
+        # Handle the news fields according to the database schema
+        # news_id, title, content, importance, timestamp, is_hidden, is_public, target_player_id, is_fake
+        if len(news_item) >= 9:
+            news_id = news_item[0]
+            title = news_item[1]
+            content = news_item[2]
+            # importance = news_item[3]  # Not used in display currently
+            timestamp = news_item[4]
+            # is_hidden = news_item[5]   # Not used in display currently
+            # is_public = news_item[6]   # Not used in display currently
+            # target_player_id = news_item[7]  # Not used in display currently
+            # is_fake = news_item[8]     # Not used in display currently
+        elif len(news_item) >= 4:
+            # Fallback for a simpler schema
+            news_id = news_item[0]
+            title = news_item[1]
+            content = news_item[2]
+            timestamp = news_item[3]
+        else:
+            # Handle unexpected data format
+            logger.warning(f"Unexpected news item format: {news_item}")
+            continue
+            
         news_time = datetime.datetime.fromisoformat(timestamp).strftime("%d/%m %H:%M")
-
+        
         news_text += f"*{title}* - {news_time}\n"
         news_text += f"{content}\n\n"
 
@@ -1319,10 +1342,9 @@ async def admin_process_cycle(update: Update, context: ContextTypes.DEFAULT_TYPE
 
 
 async def join_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Join a coordinated action with specified action ID and resources."""
+    """Join a coordinated action with buttons for better UI."""
     user = update.effective_user
     lang = get_player_language(user.id)
-    args = context.args
 
     # Check if player is registered
     player = get_player(user.id)
@@ -1336,126 +1358,81 @@ async def join_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Check if player has main actions left (coordinated actions use main actions)
     actions = get_remaining_actions(user.id)
     if actions['main'] <= 0:
-        await update.message.reply_text(get_text("no_main_actions", lang))
+        # Show message with button to return to main menu
+        keyboard = [
+            [InlineKeyboardButton(get_text("back_to_menu", lang, default="Back to Menu"), callback_data="main_menu:back")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await update.message.reply_text(
+            get_text("no_main_actions", lang),
+            reply_markup=reply_markup
+        )
         return
 
-    # If no arguments provided, show available actions
-    if not args:
-        await list_coordinated_actions_command(update, context)
+    # Show available coordinated actions to join
+    open_actions = get_open_coordinated_actions()
+
+    if not open_actions:
+        # No available actions, show a message and option to create one
+        keyboard = [
+            [InlineKeyboardButton(get_text("create_coordinated_action", lang, default="Create Action"), callback_data="main_menu:act")],
+            [InlineKeyboardButton(get_text("back_to_menu", lang, default="Back to Menu"), callback_data="main_menu:back")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await update.message.reply_text(
+            get_text("no_coordinated_actions", lang) + "\n\n" + 
+            get_text("create_action_prompt", lang, default="Would you like to create a coordinated action?"),
+            reply_markup=reply_markup
+        )
         return
 
-    # Process with arguments (action_id, resource types...)
-    try:
-        action_id = int(args[0])
+    # Create buttons for each coordinated action
+    keyboard = []
 
-        # Get action details to show in confirmation
-        action_details = get_coordinated_action_details(action_id)
+    for action in open_actions:
+        action_id = action[0]
+        initiator_id = action[1]
+        action_type_raw = action[2]
+        action_type = get_action_name(action_type_raw, lang)
+        target_type = action[3]
+        target_id = action[4]
 
-        if not action_details:
-            await update.message.reply_text(get_text("action_not_found", lang))
-            return
-
-        action_type = action_details['action_type']
-        target_type = action_details['target_type']
-        target_id = action_details['target_id']
-
-        # Get target name
+        # Get target name based on type
         if target_type == "district":
             from game.districts import get_district_by_id
             target_info = get_district_by_id(target_id)
-            target_name = target_info['name'] if target_info else target_id
+            target_name = target_info['name'] if target_info else str(target_id)
         elif target_type == "politician":
             from game.politicians import get_politician_by_id
             target_info = get_politician_by_id(target_id)
-            target_name = target_info['name'] if target_info else target_id
+            target_name = target_info['name'] if target_info else str(target_id)
         else:
-            target_name = target_id
+            target_name = str(target_id)
 
-        # Parse resource arguments if provided
-        resources_dict = {}
-        if len(args) > 1:
-            for resource_type in args[1:]:
-                resource_type = resource_type.lower()
-                if resource_type in ["influence", "resources", "information", "force"]:
-                    if resource_type in resources_dict:
-                        resources_dict[resource_type] += 1
-                    else:
-                        resources_dict[resource_type] = 1
+        # Get initiator name
+        initiator_name = get_player_name(initiator_id) or get_text("unnamed", lang)
 
-        # If resources are provided, process the join directly
-        if resources_dict:
-            # Validate resources
-            player_resources = get_player_resources(user.id)
-            for resource_type, amount in resources_dict.items():
-                if player_resources.get(resource_type, 0) < amount:
-                    await update.message.reply_text(
-                        get_text("insufficient_resources", lang, resource_type=get_resource_name(resource_type, lang))
-                    )
-                    return
+        # Get participants count
+        participants = get_coordinated_action_participants(action_id)
+        participant_count = len(participants)
+        
+        # Create button for this action
+        button_text = f"{action_type} - {target_name} ({participant_count})"
+        callback_data = f"join_action:{action_id}:{action_type_raw}:{target_type}:{target_id}"
+        
+        keyboard.append([InlineKeyboardButton(button_text, callback_data=callback_data)])
 
-            # Join the action
-            success, message = join_coordinated_action(user.id, action_id, resources_dict)
-
-            if success:
-                # Deduct resources
-                for resource_type, amount in resources_dict.items():
-                    update_player_resources(user.id, resource_type, -amount)
-
-                # Use a main action
-                use_action(user.id, True)  # True for main action
-
-                # Format resources for display
-                resources_text = []
-                for resource_type, amount in resources_dict.items():
-                    resources_text.append(f"{amount} {get_resource_name(resource_type, lang)}")
-
-                resources_display = ", ".join(resources_text)
-
-                await update.message.reply_text(
-                    get_text("joined_coordinated_action", lang,
-                             action_type=get_action_name(action_type, lang),
-                             target=target_name,
-                             resources=resources_display)
-                )
-            else:
-                await update.message.reply_text(message)
-
-            return
-
-        # Otherwise, show interactive resource selection
-        # Create buttons to select resources
-        keyboard = [
-            [
-                InlineKeyboardButton("1 Influence", callback_data=f"join_resource:{action_id}:influence:1"),
-                InlineKeyboardButton("1 Resources", callback_data=f"join_resource:{action_id}:resources:1")
-            ],
-            [
-                InlineKeyboardButton("1 Information", callback_data=f"join_resource:{action_id}:information:1"),
-                InlineKeyboardButton("1 Force", callback_data=f"join_resource:{action_id}:force:1")
-            ],
-            [
-                InlineKeyboardButton("2 Influence", callback_data=f"join_resource:{action_id}:influence:2"),
-                InlineKeyboardButton("2 Force", callback_data=f"join_resource:{action_id}:force:2")
-            ],
-            [
-                InlineKeyboardButton(get_text("action_cancel", lang), callback_data="action_cancel")
-            ]
-        ]
-
-        reply_markup = InlineKeyboardMarkup(keyboard)
-
-        await update.message.reply_text(
-            get_text("select_resources_join", lang,
-                     action_type=get_action_name(action_type, lang),
-                     target_name=target_name),
-            reply_markup=reply_markup
-        )
-
-    except ValueError:
-        await update.message.reply_text(get_text("join_usage", lang))
-    except Exception as e:
-        logger.error(f"Error in join_command: {e}")
-        await update.message.reply_text(get_text("action_error", lang))
+    # Add back button
+    keyboard.append([InlineKeyboardButton(get_text("back_to_menu", lang, default="Back to Menu"), callback_data="main_menu:back")])
+    
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    await update.message.reply_text(
+        get_text("available_coordinated_actions", lang, default="Available coordinated actions to join:"),
+        reply_markup=reply_markup
+    )
 
 
 async def exchange_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1669,8 +1646,8 @@ def get_district_by_location(location_data):
                 'name': 'Petrovaradin',
                 'resources': {
                     'influence': 1,
-                    'resources': 1,
                     'information': 1,
+                    'resources': 1,
                     'force': 1
                 },
                 'description': 'Historical fortress, cultural heritage'
@@ -1705,8 +1682,8 @@ def get_district_by_location(location_data):
                 'name': 'Grbavica',
                 'resources': {
                     'influence': 1,
-                    'resources': 1,
                     'information': 1,
+                    'resources': 1,
                     'force': 1
                 },
                 'description': 'Densely populated residential area'

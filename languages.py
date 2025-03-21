@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 def get_player_language(player_id):
     """Get player's preferred language"""
     try:
-        conn = sqlite3.connect('belgrade_game.db')
+        conn = sqlite3.connect('novi_sad_game.db')
         cursor = conn.cursor()
 
         cursor.execute("SELECT language FROM players WHERE player_id = ?", (player_id,))
@@ -37,7 +37,7 @@ def get_player_language(player_id):
 def set_player_language(player_id, language):
     """Set player's preferred language"""
     try:
-        conn = sqlite3.connect('belgrade_game.db')
+        conn = sqlite3.connect('novi_sad_game.db')
         cursor = conn.cursor()
 
         # Check if player exists
@@ -73,6 +73,13 @@ def set_player_language(player_id, language):
 
 def format_ideology(ideology_score, lang="en"):
     """Get formatted ideology description based on score"""
+    # Convert to integer if it's a string
+    if isinstance(ideology_score, str):
+        try:
+            ideology_score = int(ideology_score)
+        except ValueError:
+            ideology_score = 0  # Default to neutral if conversion fails
+    
     if ideology_score > 3:
         return get_text("ideology_strongly_conservative", lang)
     elif ideology_score > 0:
@@ -91,14 +98,40 @@ def check_missing_translations():
 
     # Get all keys in English
     english_keys = set(TRANSLATIONS["en"].keys())
+    
+    # First handle regular Serbian translations - copy missing keys from English
+    if "sr" in TRANSLATIONS:
+        sr_keys = set(TRANSLATIONS["sr"].keys())
+        missing_sr_keys = english_keys - sr_keys
+        
+        if missing_sr_keys:
+            for key in missing_sr_keys:
+                TRANSLATIONS["sr"][key] = TRANSLATIONS["en"][key]  # Use English as fallback
+    
+    # Now specifically handle _sr suffix keys - these are special Serbian versions
+    if "sr" in TRANSLATIONS:
+        sr_specific_keys = [k for k in english_keys if k.endswith('_sr')]
+        for key in sr_specific_keys:
+            if key not in TRANSLATIONS["sr"]:
+                missing_count += 1
+                base_key = key.replace('_sr', '')
+                # Try to find a reasonable fallback
+                if base_key in TRANSLATIONS["sr"]:
+                    TRANSLATIONS["sr"][key] = TRANSLATIONS["sr"][base_key]
+                    logging.warning(f"  - '{key}' (using Serbian equivalent '{base_key}')")
+                else:
+                    TRANSLATIONS["sr"][key] = TRANSLATIONS["en"][key]
+                    logging.warning(f"  - '{key}' (using English fallback)")
 
-    # Check each language
+    # Check each language (except Serbian which we handled specially)
     for lang in TRANSLATIONS:
-        if lang == "en":
+        if lang == "en" or lang == "sr":
             continue
 
         lang_keys = set(TRANSLATIONS[lang].keys())
-        missing_keys = english_keys - lang_keys
+        # Filter out _sr keys from the check for non-Serbian languages
+        filtered_english_keys = set(k for k in english_keys if not k.endswith('_sr'))
+        missing_keys = filtered_english_keys - lang_keys
 
         if missing_keys:
             missing_count += len(missing_keys)

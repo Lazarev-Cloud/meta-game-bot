@@ -7,7 +7,7 @@ logger = logging.getLogger(__name__)
 def setup_database():
     """Initialize database schema for the Belgrade game."""
     try:
-        conn = sqlite3.connect('belgrade_game.db')
+        conn = sqlite3.connect('novi_sad_game.db')
         cursor = conn.cursor()
 
         # Check if database is already set up
@@ -32,6 +32,7 @@ def setup_database():
                     cycle TEXT,
                     status TEXT DEFAULT 'open',
                     expires_at TEXT,
+                    processed_at TEXT,
                     FOREIGN KEY (initiator_id) REFERENCES players (player_id)
                 )
                 ''')
@@ -201,6 +202,7 @@ def setup_database():
             cycle TEXT,
             status TEXT DEFAULT 'open',
             expires_at TEXT,
+            processed_at TEXT,
             FOREIGN KEY (initiator_id) REFERENCES players (player_id)
         )
         ''')
@@ -297,7 +299,7 @@ def setup_database():
 def ensure_player_has_base_resources(player_id):
     """Ensure that a player has the base starting resources."""
     try:
-        conn = sqlite3.connect('belgrade_game.db')
+        conn = sqlite3.connect('novi_sad_game.db')
         cursor = conn.cursor()
 
         # Check if player has resources

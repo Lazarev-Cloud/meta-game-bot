@@ -40,15 +40,50 @@ def db_transaction(func):
         
         # Get a connection from the pool
         conn = get_db_connection()
+        transaction_started = False
+        
         try:
-            # Begin transaction
-            conn.execute('BEGIN IMMEDIATE')
+            # Check if a transaction is already active
+            try:
+                cursor = conn.cursor()
+                cursor.execute("SELECT 1 FROM sqlite_master LIMIT 1")
+                in_transaction = conn.in_transaction
+            except Exception as e:
+                logger.debug(f"Error checking transaction state: {e}")
+                in_transaction = False
+            
+            # Begin transaction if not already in one
+            if not in_transaction:
+                try:
+                    conn.execute('BEGIN IMMEDIATE')
+                    transaction_started = True
+                    logger.debug(f"Started new transaction in {func_name}")
+                except sqlite3.OperationalError as e:
+                    if "database is locked" in str(e).lower():
+                        logger.warning(f"Database locked in {func_name}, retrying...")
+                        time.sleep(0.1)  # Brief sleep before retry
+                        conn.execute('BEGIN IMMEDIATE')
+                        transaction_started = True
+                    else:
+                        raise
+            else:
+                logger.debug(f"Reusing existing transaction in {func_name}")
             
             # Call the function with the connection as first arg
             result = func(conn, *args, **kwargs)
             
-            # Commit changes
-            conn.execute('COMMIT')
+            # Commit changes only if we started the transaction
+            if transaction_started:
+                try:
+                    conn.commit()
+                    logger.debug(f"Transaction committed in {func_name}")
+                except sqlite3.OperationalError as e:
+                    if "cannot commit" in str(e).lower():
+                        logger.warning(f"Cannot commit in {func_name}: {e}")
+                        # Transaction may have been auto-committed or rolled back
+                        pass
+                    else:
+                        raise
             
             return result
             
@@ -56,37 +91,46 @@ def db_transaction(func):
             error_msg = str(e).lower()
             logger.error(f"Database operational error in {func_name}: {e}")
             
-            try:
-                conn.execute('ROLLBACK')
-            except Exception as rollback_error:
-                logger.warning(f"Rollback failed in {func_name}: {rollback_error}")
+            # Only rollback if we started a transaction
+            if transaction_started:
+                try:
+                    conn.rollback()
+                    logger.debug(f"Transaction rolled back in {func_name}")
+                except Exception as rollback_error:
+                    logger.warning(f"Rollback failed in {func_name}: {rollback_error}")
             
             raise
             
         except sqlite3.IntegrityError as e:
-            try:
-                conn.execute('ROLLBACK')
-            except Exception:
-                pass
+            # Only rollback if we started a transaction
+            if transaction_started:
+                try:
+                    conn.rollback()
+                    logger.debug(f"Transaction rolled back in {func_name} due to integrity error")
+                except Exception:
+                    pass
             
             # Log the integrity error with detailed information
             logger.error(f"Database integrity error in {func_name}: {e}")
             raise
             
         except Exception as e:
-            try:
-                conn.execute('ROLLBACK')
-            except Exception:
-                pass
+            # Only rollback if we started a transaction
+            if transaction_started:
+                try:
+                    conn.rollback()
+                    logger.debug(f"Transaction rolled back in {func_name} due to exception")
+                except Exception:
+                    pass
             
             logger.error(f"Unexpected error in {func_name}: {e}")
             raise
             
         finally:
-            # Return the connection to the pool
-            if conn:
+            # Release the connection back to the pool
+            if conn is not None and conn != args[0] if args else None:
                 release_db_connection(conn)
-
+    
     return wrapper
 
 
@@ -100,9 +144,9 @@ def get_player(conn, player_id):
     return player
 
 
-def register_player(player_id, username, language="en"):
+@db_transaction
+def register_player(conn, player_id, username, language="en"):
     """Register a new player."""
-    conn = sqlite3.connect('belgrade_game.db')
     cursor = conn.cursor()
 
     # Check if player already exists
@@ -121,21 +165,19 @@ def register_player(player_id, username, language="en"):
             (player_id,)
         )
 
-        conn.commit()
+        return True
+    return False
 
-    conn.close()
 
-def set_player_name(player_id, character_name):
+@db_transaction
+def set_player_name(conn, player_id, character_name):
     """Set player's character name."""
-    conn = sqlite3.connect('belgrade_game.db')
     cursor = conn.cursor()
     cursor.execute(
         "UPDATE players SET character_name = ? WHERE player_id = ?",
         (character_name, player_id)
     )
-    conn.commit()
-    conn.close()
-
+    return cursor.rowcount > 0
 
 
 @db_transaction
@@ -145,6 +187,18 @@ def get_player_language(conn, player_id):
     cursor.execute("SELECT language FROM players WHERE player_id = ?", (player_id,))
     result = cursor.fetchone()
     return result[0] if result else "en"
+
+
+@db_transaction
+def get_player_name(conn, player_id):
+    """Get player's character name."""
+    cursor = conn.cursor()
+    cursor.execute("SELECT character_name, username FROM players WHERE player_id = ?", (player_id,))
+    result = cursor.fetchone()
+    if not result:
+        return None
+    # Return character_name if it exists, otherwise return username
+    return result[0] if result[0] else result[1]
 
 
 @db_transaction
@@ -512,8 +566,18 @@ def get_remaining_actions(conn, player_id):
 def use_action(conn, player_id, is_main_action):
     """Decrement action count when player uses an action."""
     cursor = conn.cursor()
+    now = datetime.datetime.now().isoformat()
 
     field = "main_actions_left" if is_main_action else "quick_actions_left"
+    timestamp_field = "last_main_action_refresh" if is_main_action else "last_quick_action_refresh"
+
+    # Check for last_main_action_refresh and last_quick_action_refresh columns
+    cursor.execute("PRAGMA table_info(players)")
+    columns = [info[1] for info in cursor.fetchall()]
+    
+    # Use legacy field if new columns don't exist
+    if 'last_main_action_refresh' not in columns or 'last_quick_action_refresh' not in columns:
+        timestamp_field = "last_action_refresh"
 
     # Check if player has actions left
     cursor.execute(
@@ -526,10 +590,10 @@ def use_action(conn, player_id, is_main_action):
         logger.warning(f"Player {player_id} has no {'main' if is_main_action else 'quick'} actions left")
         return False
 
-    # Update the appropriate action count
+    # Update the appropriate action count and timestamp
     cursor.execute(
-        f"UPDATE players SET {field} = {field} - 1 WHERE player_id = ? AND {field} > 0",
-        (player_id,)
+        f"UPDATE players SET {field} = {field} - 1, {timestamp_field} = ? WHERE player_id = ? AND {field} > 0",
+        (now, player_id)
     )
 
     result = cursor.rowcount > 0
@@ -543,57 +607,156 @@ def refresh_player_actions(conn, player_id):
     """Reset action counts and update refresh timestamp."""
     cursor = conn.cursor()
     now = datetime.datetime.now().isoformat()
-
-    # Check current action counts first
+    
+    # Check for last_main_action_refresh and last_quick_action_refresh columns
+    cursor.execute("PRAGMA table_info(players)")
+    columns = [info[1] for info in cursor.fetchall()]
+    
+    if 'last_main_action_refresh' not in columns or 'last_quick_action_refresh' not in columns:
+        # Old schema - check current action counts first
+        cursor.execute(
+            "SELECT main_actions_left, quick_actions_left, last_action_refresh FROM players WHERE player_id = ?",
+            (player_id,)
+        )
+        result = cursor.fetchone()
+        
+        if not result:
+            return False
+        
+        current_main, current_quick, last_refresh = result
+        
+        # If already at max, don't refresh
+        if current_main >= 3 and current_quick >= 5:
+            return False
+        
+        # Update to max values
+        cursor.execute(
+            "UPDATE players SET main_actions_left = 3, quick_actions_left = 5, last_action_refresh = ? WHERE player_id = ?",
+            (now, player_id)
+        )
+        
+        # Return True only if values were actually updated
+        return cursor.rowcount > 0
+    
+    # New schema with separate refresh timestamps
+    updated = False
+    
+    # Check and update main actions
     cursor.execute(
-        "SELECT main_actions_left, quick_actions_left, last_action_refresh FROM players WHERE player_id = ?",
+        "SELECT main_actions_left FROM players WHERE player_id = ?",
         (player_id,)
     )
-    result = cursor.fetchone()
-
-    if not result:
-        return False
-
-    current_main, current_quick, last_refresh = result
-
-    # If already at max, don't refresh
-    if current_main >= 1 and current_quick >= 2:
-        return False
-
-    # Update to max values
+    main_result = cursor.fetchone()
+    
+    if main_result and main_result[0] < 3:
+        cursor.execute(
+            "UPDATE players SET main_actions_left = 3, last_main_action_refresh = ? WHERE player_id = ?",
+            (now, player_id)
+        )
+        updated = True
+    
+    # Check and update quick actions
     cursor.execute(
-        "UPDATE players SET main_actions_left = 1, quick_actions_left = 2, last_action_refresh = ? WHERE player_id = ?",
-        (now, player_id)
+        "SELECT quick_actions_left FROM players WHERE player_id = ?",
+        (player_id,)
     )
-
-    # Return True only if values were actually updated
-    return cursor.rowcount > 0
+    quick_result = cursor.fetchone()
+    
+    if quick_result and quick_result[0] < 5:
+        cursor.execute(
+            "UPDATE players SET quick_actions_left = 5, last_quick_action_refresh = ? WHERE player_id = ?",
+            (now, player_id)
+        )
+        updated = True
+    
+    return updated
 
 
 @db_transaction
-def update_action_counts(conn, player_id):
-    """Reset action counts if it's been more than 3 hours since last refresh."""
+def update_action_counts(conn, player_id, main_action=True, quick_action=True):
+    """
+    Reset action counts if it's been more than 3 hours since last refresh.
+    
+    Args:
+        conn: Database connection
+        player_id: Player ID
+        main_action: Whether to check/update main actions
+        quick_action: Whether to check/update quick actions
+    
+    Returns:
+        bool: True if actions were refreshed, False otherwise
+    """
     cursor = conn.cursor()
-    cursor.execute(
-        "SELECT last_action_refresh FROM players WHERE player_id = ?",
-        (player_id,)
-    )
-    last_refresh = cursor.fetchone()
-
-    if not last_refresh:
-        return False
-
-    last_refresh_time = datetime.datetime.fromisoformat(last_refresh[0])
     now = datetime.datetime.now()
-
-    # If it's been more than 3 hours
-    if (now - last_refresh_time).total_seconds() > 3 * 60 * 60:
+    now_str = now.isoformat()
+    refresh_threshold = 3 * 60 * 60  # 3 hours in seconds
+    
+    # Check for last_main_action_refresh and last_quick_action_refresh columns
+    cursor.execute("PRAGMA table_info(players)")
+    columns = [info[1] for info in cursor.fetchall()]
+    
+    if 'last_main_action_refresh' not in columns or 'last_quick_action_refresh' not in columns:
+        # Old schema with only last_action_refresh
         cursor.execute(
-            "UPDATE players SET main_actions_left = 1, quick_actions_left = 2, last_action_refresh = ? WHERE player_id = ?",
-            (now.isoformat(), player_id)
+            "SELECT last_action_refresh FROM players WHERE player_id = ?",
+            (player_id,)
         )
-        return True
-    return False
+        last_refresh = cursor.fetchone()
+        
+        if not last_refresh:
+            return False
+        
+        last_refresh_time = datetime.datetime.fromisoformat(last_refresh[0])
+        
+        # If it's been more than 3 hours
+        if (now - last_refresh_time).total_seconds() > refresh_threshold:
+            cursor.execute(
+                "UPDATE players SET main_actions_left = 3, quick_actions_left = 5, last_action_refresh = ? WHERE player_id = ?",
+                (now_str, player_id)
+            )
+            return True
+        return False
+    
+    # New schema with separate refresh timestamps
+    refreshed = False
+    
+    if main_action:
+        cursor.execute(
+            "SELECT main_actions_left, last_main_action_refresh FROM players WHERE player_id = ?",
+            (player_id,)
+        )
+        main_result = cursor.fetchone()
+        
+        if main_result and main_result[1]:  # If we have a last_main_action_refresh value
+            last_main_refresh = datetime.datetime.fromisoformat(main_result[1])
+            
+            # If it's been more than 3 hours and not at max actions
+            if (now - last_main_refresh).total_seconds() > refresh_threshold and main_result[0] < 3:
+                cursor.execute(
+                    "UPDATE players SET main_actions_left = 3, last_main_action_refresh = ? WHERE player_id = ?",
+                    (now_str, player_id)
+                )
+                refreshed = True
+    
+    if quick_action:
+        cursor.execute(
+            "SELECT quick_actions_left, last_quick_action_refresh FROM players WHERE player_id = ?",
+            (player_id,)
+        )
+        quick_result = cursor.fetchone()
+        
+        if quick_result and quick_result[1]:  # If we have a last_quick_action_refresh value
+            last_quick_refresh = datetime.datetime.fromisoformat(quick_result[1])
+            
+            # If it's been more than 3 hours and not at max actions
+            if (now - last_quick_refresh).total_seconds() > refresh_threshold and quick_result[0] < 5:
+                cursor.execute(
+                    "UPDATE players SET quick_actions_left = 5, last_quick_action_refresh = ? WHERE player_id = ?",
+                    (now_str, player_id)
+                )
+                refreshed = True
+    
+    return refreshed
 
 
 @db_transaction
@@ -772,7 +935,7 @@ def join_coordinated_action(conn, player_id, action_id, resources_used):
     # Check if action exists and is still open
     cursor.execute(
         """
-        SELECT action_id, expires_at, status, initiator_id
+        SELECT action_id, expires_at, status, initiator_id, min_participants
         FROM coordinated_actions 
         WHERE action_id = ?
         """,
@@ -781,13 +944,13 @@ def join_coordinated_action(conn, player_id, action_id, resources_used):
     action = cursor.fetchone()
 
     if not action:
-        return False, "Action not found"
+        return False, "Action not found", False
 
-    action_id, expires_at_str, status, initiator_id = action
+    action_id, expires_at_str, status, initiator_id, min_participants = action
 
     # Don't allow initiator to join their own action
     if player_id == initiator_id:
-        return False, "You cannot join your own action"
+        return False, "You cannot join your own action", False
 
     # Check if player already joined this action
     cursor.execute(
@@ -799,14 +962,14 @@ def join_coordinated_action(conn, player_id, action_id, resources_used):
         (action_id, player_id)
     )
     if cursor.fetchone():
-        return False, "You have already joined this action"
+        return False, "You have already joined this action", False
 
     if status != 'open':
-        return False, "Action is no longer open"
+        return False, "Action is no longer open", False
 
     expires_at = datetime.datetime.fromisoformat(expires_at_str)
     if datetime.datetime.now() > expires_at:
-        return False, "Action has expired"
+        return False, "Action has expired", False
 
     # Add participant
     cursor.execute(
@@ -818,7 +981,25 @@ def join_coordinated_action(conn, player_id, action_id, resources_used):
         (action_id, player_id, json.dumps(resources_used), datetime.datetime.now().isoformat())
     )
 
-    return True, "Successfully joined action"
+    # Count current participants to see if we've reached the minimum
+    cursor.execute(
+        """
+        SELECT COUNT(*) 
+        FROM coordinated_action_participants
+        WHERE action_id = ?
+        """,
+        (action_id,)
+    )
+    participant_count = cursor.fetchone()[0]
+    
+    # Check if we have enough participants to complete the action
+    action_completed = False
+    if participant_count >= min_participants:
+        # Close the action and convert it to regular actions
+        close_coordinated_action(conn, action_id)
+        action_completed = True
+        
+    return True, "Successfully joined action", action_completed
 
 
 @db_transaction
@@ -956,3 +1137,35 @@ def get_coordinated_action_details(conn, action_id):
 def generate_id():
     """Generate a unique ID for database records."""
     return str(uuid.uuid4())
+
+def is_player_in_action(player_id, action_id):
+    """
+    Check if a player is already participating in a coordinated action.
+    
+    Args:
+        player_id (int): The ID of the player
+        action_id (int): The ID of the coordinated action
+        
+    Returns:
+        bool: True if the player is already participating, False otherwise
+    """
+    conn = sqlite3.connect('novi_sad_game.db')
+    cursor = conn.cursor()
+    
+    try:
+        cursor.execute(
+            """
+            SELECT player_id
+            FROM coordinated_action_participants
+            WHERE action_id = ? AND player_id = ?
+            """,
+            (action_id, player_id)
+        )
+        
+        result = cursor.fetchone()
+        return result is not None
+    except Exception as e:
+        logger.error(f"Error checking if player is in action: {e}")
+        return False
+    finally:
+        conn.close()

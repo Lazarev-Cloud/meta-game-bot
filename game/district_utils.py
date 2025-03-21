@@ -27,7 +27,7 @@ def calculate_action_success_rate(player_id: int, district_id: str, action_type:
         float: Success rate between 0.0 and 1.0
     """
     try:
-        conn = sqlite3.connect('belgrade_game.db')
+        conn = sqlite3.connect('novi_sad_game.db')
         cursor = conn.cursor()
 
         # Get player's control in district
@@ -233,7 +233,7 @@ def calculate_district_importance():
         Dict[str, float]: District importance scores (0.0-1.0)
     """
     try:
-        conn = sqlite3.connect('belgrade_game.db')
+        conn = sqlite3.connect('novi_sad_game.db')
         cursor = conn.cursor()
 
         # Get all districts
@@ -307,7 +307,7 @@ def generate_district_status_report(lang="en"):
     from languages import get_text
 
     try:
-        conn = sqlite3.connect('belgrade_game.db')
+        conn = sqlite3.connect('novi_sad_game.db')
         cursor = conn.cursor()
 
         # Get all districts with their details

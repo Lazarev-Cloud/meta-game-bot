@@ -13,7 +13,7 @@ def setup_districts():
     try:
         # Connect to the database
         print("Connecting to database...")
-        conn = sqlite3.connect('belgrade_game.db')
+        conn = sqlite3.connect('novi_sad_game.db')
         cursor = conn.cursor()
         
         # Check if districts table exists

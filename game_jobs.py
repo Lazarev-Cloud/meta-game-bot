@@ -1,262 +1,414 @@
-import logging
-import datetime
-import sqlite3
-import json
-from telegram.ext import ContextTypes
-from db.queries import db_transaction
-from db.utils import get_db_connection
-from languages import get_text
-from config import DB_PATH
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 
-# Configure logging
-logging.basicConfig(
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.INFO
-)
+"""
+Meta Game - Scheduled Jobs Module
+Handles all scheduled jobs and periodic tasks for the game
+"""
+
+import logging
+import random
+import sqlite3
+import datetime
+from telegram.ext import ContextTypes
+from game.districts import update_district_defenses
+
 logger = logging.getLogger(__name__)
 
-def get_next_cycle_time(is_morning=True):
-    """Calculate the next time for a morning (8:00) or evening (20:00) cycle."""
-    now = datetime.datetime.now()
-    target_hour = 8 if is_morning else 20
+async def distribute_resources(context: ContextTypes.DEFAULT_TYPE):
+    """
+    Scheduled job to distribute resources to players based on district control.
     
-    # Create a datetime for today at the target hour
-    target_time = now.replace(hour=target_hour, minute=0, second=0, microsecond=0)
-    
-    # If that time has already passed today, move to tomorrow
-    if now >= target_time:
-        target_time += datetime.timedelta(days=1)
-    
-    # Calculate seconds until that time
-    time_diff = (target_time - now).total_seconds()
-    return time_diff
-
-async def morning_cycle(context: ContextTypes.DEFAULT_TYPE):
-    """Run the morning cycle tasks: distributing resources, resetting actions."""
+    Args:
+        context: The context passed by the job queue
+    """
     try:
-        logging.info("Starting morning cycle...")
+        logger.info("Distributing resources to players...")
+        conn = sqlite3.connect('novi_sad_game.db')
+        cursor = conn.cursor()
         
-        # Notify users
-        await send_cycle_notification(context, is_morning=True)
+        # Get all players
+        cursor.execute("SELECT player_id FROM players")
+        players = cursor.fetchall()
         
-        # Reset player operations
-        reset_player_operations()
+        for player_id in [p[0] for p in players]:
+            # Get all districts where player has control
+            cursor.execute(
+                """
+                SELECT d.district_id, d.name, dc.control_points,
+                       d.influence_resource, d.resources_resource, d.information_resource, d.force_resource
+                FROM district_control dc
+                JOIN districts d ON dc.district_id = d.district_id
+                WHERE dc.player_id = ? AND dc.control_points >= 10
+                """,
+                (player_id,)
+            )
+            
+            controlled_districts = cursor.fetchall()
+            
+            if not controlled_districts:
+                logger.info(f"Player {player_id} has no districts with sufficient control")
+                continue
+                
+            # Calculate resources from all controlled districts
+            total_influence = 0
+            total_resources = 0
+            total_information = 0
+            total_force = 0
+            
+            for district in controlled_districts:
+                _, _, control_points, influence, resources, information, force = district
+                
+                # Calculate percentage of control (max 100%)
+                control_percentage = min(1.0, control_points / 100)
+                
+                # Add resources based on control percentage
+                total_influence += round(influence * control_percentage)
+                total_resources += round(resources * control_percentage)
+                total_information += round(information * control_percentage)
+                total_force += round(force * control_percentage)
+            
+            # Update player resources
+            if total_influence > 0:
+                cursor.execute(
+                    """
+                    INSERT INTO resources (player_id, resource_type, amount)
+                    VALUES (?, 'influence', ?)
+                    ON CONFLICT(player_id, resource_type) 
+                    DO UPDATE SET amount = amount + ?
+                    """,
+                    (player_id, total_influence, total_influence)
+                )
+                
+            if total_resources > 0:
+                cursor.execute(
+                    """
+                    INSERT INTO resources (player_id, resource_type, amount)
+                    VALUES (?, 'resources', ?)
+                    ON CONFLICT(player_id, resource_type) 
+                    DO UPDATE SET amount = amount + ?
+                    """,
+                    (player_id, total_resources, total_resources)
+                )
+                
+            if total_information > 0:
+                cursor.execute(
+                    """
+                    INSERT INTO resources (player_id, resource_type, amount)
+                    VALUES (?, 'information', ?)
+                    ON CONFLICT(player_id, resource_type) 
+                    DO UPDATE SET amount = amount + ?
+                    """,
+                    (player_id, total_information, total_information)
+                )
+                
+            if total_force > 0:
+                cursor.execute(
+                    """
+                    INSERT INTO resources (player_id, resource_type, amount)
+                    VALUES (?, 'force', ?)
+                    ON CONFLICT(player_id, resource_type) 
+                    DO UPDATE SET amount = amount + ?
+                    """,
+                    (player_id, total_force, total_force)
+                )
+            
+            # Log the distribution
+            logger.info(f"Distributed resources to player {player_id}: I:{total_influence} R:{total_resources} F:{total_information} P:{total_force}")
+            
+            # Notify player if enabled
+            if context and hasattr(context, 'bot'):
+                try:
+                    # Check if player has notification preferences and has enabled resource notifications
+                    cursor.execute(
+                        """
+                        SELECT username FROM players WHERE player_id = ?
+                        """,
+                        (player_id,)
+                    )
+                    player_result = cursor.fetchone()
+                    if player_result:
+                        district_names = ', '.join([d[1] for d in controlled_districts])
+                        message = f"You've received resources from your controlled districts ({district_names}):\n"
+                        message += f"• Influence: +{total_influence}\n"
+                        message += f"• Resources: +{total_resources}\n"
+                        message += f"• Information: +{total_information}\n"
+                        message += f"• Force: +{total_force}"
+                        
+                        await context.bot.send_message(
+                            chat_id=player_id,
+                            text=message
+                        )
+                except Exception as e:
+                    logger.error(f"Failed to send resource notification to player {player_id}: {e}")
         
-        # Distribute resources
-        distribute_resources()
+        conn.commit()
+        conn.close()
+        logger.info("Resource distribution complete")
         
-        # Create news about the cycle
-        create_cycle_news(is_morning=True)
-        
-        logging.info("Morning cycle completed successfully")
     except Exception as e:
-        logging.error(f"Error during morning cycle: {e}")
+        logger.error(f"Error distributing resources: {e}")
 
-async def evening_cycle(context: ContextTypes.DEFAULT_TYPE):
-    """Run the evening cycle tasks: distributing resources, resetting actions."""
+async def process_completed_actions(context: ContextTypes.DEFAULT_TYPE):
+    """
+    Process all completed coordinated actions.
+    
+    Args:
+        context: The context passed by the job queue
+    """
     try:
-        logging.info("Starting evening cycle...")
+        logger.info("Processing completed coordinated actions...")
+        conn = sqlite3.connect('novi_sad_game.db')
+        cursor = conn.cursor()
         
-        # Notify users
-        await send_cycle_notification(context, is_morning=False)
+        # Check if processed_at column exists in coordinated_actions table
+        try:
+            cursor.execute(
+                """
+                SELECT action_id
+                FROM coordinated_actions
+                WHERE status = 'complete' AND processed_at IS NULL
+                """
+            )
+            
+            actions = cursor.fetchall()
+        except sqlite3.OperationalError as e:
+            if "no such column: processed_at" in str(e):
+                # Column doesn't exist yet, the migration hasn't run
+                # Add the column if it doesn't exist
+                logger.info("Adding processed_at column to coordinated_actions table...")
+                try:
+                    cursor.execute("ALTER TABLE coordinated_actions ADD COLUMN processed_at TEXT")
+                    conn.commit()
+                    logger.info("Added processed_at column")
+                    
+                    # Now try to fetch completed actions again
+                    cursor.execute(
+                        """
+                        SELECT action_id
+                        FROM coordinated_actions
+                        WHERE status = 'complete'
+                        """
+                    )
+                    
+                    actions = cursor.fetchall()
+                except Exception as add_col_err:
+                    logger.error(f"Error adding processed_at column: {add_col_err}")
+                    conn.close()
+                    return
+            else:
+                # Some other SQLite error occurred
+                raise
         
-        # Reset player operations
-        reset_player_operations()
+        conn.close()
         
-        # Distribute resources
-        distribute_resources()
+        from game.actions import process_coordinated_action
         
-        # Create news about the cycle
-        create_cycle_news(is_morning=False)
-        
-        logging.info("Evening cycle completed successfully")
+        for action_id, in actions:
+            logger.info(f"Processing coordinated action {action_id}")
+            success, message = await process_coordinated_action(action_id)
+            
+            if success and context and hasattr(context, 'bot'):
+                try:
+                    # Notify participants
+                    conn = sqlite3.connect('novi_sad_game.db')
+                    cursor = conn.cursor()
+                    
+                    cursor.execute(
+                        """
+                        SELECT p.player_id 
+                        FROM coordinated_action_participants p
+                        WHERE p.action_id = ?
+                        """,
+                        (action_id,)
+                    )
+                    
+                    participants = cursor.fetchall()
+                    conn.close()
+                    
+                    for player_id, in participants:
+                        await context.bot.send_message(
+                            chat_id=player_id,
+                            text=message
+                        )
+                except Exception as e:
+                    logger.error(f"Error notifying participants for action {action_id}: {e}")
+            
+            if not success:
+                logger.error(f"Failed to process coordinated action {action_id}: {message}")
     except Exception as e:
-        logging.error(f"Error during evening cycle: {e}")
+        logger.error(f"Error processing completed actions: {e}")
 
 async def cleanup_expired_actions(context: ContextTypes.DEFAULT_TYPE):
-    """Clean up expired coordinated actions."""
-    try:
-        logging.info("Cleaning up expired coordinated actions...")
-        
-        # Get current time
-        now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        
-        # Connect to database
-        with get_db_connection() as conn:
-            cursor = conn.cursor()
-            
-            # Get expired actions
-            cursor.execute(
-                "SELECT id, initiator_id FROM coordinated_actions WHERE expires_at < ?", 
-                (now,)
-            )
-            expired_actions = cursor.fetchall()
-            
-            if expired_actions:
-                # Delete expired actions
-                action_ids = [action[0] for action in expired_actions]
-                action_ids_str = ','.join(['?'] * len(action_ids))
-                cursor.execute(
-                    f"DELETE FROM coordinated_actions WHERE id IN ({action_ids_str})",
-                    action_ids
-                )
-                
-                # Log the cleanup
-                logging.info(f"Cleaned up {len(expired_actions)} expired coordinated actions")
-                
-                # Notify initiators
-                for action_id, initiator_id in expired_actions:
-                    try:
-                        # Get player language
-                        cursor.execute("SELECT lang FROM players WHERE id = ?", (initiator_id,))
-                        result = cursor.fetchone()
-                        if result:
-                            lang = result[0]
-                            # Send notification
-                            await context.bot.send_message(
-                                chat_id=initiator_id,
-                                text=get_text('action_expired', lang, default="Your coordinated action has expired.")
-                            )
-                    except Exception as e:
-                        logging.error(f"Failed to notify player {initiator_id} about expired action: {e}")
-            else:
-                logging.info("No expired coordinated actions found")
-                
-        conn.commit()
-    except Exception as e:
-        logging.error(f"Error during cleanup of expired actions: {e}")
-
-async def update_district_defenses(context: ContextTypes.DEFAULT_TYPE):
-    """Update district defense levels based on recent activity."""
-    try:
-        logging.info("Updating district defense levels...")
-        
-        # Connect to database
-        with get_db_connection() as conn:
-            cursor = conn.cursor()
-            
-            # Get all districts
-            cursor.execute("SELECT id FROM districts")
-            districts = cursor.fetchall()
-            
-            for district_id in [d[0] for d in districts]:
-                # Check if district has defense entry
-                cursor.execute(
-                    "SELECT defense_level FROM district_defense WHERE district_id = ?", 
-                    (district_id,)
-                )
-                result = cursor.fetchone()
-                
-                if result:
-                    # District has defense entry, update it
-                    current_level = result[0]
-                    # Natural decay of defense levels over time (reduce by 5%)
-                    new_level = max(0, int(current_level * 0.95))
-                    cursor.execute(
-                        "UPDATE district_defense SET defense_level = ?, last_updated = CURRENT_TIMESTAMP WHERE district_id = ?",
-                        (new_level, district_id)
-                    )
-                else:
-                    # District doesn't have defense entry, create it
-                    cursor.execute(
-                        "INSERT INTO district_defense (district_id, defense_level) VALUES (?, 0)",
-                        (district_id,)
-                    )
-            
-            conn.commit()
-            logging.info("District defense levels updated")
-    except Exception as e:
-        logging.error(f"Error updating district defense levels: {e}")
-
-@db_transaction
-def reset_player_operations(cursor):
-    """Reset the operations_left counter for all players."""
-    cursor.execute("UPDATE players SET operations_left = 3")
-    logging.info("Reset operations for all players")
-
-@db_transaction
-def distribute_resources(cursor):
-    """Distribute resources to players based on district control."""
-    # Get all players
-    cursor.execute("SELECT id FROM players")
-    players = cursor.fetchall()
+    """
+    Clean up expired coordinated actions.
     
-    for player_id in [p[0] for p in players]:
-        # Count controlled districts
-        cursor.execute("SELECT COUNT(*) FROM districts WHERE controller_id = ?", (player_id,))
-        district_count = cursor.fetchone()[0]
+    Args:
+        context: The context passed by the job queue
+    """
+    try:
+        logger.info("Cleaning up expired coordinated actions...")
+        conn = sqlite3.connect('novi_sad_game.db')
+        cursor = conn.cursor()
         
-        # Base resource amount
-        base_amount = 10
+        now = datetime.datetime.now().isoformat()
         
-        # Calculate resource amounts based on district control
-        # More districts = more resources
-        influence = base_amount + (district_count * 5)
-        surveillance = base_amount + (district_count * 4)
-        force = base_amount + (district_count * 3)
-        wealth = base_amount + (district_count * 6)
-        
-        # Update player resources
+        # Find expired actions still in pending status
         cursor.execute(
             """
-            UPDATE players 
-            SET influence = influence + ?, 
-                surveillance = surveillance + ?, 
-                force = force + ?, 
-                wealth = wealth + ?
-            WHERE id = ?
-            """, 
-            (influence, surveillance, force, wealth, player_id)
+            SELECT action_id, initiator_id, district_id, action_type
+            FROM coordinated_actions
+            WHERE status = 'pending' AND expires_at < ?
+            """,
+            (now,)
         )
         
-        logging.info(f"Distributed resources to player {player_id}: I:{influence} S:{surveillance} F:{force} W:{wealth}")
-
-@db_transaction
-def create_cycle_news(cursor, is_morning=True):
-    """Create a news entry for the game cycle."""
-    cycle_type = "Morning" if is_morning else "Evening"
-    timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    
-    # Create news entry
-    cursor.execute(
-        """
-        INSERT INTO news (timestamp, title, content) 
-        VALUES (?, ?, ?)
-        """,
-        (
-            timestamp, 
-            f"{cycle_type} Cycle", 
-            f"The {cycle_type.lower()} cycle has begun. All players have received resources and operations have been reset."
+        expired_actions = cursor.fetchall()
+        
+        # Update status to expired
+        cursor.execute(
+            """
+            UPDATE coordinated_actions
+            SET status = 'expired'
+            WHERE status = 'pending' AND expires_at < ?
+            """,
+            (now,)
         )
-    )
-    
-    logging.info(f"Created news entry for {cycle_type.lower()} cycle")
-
-async def send_cycle_notification(context: ContextTypes.DEFAULT_TYPE, is_morning=True):
-    """Send notifications to all players about the new cycle."""
-    try:
-        # Connect to database
-        with get_db_connection() as conn:
-            cursor = conn.cursor()
-            
-            # Get all players
-            cursor.execute("SELECT id, lang FROM players")
-            players = cursor.fetchall()
-            
-            cycle_type = "morning" if is_morning else "evening"
-            
-            # Send notifications
-            for player_id, lang in players:
+        
+        conn.commit()
+        conn.close()
+        
+        # Notify initiators if applicable
+        if context and hasattr(context, 'bot'):
+            for action_id, initiator_id, district_id, action_type in expired_actions:
                 try:
+                    conn = sqlite3.connect('novi_sad_game.db')
+                    cursor = conn.cursor()
+                    
+                    # Get district name
+                    cursor.execute("SELECT name FROM districts WHERE district_id = ?", (district_id,))
+                    district_name = cursor.fetchone()[0]
+                    
+                    conn.close()
+                    
+                    message = f"Your coordinated action ({action_type}) in {district_name} has expired without reaching the minimum number of participants."
+                    
                     await context.bot.send_message(
-                        chat_id=player_id,
-                        text=get_text(
-                            f'cycle_{cycle_type}', 
-                            lang, 
-                            default=f"A new {cycle_type} cycle has begun! Your resources have been replenished and operations reset."
-                        )
+                        chat_id=initiator_id,
+                        text=message
                     )
                 except Exception as e:
-                    logging.error(f"Failed to send cycle notification to player {player_id}: {e}")
+                    logger.error(f"Error notifying initiator {initiator_id} about expired action {action_id}: {e}")
+        
+        logger.info(f"Cleaned up {len(expired_actions)} expired coordinated actions")
+        
     except Exception as e:
-        logging.error(f"Error sending cycle notifications: {e}") 
+        logger.error(f"Error cleaning up expired actions: {e}")
+
+async def generate_news(context: ContextTypes.DEFAULT_TYPE):
+    """
+    Generate news items about game events.
+    
+    Args:
+        context: The context passed by the job queue
+    """
+    try:
+        logger.info("Generating news items...")
+        conn = sqlite3.connect('novi_sad_game.db')
+        cursor = conn.cursor()
+        
+        # Get top districts by activity
+        cursor.execute(
+            """
+            SELECT d.district_id, d.name, COUNT(a.action_id) as activity
+            FROM districts d
+            LEFT JOIN actions a ON d.district_id = a.district_id AND a.timestamp > datetime('now', '-24 hours')
+            GROUP BY d.district_id
+            ORDER BY activity DESC
+            LIMIT 3
+            """
+        )
+        
+        active_districts = cursor.fetchall()
+        
+        # Generate news based on district activity
+        news_items = []
+        for district_id, district_name, activity in active_districts:
+            if activity > 5:
+                news_items.append((
+                    f"Unrest in {district_name}",
+                    f"Reports indicate increased political activity in {district_name} as various factions vie for control. Local residents express concern about the growing tensions.",
+                    district_id
+                ))
+            elif activity > 0:
+                news_items.append((
+                    f"Strategic Movements in {district_name}",
+                    f"Political operatives have been observed making moves in {district_name}. Analysts suggest this could be the beginning of a larger power play.",
+                    district_id
+                ))
+        
+        # Get districts with recent control changes
+        cursor.execute(
+            """
+            SELECT d.district_id, d.name, p.username, dc.control_points
+            FROM district_control dc
+            JOIN districts d ON dc.district_id = d.district_id
+            JOIN players p ON dc.player_id = p.player_id
+            WHERE dc.control_points >= 60
+            ORDER BY dc.control_points DESC
+            LIMIT 2
+            """
+        )
+        
+        controlled_districts = cursor.fetchall()
+        
+        # Generate news about district control
+        for district_id, district_name, player_name, control in controlled_districts:
+            news_items.append((
+                f"{player_name} Strengthens Grip on {district_name}",
+                f"{player_name} now maintains firm control over {district_name} with {control} control points. Local officials appear to be following their directives.",
+                district_id
+            ))
+        
+        # Insert news items
+        now = datetime.datetime.now().isoformat()
+        for title, content, district_id in news_items:
+            cursor.execute(
+                """
+                INSERT INTO news (title, content, timestamp, is_public)
+                VALUES (?, ?, ?, 1)
+                """,
+                (title, content, now)
+            )
+        
+        conn.commit()
+        conn.close()
+        
+        logger.info(f"Generated {len(news_items)} news items")
+        
+    except Exception as e:
+        logger.error(f"Error generating news: {e}")
+
+def schedule_jobs(job_queue):
+    """
+    Schedule all recurring jobs.
+    
+    Args:
+        job_queue: The job queue to schedule jobs on
+    """
+    # Resource distribution - every 12 hours
+    job_queue.run_repeating(distribute_resources, interval=43200, first=300)
+    
+    # Update district defenses - daily
+    job_queue.run_repeating(update_district_defenses, interval=86400, first=300)
+    
+    # Process completed coordinated actions - every hour
+    job_queue.run_repeating(process_completed_actions, interval=3600, first=600)
+    
+    # Clean up expired actions - every 3 hours
+    job_queue.run_repeating(cleanup_expired_actions, interval=10800, first=900)
+    
+    # Generate news - every 6 hours
+    job_queue.run_repeating(generate_news, interval=21600, first=1200)
+    
+    logger.info("All game jobs scheduled") 

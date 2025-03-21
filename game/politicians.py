@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 def get_politician_by_name(name):
     """Find a politician by name (case-insensitive partial match)."""
     try:
-        conn = sqlite3.connect('belgrade_game.db')
+        conn = sqlite3.connect('novi_sad_game.db')
         cursor = conn.cursor()
         cursor.execute(
             "SELECT * FROM politicians WHERE name LIKE ? ORDER BY is_international, name",
@@ -29,7 +29,7 @@ def get_politician_by_name(name):
 def get_politician_by_id(politician_id):
     """Find a politician by ID."""
     try:
-        conn = sqlite3.connect('belgrade_game.db')
+        conn = sqlite3.connect('novi_sad_game.db')
         cursor = conn.cursor()
         cursor.execute(
             "SELECT politician_id, name, role, ideology_score, district_id, influence, friendliness, is_international, description FROM politicians WHERE politician_id = ?",
@@ -63,7 +63,7 @@ def get_politician_by_id(politician_id):
 def get_politician_relationship(politician_id, player_id):
     """Get the relationship status between a politician and a player."""
     try:
-        conn = sqlite3.connect('belgrade_game.db')
+        conn = sqlite3.connect('novi_sad_game.db')
         cursor = conn.cursor()
 
         # Check if a relationship record exists
@@ -119,7 +119,7 @@ def format_politician_info(politician_id, player_id, lang="en"):
 
     # Get player's ideology
     try:
-        conn = sqlite3.connect('belgrade_game.db')
+        conn = sqlite3.connect('novi_sad_game.db')
         cursor = conn.cursor()
         cursor.execute("SELECT ideology_score FROM players WHERE player_id = ?", (player_id,))
         player_record = cursor.fetchone()
@@ -145,7 +145,7 @@ def format_politician_info(politician_id, player_id, lang="en"):
     district_name = ""
     if district_id:
         try:
-            conn = sqlite3.connect('belgrade_game.db')
+            conn = sqlite3.connect('novi_sad_game.db')
             cursor = conn.cursor()
             cursor.execute("SELECT name FROM districts WHERE district_id = ?", (district_id,))
             district_record = cursor.fetchone()
@@ -190,7 +190,13 @@ def format_politicians_list(is_international=False, lang="en"):
     politicians_text = [f"*{title}*\n"]
 
     for politician in politicians:
-        pol_id, name, role, ideology, district_id, influence, friendliness, _, _ = politician
+        # Handle the tuple properly based on its length
+        if len(politician) >= 9:
+            pol_id, name, role, ideology, district_id, influence, friendliness, is_international, description = politician
+        else:
+            # Fallback for fewer columns
+            pol_id, name, role, ideology, district_id, influence, friendliness, is_international = politician
+            description = ""
 
         # Format ideology
         ideology_desc = format_ideology(ideology, lang)
@@ -207,7 +213,7 @@ def format_politicians_list(is_international=False, lang="en"):
 def get_active_politicians(district_id=None):
     """Get active politicians, optionally filtered by district."""
     try:
-        conn = sqlite3.connect('belgrade_game.db')
+        conn = sqlite3.connect('novi_sad_game.db')
         cursor = conn.cursor()
 
         if district_id:

@@ -10,6 +10,9 @@ import logging
 import sys
 import traceback
 import sqlite3
+import os
+import argparse
+import time
 from contextlib import contextmanager
 from telegram import Update
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler
@@ -18,8 +21,7 @@ from languages_update import init_language_support
 from config import TOKEN, ADMIN_IDS
 from db.schema import setup_database
 from error_handlers import error_handler
-from game.actions import get_next_cycle_time, morning_cycle, evening_cycle, cleanup_expired_actions
-from game.districts import update_district_defenses
+from game_jobs import schedule_jobs
 
 # Enable logging
 logging.basicConfig(
@@ -33,6 +35,15 @@ logging.basicConfig(
 
 logger = logging.getLogger(__name__)
 
+# Parse command-line arguments
+parser = argparse.ArgumentParser(description="Run the Belgrade Game Bot")
+parser.add_argument("--instance-id", type=str, help="Unique instance ID to avoid conflicts")
+args, unknown = parser.parse_known_args()
+
+# Set or get instance ID
+INSTANCE_ID = args.instance_id or os.environ.get('BOT_INSTANCE_ID') or str(int(time.time()))
+logger.info(f"Running with instance ID: {INSTANCE_ID}")
+
 @contextmanager
 def get_db_connection():
     """
@@ -41,7 +52,7 @@ def get_db_connection():
     """
     conn = None
     try:
-        conn = sqlite3.connect('belgrade_game.db')
+        conn = sqlite3.connect('novi_sad_game.db')
         yield conn
     except Exception as e:
         logger.error(f"Database connection error: {e}")
@@ -55,6 +66,40 @@ def main():
     """Start the bot."""
     # Log startup message
     logging.info("Starting Belgrade Game Bot...")
+    logging.info(f"Bot instance ID: {INSTANCE_ID}")
+    
+    # Check if this is the first run or a restart
+    is_restart = os.environ.get('BOT_RESTART_COUNT', '0') != '0'
+    if is_restart:
+        logging.info(f"This is restart #{os.environ.get('BOT_RESTART_COUNT')}") 
+
+    # Attempt to terminate any competing bot instances
+    try:
+        from error_handlers import find_and_kill_bot_processes
+        killed_count = find_and_kill_bot_processes(except_instance_id=INSTANCE_ID)
+        if killed_count > 0:
+            logging.info(f"Terminated {killed_count} competing bot instances")
+            # Wait to ensure clean termination
+            time.sleep(3) 
+    except Exception as e:
+        logging.error(f"Error killing competing processes: {e}")
+    
+    # Reset any webhook connections from previous runs
+    try:
+        import requests
+        logging.info("Resetting Telegram webhook...")
+        response = requests.post(
+            f"https://api.telegram.org/bot{TOKEN}/deleteWebhook",
+            params={"drop_pending_updates": True}
+        )
+        if response.status_code == 200:
+            logging.info("Webhook reset successful")
+        else:
+            logging.warning(f"Webhook reset returned status code {response.status_code}")
+        # Give the Telegram API a moment
+        time.sleep(2)
+    except Exception as e:
+        logging.error(f"Error resetting webhook: {e}")
     
     # First initialize language system
     try:
@@ -87,23 +132,43 @@ def main():
     # Add the error handler
     application.add_error_handler(error_handler)
     
-    # Set up job queue for scheduled tasks
-    job_queue = application.job_queue
+    # Set up job queue for scheduled tasks and register all game jobs
+    schedule_jobs(application.job_queue)
     
-    # Run jobs every 12 hours (morning and evening cycles)
-    job_queue.run_repeating(morning_cycle, interval=43200, first=get_next_cycle_time(is_morning=True))
-    job_queue.run_repeating(evening_cycle, interval=43200, first=get_next_cycle_time(is_morning=False))
+    # Log instance information
+    logger.info(f"Bot instance {INSTANCE_ID} starting polling")
     
-    # Clean up expired coordinated actions every hour
-    job_queue.run_repeating(cleanup_expired_actions, interval=3600, first=10)
+    # Run the bot until the user presses Ctrl-C or an error occurs
+    # Use instance-specific parameters to avoid conflicts
+    try:
+        application.run_polling(
+            drop_pending_updates=True,
+            allowed_updates=["message", "callback_query", "chat_member"],
+            pool_timeout=30.0,
+            connect_timeout=30.0,
+            read_timeout=30.0,
+            write_timeout=30.0
+        )
+    except Exception as e:
+        if "terminated by other getUpdates request" in str(e).lower() or "conflict" in str(e).lower():
+            logging.error(f"Telegram conflict detected: {e}")
+            # Increment restart counter
+            os.environ['BOT_RESTART_COUNT'] = str(int(os.environ.get('BOT_RESTART_COUNT', '0')) + 1)
+            # Clean up connections
+            from db.utils import close_all_connections
+            close_all_connections()
+            # Exit with error code to enable restart
+            sys.exit(1)
+        else:
+            logging.error(f"Error in main application: {e}")
+            raise
     
-    # Update district defense values every day
-    job_queue.run_repeating(update_district_defenses, interval=86400, first=300)
+    logging.info(f"Bot instance {INSTANCE_ID} stopped gracefully.")
     
-    # Run the bot until the user presses Ctrl-C
-    application.run_polling()
-    
-    logging.info("Bot stopped.")
+    # Clean up before exit
+    from db.utils import close_all_connections
+    close_all_connections()
+    logging.info("Database connections closed.")
 
 
 def validate_system():
@@ -200,7 +265,7 @@ def validate_and_fix_database_schema():
     """Check the database schema and fix if necessary."""
     try:
         logging.info("Validating database schema...")
-        conn = sqlite3.connect('belgrade_game.db')
+        conn = sqlite3.connect('novi_sad_game.db')
         cursor = conn.cursor()
 
         # Create a versions table if it doesn't exist to track schema versions
@@ -215,6 +280,7 @@ def validate_and_fix_database_schema():
         cursor.execute("SELECT MAX(version) FROM db_version")
         result = cursor.fetchone()
         current_version = result[0] if result[0] is not None else 0
+        max_version = current_version
         logging.info(f"Current database schema version: {current_version}")
 
         # Define migrations as a sequence of version upgrades
@@ -303,6 +369,33 @@ def validate_and_fix_database_schema():
                 '''
             ]
         }
+
+        # Add a new migration for processed_at column
+        if max_version is None or current_version < 5:
+            migrations[5] = [
+                '''
+                ALTER TABLE coordinated_actions ADD COLUMN processed_at TEXT
+                '''
+            ]
+            
+            # Apply this migration
+            if current_version < 5:
+                logging.info("Applying migration to version 5...")
+                try:
+                    for query in migrations[5]:
+                        logging.info(f"Executing: {query}")
+                        cursor.execute(query)
+                        logging.info(f"Successfully executed: {query[:40]}...")
+                    
+                    # Update version in database
+                    cursor.execute("INSERT INTO db_version (version) VALUES (?)", (5,))
+                    conn.commit()
+                    logging.info("Database upgraded to version 5")
+                    current_version = 5
+                except Exception as e:
+                    conn.rollback()
+                    logging.error(f"Migration to version 5 failed: {e}")
+                    # Continue with other checks
 
         # Apply migrations sequentially
         for version in sorted(migrations.keys()):

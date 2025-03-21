@@ -1,1474 +1,1252 @@
-import datetime
-import json
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+"""
+Meta Game - Actions Module
+Handles player actions and their effects
+"""
+
 import logging
 import random
 import sqlite3
+import datetime
+from datetime import timedelta
+from telegram import Update
 from telegram.ext import ContextTypes
-from db.queries import (
-    update_district_control, distribute_district_resources,
-    get_district_control, get_district_info, add_news, get_news, get_player_resources, get_player_language,
-    get_player_districts, refresh_player_actions, db_transaction, update_resources, spend_resources, update_control_points,
-    get_player_resource_counts
-)
-from db.utils import get_db_connection, release_db_connection
-from languages import get_text, get_cycle_name, get_action_name, get_resource_name
-from bot.politicians import (
-    get_random_international_politicians,
-    process_international_politician_action
-)
+import json
 
 logger = logging.getLogger(__name__)
 
-# Main actions (strategic, major impact)
-ACTION_INFLUENCE = "influence"
+# Resource types
+RESOURCE_TYPES = ["influence", "resources", "information", "force"]
+
+# Action Type Constants
 ACTION_ATTACK = "attack"
-ACTION_DEFENSE = "defense"
+ACTION_DEFENSE = "defend"
 
-# Quick actions (tactical, minor impact)
-QUICK_ACTION_RECON = "recon"
-QUICK_ACTION_INFO = "info"
-QUICK_ACTION_SUPPORT = "support"
-
-# Group actions by type for validation
-MAIN_ACTIONS = [ACTION_INFLUENCE, ACTION_ATTACK, ACTION_DEFENSE]
-QUICK_ACTIONS = [QUICK_ACTION_RECON, QUICK_ACTION_INFO, QUICK_ACTION_SUPPORT]
-
-# Action cost definitions - Map each action type to its typical resource costs
-ACTION_COSTS = {
-    # Main actions typically cost 2-3 resources
-    ACTION_INFLUENCE: {
-        "default": {"influence": 2},
-        "alternatives": [
-            {"influence": 1, "resources": 1},
-            {"influence": 1, "information": 1}
-        ]
-    },
-    ACTION_ATTACK: {
-        "default": {"force": 2},
-        "alternatives": [
-            {"force": 1, "influence": 1},
-            {"force": 1, "information": 1}
-        ]
-    },
-    ACTION_DEFENSE: {
-        "default": {"force": 2},
-        "alternatives": [
-            {"force": 1, "resources": 1},
-            {"influence": 1, "force": 1}
-        ]
-    },
-
-    # Quick actions typically cost 1 resource
-    QUICK_ACTION_RECON: {
-        "default": {"information": 1},
-        "alternatives": []
-    },
-    QUICK_ACTION_INFO: {
-        "default": {"information": 1},
-        "alternatives": []
-    },
-    QUICK_ACTION_SUPPORT: {
-        "default": {"influence": 1},
-        "alternatives": []
-    }
-}
-
-# Action effects - Define the possible outcomes for each action type
-ACTION_EFFECTS = {
-    # Main actions have significant effects
-    ACTION_INFLUENCE: {
-        "success": {"control_change": 10, "message": "influence_success"},
-        "partial": {"control_change": 5, "message": "influence_partial"},
-        "failure": {"control_change": 0, "message": "influence_failure"}
-    },
-    ACTION_ATTACK: {
-        "success": {"target_control_change": -10, "attacker_control_change": 10, "message": "attack_success"},
-        "partial": {"target_control_change": -5, "attacker_control_change": 5, "message": "attack_partial"},
-        "failure": {"target_control_change": 0, "attacker_control_change": 0, "message": "attack_failure"}
-    },
-    ACTION_DEFENSE: {
-        "success": {"defense_bonus": 10, "message": "defense_success"},
-        "partial": {"defense_bonus": 5, "message": "defense_partial"},
-        "failure": {"defense_bonus": 0, "message": "defense_failure"}
-    },
-
-    # Quick actions have limited effects
-    QUICK_ACTION_RECON: {
-        "success": {"message": "recon_success", "reveals_control": True, "reveals_plans": True}
-    },
-    QUICK_ACTION_INFO: {
-        "success": {"message": "info_success", "news_published": True}
-    },
-    QUICK_ACTION_SUPPORT: {
-        "success": {"control_change": 5, "message": "support_success"}
-    }
-}
-
-# Game cycle times
-MORNING_CYCLE_START = datetime.time(6, 0)  # 6:00 AM
-MORNING_CYCLE_DEADLINE = datetime.time(12, 0)  # 12:00 PM
-MORNING_CYCLE_RESULTS = datetime.time(8, 0)  # 8:00 AM
-EVENING_CYCLE_START = datetime.time(13, 1)  # 1:01 PM
-EVENING_CYCLE_DEADLINE = datetime.time(18, 0)  # 6:00 PM
-EVENING_CYCLE_RESULTS = datetime.time(19, 0)  # 7:00 PM
-
-
-async def process_game_cycle(context):
-    """Process a full game cycle."""
-    try:
-        logger.info("Processing game cycle...")
-        bot = context.bot
-        
-        # Update district control based on control points
-        update_district_control()
-        
-        # Distribute resources to controlling players
-        distribute_district_resources()
-        
-        # Process international politician actions
-        process_international_politician_events()
-        
-        # Add news about the cycle completion
-        now = datetime.datetime.now()
-        current_time = now.time()
-        if current_time.hour < 12:
-            cycle = "morning"
-        else:
-            cycle = "evening"
-            
-        cycle_name = get_cycle_name(cycle, "en")
-        
-        add_news(
-            title=f"{cycle_name} Cycle Completed",
-            content=f"The {cycle_name.lower()} cycle has been completed. Resources have been distributed to controlling players.",
-            is_public=True,
-        )
-        
-        # Refresh player actions
-        refresh_player_actions()
-        
-        logger.info("Game cycle processed successfully")
-        return True
-    except Exception as e:
-        logger.error(f"Error processing game cycle: {e}")
-        return False
-
-
-async def process_game_cycle(context):
-    """Process actions and update game state at the end of a cycle."""
-    now = datetime.datetime.now().time()
-
-    # Determine which cycle just ended
-    if now.hour == MORNING_CYCLE_RESULTS.hour and now.minute == MORNING_CYCLE_RESULTS.minute:
-        cycle = "morning"
-    elif now.hour == EVENING_CYCLE_RESULTS.hour and now.minute == EVENING_CYCLE_RESULTS.minute:
-        cycle = "evening"
-    else:
-        # If called at an unexpected time (e.g., manual admin trigger), use current cycle
-        if MORNING_CYCLE_START <= now < EVENING_CYCLE_START:
-            cycle = "morning"
-        else:
-            cycle = "evening"
-
-    logger.info(f"Processing {cycle} cycle")
-
-    try:
-        # Process each action separately with its own connection to avoid long transactions
-        actions = get_pending_actions(cycle)
-
-        for action in actions:
-            try:
-                # Process action with its own connection
-                process_single_action(action[0], action[1], action[2], action[3], action[4])
-            except Exception as e:
-                logger.error(f"Error processing action {action[0]}: {e}")
-
-        # Apply decay to district control
-        apply_district_decay()
-
-        # Distribute resources - use existing function with its own connection
-        distribute_district_resources()
-
-        # Process international politicians one by one
-        for politician_id in get_random_international_politicians(1, 3):
-            try:
-                process_international_politician_action(politician_id)
-            except Exception as e:
-                logger.error(f"Error processing international politician {politician_id}: {e}")
-
-        # Notify all players of results
-        await notify_players_of_results(context, cycle)
-
-        logger.info(f"Completed processing {cycle} cycle")
-    except Exception as e:
-        logger.error(f"Error processing game cycle: {e}")
-        import traceback
-        tb_list = traceback.format_exception(None, e, e.__traceback__)
-        tb_string = ''.join(tb_list)
-        logger.error(f"Exception traceback:\n{tb_string}")
-
-
-# Helper functions to break down the process
-def get_pending_actions(cycle):
-    """Get all pending actions for a cycle with a dedicated connection."""
-    try:
-        conn = sqlite3.connect('novi_sad_game.db')
-        cursor = conn.cursor()
-        cursor.execute(
-            "SELECT action_id, player_id, action_type, target_type, target_id FROM actions WHERE status = 'pending' AND cycle = ?",
-            (cycle,)
-        )
-        actions = cursor.fetchall()
-        conn.close()
-        return actions
-    except Exception as e:
-        logger.error(f"Error getting pending actions: {e}")
-        return []
-
-
-def process_single_action(action_id, player_id, action_type, target_type, target_id):
-    """Process a single action with its own connection."""
-    try:
-        # Process the action
-        result = process_action(action_id, player_id, action_type, target_type, target_id)
-
-        # Update status
-        conn = sqlite3.connect('novi_sad_game.db')
-        cursor = conn.cursor()
-        cursor.execute(
-            "UPDATE actions SET status = 'completed', result = ? WHERE action_id = ?",
-            (json.dumps(result), action_id)
-        )
-        conn.commit()
-        conn.close()
-        return True
-    except Exception as e:
-        logger.error(f"Error processing single action {action_id}: {e}")
-        return False
-
-
-def apply_district_decay():
-    """Apply decay to district control with a dedicated connection."""
-    try:
-        conn = sqlite3.connect('novi_sad_game.db')
-        cursor = conn.cursor()
-        cursor.execute(
-            "UPDATE district_control SET control_points = MAX(0, control_points - 5) WHERE control_points > 0"
-        )
-        conn.commit()
-        conn.close()
-        return True
-    except Exception as e:
-        logger.error(f"Error applying district decay: {e}")
-        return False
-
-
-def get_random_international_politicians(min_count, max_count):
-    """Get random international politician IDs."""
-    try:
-        conn = sqlite3.connect('novi_sad_game.db')
-        cursor = conn.cursor()
-        cursor.execute("SELECT politician_id FROM politicians WHERE is_international = 1")
-        politicians = cursor.fetchall()
-        conn.close()
-
-        import random
-        count = min(max_count, max(min_count, len(politicians)))
-        return [p[0] for p in random.sample(politicians, count)]
-    except Exception as e:
-        logger.error(f"Error getting international politicians: {e}")
-        return []
-
-
-def process_action(action_id, player_id, action_type, target_type, target_id):
-    """Process a single action and return the result"""
-    result = {}
-    player_lang = get_player_language(player_id)
-
-    try:
-        # Determine if this is a main or quick action
-        is_main_action = action_type in [ACTION_INFLUENCE, ACTION_ATTACK, ACTION_DEFENSE]
-
-        if target_type == "district":
-            if action_type == ACTION_INFLUENCE:
-                # Process influence action on district
-                success_roll = random.randint(1, 100)
-
-                # Main actions have more significant outcomes with possible failures
-                if success_roll > 70:  # Success (30% chance)
-                    update_district_control(player_id, target_id, 10)
-                    result = {
-                        "status": "success",
-                        "message": get_text("influence_success", player_lang, "Successfully increased influence in {target}").format(target=target_id),
-                        "control_change": 10
-                    }
-                elif success_roll > 30:  # Partial success (40% chance)
-                    update_district_control(player_id, target_id, 5)
-                    result = {
-                        "status": "partial",
-                        "message": get_text("influence_partial", player_lang, "Partially increased influence in {target}").format(target=target_id),
-                        "control_change": 5
-                    }
-                else:  # Failure (30% chance)
-                    result = {
-                        "status": "failure",
-                        "message": get_text("influence_failure", player_lang, "Failed to increase influence in {target}").format(target=target_id),
-                        "control_change": 0
-                    }
-
-            elif action_type == ACTION_ATTACK:
-                # Process attack action on district
-                # Get current controlling player(s)
-                control_data = get_district_control(target_id)
-
-                if control_data:
-                    # Attack the player with the most control
-                    target_player_id = control_data[0][0]
-                    success_roll = random.randint(1, 100)
-
-                    if success_roll > 70:  # Success
-                        # Reduce target player's control
-                        update_district_control(target_player_id, target_id, -10)
-                        # Increase attacking player's control
-                        update_district_control(player_id, target_id, 10)
-                        result = {
-                            "status": "success",
-                            "message": get_text("attack_success", player_lang, "Successfully attacked {target}").format(target=target_id),
-                            "target_player": target_player_id,
-                            "target_control_change": -10,
-                            "attacker_control_change": 10
-                        }
-                    elif success_roll > 30:  # Partial success
-                        update_district_control(target_player_id, target_id, -5)
-                        update_district_control(player_id, target_id, 5)
-                        result = {
-                            "status": "partial",
-                            "message": get_text("attack_partial", player_lang, "Partially successful attack on {target}").format(target=target_id),
-                            "target_player": target_player_id,
-                            "target_control_change": -5,
-                            "attacker_control_change": 5
-                        }
-                    else:  # Failure
-                        result = {
-                            "status": "failure",
-                            "message": get_text("attack_failure", player_lang, "Failed to attack {target}").format(target=target_id),
-                            "target_player": target_player_id,
-                            "target_control_change": 0,
-                            "attacker_control_change": 0
-                        }
-                else:
-                    # No one controls the district, so just add control points
-                    update_district_control(player_id, target_id, 10)
-                    result = {
-                        "status": "success",
-                        "message": get_text("attack_uncontrolled", player_lang, "Claimed uncontrolled district {target}").format(target=target_id),
-                        "attacker_control_change": 10
-                    }
-
-            elif action_type == ACTION_DEFENSE:
-                # Process defense action - will block future attacks
-                success_roll = random.randint(1, 100)
-                defense_bonus = 10
-                
-                if success_roll > 70:  # Success
-                    defense_bonus = 10
-                    status = "success"
-                    message_key = "defense_success"
-                elif success_roll > 30:  # Partial success
-                    defense_bonus = 5
-                    status = "partial"
-                    message_key = "defense_partial"
-                else:  # Failure
-                    defense_bonus = 2
-                    status = "failure"
-                    message_key = "defense_failure"
-                
-                # Store the defense bonus in the district_control table
-                conn = sqlite3.connect('novi_sad_game.db')
-                cursor = conn.cursor()
-                now = datetime.datetime.now().isoformat()
-
-                # Add a defense bonus that expires at the end of the cycle
-                cursor.execute(
-                    """
-                    INSERT OR REPLACE INTO district_defense 
-                    (district_id, player_id, defense_bonus, expires_at)
-                    VALUES (?, ?, ?, ?)
-                    """,
-                    (target_id, player_id, defense_bonus, now)  # Use appropriate expiration time based on cycle
-                )
-                conn.commit()
-                conn.close()
-                
-                result = {
-                    "status": status,
-                    "message": get_text(message_key, player_lang, "Defensive measures in place for {target}").format(target=target_id),
-                    "defense_bonus": defense_bonus
-                }
-
-            elif action_type == QUICK_ACTION_RECON:
-                # Process reconnaissance action - always succeeds
-                control_data = get_district_control(target_id)
-                district_info = get_district_info(target_id)
-
-                # Get pending actions targeting this district
-                conn = sqlite3.connect('novi_sad_game.db')
-                cursor = conn.cursor()
-                cursor.execute(
-                    """
-                    SELECT a.action_type, p.character_name
-                    FROM actions a
-                    JOIN players p ON a.player_id = p.player_id
-                    WHERE a.target_type = 'district' AND a.target_id = ? AND a.status = 'pending'
-                    """,
-                    (target_id,)
-                )
-                pending_actions = cursor.fetchall()
-                conn.close()
-
-                result = {
-                    "status": "success",
-                    "message": get_text("recon_success", player_lang, "Reconnaissance of {target} complete").format(target=target_id),
-                    "control_data": control_data,
-                    "district_info": district_info,
-                    "pending_actions": pending_actions if pending_actions else []
-                }
-
-            elif action_type == QUICK_ACTION_SUPPORT:
-                # Process support action (small influence gain) - always succeeds
-                update_district_control(player_id, target_id, 5)
-                result = {
-                    "status": "success",
-                    "message": get_text("support_success", player_lang, "Support action in {target} complete").format(target=target_id),
-                    "control_change": 5
-                }
-
-            elif action_type == QUICK_ACTION_INFO:
-                # Process information spreading - always succeeds
-                result = {
-                    "status": "success",
-                    "message": get_text("info_success", player_lang, "Information has been spread about {target}").format(target=target_id),
-                }
-
-        elif target_type == "politician":
-            if action_type == ACTION_INFLUENCE:
-                # Process influence on politician
-                from game.politicians import get_politician_by_id
-                politician = get_politician_by_id(target_id)
-                if politician:
-                    # Update politician relationship in the results processing phase
-                    result = {
-                        "status": "success",
-                        "message": get_text("influence_success", player_lang, "Improved relationship with {politician}").format(politician=politician['name']),
-                        "politician_id": politician['politician_id']
-                    }
-            elif action_type == "undermine":
-                # Process undermining action on politician
-                from game.politicians import get_politician_by_id
-                politician = get_politician_by_id(target_id)
-                if politician:
-                    result = {
-                        "status": "success",
-                        "message": get_text("influence_success", player_lang, "Started undermining {politician}'s influence").format(politician=politician['name']),
-                        "politician_id": politician['politician_id']
-                    }
-            elif action_type == "info":
-                # Process info gathering on politician - quick action
-                from game.politicians import get_politician_by_id
-                politician = get_politician_by_id(target_id)
-                if politician:
-                    result = {
-                        "status": "success",
-                        "message": get_text("influence_success", player_lang, "Gathered intelligence on {politician}").format(politician=politician['name']),
-                        "politician_id": politician['politician_id'],
-                        "politician_data": politician
-                    }
-
-    except Exception as e:
-        logger.error(f"Error in process_action: {e}")
-        result = {"status": "error", "message": f"An error occurred: {str(e)}"}
-
-    return result
-
-
-def apply_physical_presence_bonus(player_id, district_id, action_type):
+async def take_action(update: Update, context: ContextTypes.DEFAULT_TYPE, player_id: str, action_type: str, district_id: str = None, resource_type: str = None, amount: int = 0):
     """
-    Apply a bonus for physically being present in a district during an action.
-    This gives +20 Control Points to the action if it's a main action.
-
+    Process a player action.
+    
     Args:
-        player_id: The player ID
-        district_id: The district ID
-        action_type: The type of action
-
+        update: Telegram update
+        context: Bot context
+        player_id: ID of the player taking the action
+        action_type: Type of action (collect, control, etc.)
+        district_id: ID of the district (if applicable)
+        resource_type: Type of resource (if applicable)
+        amount: Amount of resource (if applicable)
+        
     Returns:
-        dict: Bonus information
+        tuple: (success, message)
     """
-    # Check if this is a main action
-    if action_type not in MAIN_ACTIONS:
-        return {"applied": False, "bonus": 0, "message": "Bonus only applies to main actions"}
-
     try:
         conn = sqlite3.connect('novi_sad_game.db')
         cursor = conn.cursor()
-
-        # Check for a valid and not expired record of physical presence
-        # Presence expires after 6 hours
-        expiry_time = (datetime.datetime.now() - datetime.timedelta(hours=6)).isoformat()
         
+        # Record the action in the database
+        now = datetime.datetime.now().isoformat()
         cursor.execute(
             """
-            SELECT is_present, timestamp FROM player_presence 
-            WHERE player_id = ? AND district_id = ? AND timestamp > ?
+            INSERT INTO actions 
+            (player_id, action_type, district_id, resource_type, amount, timestamp)
+            VALUES (?, ?, ?, ?, ?, ?)
             """,
-            (player_id, district_id, expiry_time)
+            (player_id, action_type, district_id, resource_type, amount, now)
         )
-        presence_record = cursor.fetchone()
-
-        if presence_record and presence_record[0]:
-            # Calculate time remaining on presence bonus
-            timestamp = datetime.datetime.fromisoformat(presence_record[1])
-            expires_at = timestamp + datetime.timedelta(hours=6)
-            now = datetime.datetime.now()
-            time_remaining = max(0, (expires_at - now).total_seconds() // 60)  # Minutes remaining
+        
+        # Handle specific action types
+        if action_type == "collect":
+            success, message = await handle_collect_action(cursor, player_id, district_id)
+        elif action_type == "control":
+            success, message = await handle_control_action(cursor, player_id, district_id, amount)
+        elif action_type == "attack":
+            success, message = await handle_attack_action(cursor, player_id, district_id, amount)
+        elif action_type == "defend":
+            success, message = await handle_defend_action(cursor, player_id, district_id, amount)
+        elif action_type == "influence":
+            success, message = await handle_influence_action(cursor, player_id, district_id, amount)
+        else:
+            success = False
+            message = "Unknown action type."
+        
+        if success:
+            conn.commit()
+        else:
+            conn.rollback()
             
-            # Apply +20 CP bonus
-            return {
-                "applied": True, 
-                "bonus": 20,
-                "message": get_text("physical_presence_bonus", player_lang, "Physical presence bonus applied (+20 CP). Expires in {time_remaining} minutes").format(time_remaining=time_remaining),
-                "expires_at": expires_at.isoformat()
-            }
-
         conn.close()
-        return {"applied": False, "bonus": 0, "message": "No physical presence detected"}
-
+        return success, message
+        
     except Exception as e:
-        logger.error(f"Error checking physical presence: {e}")
-        return {"applied": False, "bonus": 0, "message": f"Error: {str(e)}"}
+        logger.error(f"Error processing action: {e}")
+        return False, "An error occurred while processing your action."
 
-
-def register_player_presence(player_id, district_id, location_data=None):
+async def handle_collect_action(cursor, player_id, district_id):
     """
-    Register a player as physically present in a district.
+    Handle resource collection from a district.
     
     Args:
-        player_id: The player ID
-        district_id: The district ID
-        location_data: Optional location data from Telegram (latitude/longitude)
+        cursor: Database cursor
+        player_id: ID of the player
+        district_id: ID of the district
         
     Returns:
-        dict: Result of the operation
+        tuple: (success, message)
     """
-    if not player_id or not district_id:
-        logger.error("Missing player_id or district_id for presence registration")
-        return {
-            "success": False,
-            "message": "Missing required information for presence registration."
-        }
-    
-    conn = None
-    
     try:
-        # Validate the location if provided
-        if location_data:
-            valid_location = verify_location_in_district(location_data, district_id)
-            if not valid_location:
-                return {
-                    "success": False,
-                    "message": "Your location is not within this district."
-                }
-        
-        # Validate that district exists
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        
-        cursor.execute("SELECT district_id FROM districts WHERE district_id = ?", (district_id,))
-        if not cursor.fetchone():
-            return {
-                "success": False,
-                "message": "District not found."
-            }
-            
-        # Validate that player exists
-        cursor.execute("SELECT player_id FROM players WHERE player_id = ?", (player_id,))
-        if not cursor.fetchone():
-            return {
-                "success": False, 
-                "message": "Player not registered."
-            }
-            
-        # Begin transaction
-        cursor.execute("BEGIN IMMEDIATE")
-        
-        now = datetime.datetime.now().isoformat()
-        
-        # Check if record already exists
+        # Check if player has presence in the district
         cursor.execute(
-            "SELECT * FROM player_presence WHERE player_id = ? AND district_id = ?",
+            """
+            SELECT control_points 
+            FROM district_control
+            WHERE player_id = ? AND district_id = ?
+            """,
             (player_id, district_id)
         )
         
-        if cursor.fetchone():
-            # Update existing record
+        control_result = cursor.fetchone()
+        if not control_result or control_result[0] < 5:
+            return False, "You need at least 5 control points in this district to collect resources."
+        
+        control_points = control_result[0]
+        
+        # Get district resource generation rates
+        cursor.execute(
+            """
+            SELECT influence_resource, resources_resource, information_resource, force_resource
+            FROM districts
+            WHERE district_id = ?
+            """,
+            (district_id,)
+        )
+        
+        district = cursor.fetchone()
+        if not district:
+            return False, "District not found."
+        
+        # Calculate resource amounts based on control (higher control = higher percentage)
+        control_percentage = min(1.0, control_points / 100)
+        influence_amount = round(district[0] * control_percentage)
+        resources_amount = round(district[1] * control_percentage)
+        information_amount = round(district[2] * control_percentage)
+        force_amount = round(district[3] * control_percentage)
+        
+        # Add resources to player
+        resources_added = 0
+        for resource_type, amount in [
+            ("influence", influence_amount),
+            ("resources", resources_amount),
+            ("information", information_amount),
+            ("force", force_amount)
+        ]:
+            if amount > 0:
+                cursor.execute(
+                    """
+                    INSERT INTO resources (player_id, resource_type, amount)
+                    VALUES (?, ?, ?)
+                    ON CONFLICT(player_id, resource_type) 
+                    DO UPDATE SET amount = amount + ?
+                    """,
+                    (player_id, resource_type, amount, amount)
+                )
+                resources_added += 1
+        
+        if resources_added == 0:
+            return False, "This district doesn't generate any resources."
+        
+        # Record last collection time
+        now = datetime.datetime.now().isoformat()
+        cursor.execute(
+            """
+            UPDATE player_presence
+            SET last_collected = ?
+            WHERE player_id = ? AND district_id = ?
+            """,
+            (now, player_id, district_id)
+        )
+        
+        # If no rows were updated, insert a new record
+        if cursor.rowcount == 0:
             cursor.execute(
                 """
-                UPDATE player_presence 
-                SET is_present = 1, timestamp = ? 
-                WHERE player_id = ? AND district_id = ?
-                """,
-                (now, player_id, district_id)
-            )
-            
-            # Add log for refreshed presence
-            logger.info(f"Refreshed player {player_id} presence in district {district_id}")
-        else:
-            # Create new record
-            cursor.execute(
-                """
-                INSERT INTO player_presence (player_id, district_id, timestamp, is_present)
-                VALUES (?, ?, ?, 1)
+                INSERT INTO player_presence (player_id, district_id, last_collected)
+                VALUES (?, ?, ?)
                 """,
                 (player_id, district_id, now)
             )
-            
-            # Log new presence registration
-            logger.info(f"New player {player_id} presence registered in district {district_id}")
-            
-        # Commit transaction
-        cursor.execute("COMMIT")
         
-        # Calculate expiry time
-        expires_at = datetime.datetime.now() + datetime.timedelta(hours=6)
-        formatted_time = expires_at.strftime("%H:%M:%S on %Y-%m-%d")
+        return True, f"You've collected resources from this district based on your control level ({control_points}%)."
         
-        return {
-            "success": True,
-            "message": get_text("physical_presence_registered", player_lang, "Physical presence registered in district. Expires at {formatted_time}").format(formatted_time=formatted_time),
-            "expires_at": expires_at.isoformat()
-        }
-        
-    except sqlite3.Error as e:
-        # Handle database errors
-        if conn:
-            try:
-                # Rollback transaction on error
-                conn.execute("ROLLBACK")
-                logger.warning(f"Rolled back transaction: {str(e)}")
-            except Exception as rollback_e:
-                logger.error(f"Error rolling back transaction: {str(rollback_e)}")
-                
-        error_msg = str(e).lower()
-        user_friendly_msg = "Database error occurred while registering presence."
-        
-        if "database is locked" in error_msg:
-            user_friendly_msg = "The system is busy. Please try again in a moment."
-        elif "no such table" in error_msg:
-            user_friendly_msg = "System error: Missing required database table."
-        elif "constraint failed" in error_msg:
-            user_friendly_msg = "Data validation error. Please try again."
-            
-        logger.error(f"Database error registering presence: {str(e)}")
-        return {
-            "success": False,
-            "message": user_friendly_msg
-        }
     except Exception as e:
-        # Handle other errors
-        logger.error(f"Error registering physical presence: {e}")
-        return {
-            "success": False,
-            "message": "An error occurred while registering your presence. Please try again."
-        }
-    finally:
-        # Ensure connection is returned to the pool
-        if conn:
-            release_db_connection(conn)
+        logger.error(f"Error handling collect action: {e}")
+        return False, "An error occurred while collecting resources."
 
-
-def verify_location_in_district(location_data, district_id):
+async def handle_control_action(cursor, player_id, district_id, amount):
     """
-    Verify if the provided location is within the specified district.
+    Handle increasing control in a district.
     
     Args:
-        location_data: Location data (latitude/longitude)
-        district_id: District ID to check against
+        cursor: Database cursor
+        player_id: ID of the player
+        district_id: ID of the district
+        amount: Amount of influence to spend
         
     Returns:
-        bool: True if location is in district, False otherwise
-    """
-    if not location_data or not district_id:
-        logger.warning("Missing location data or district ID for verification")
-        return False
-        
-    try:
-        # Validate location data format
-        if 'latitude' not in location_data or 'longitude' not in location_data:
-            logger.warning("Location data missing latitude or longitude")
-            return False
-            
-        lat = location_data['latitude']
-        lon = location_data['longitude']
-        
-        # Ensure coordinates are in valid ranges
-        if not (-90 <= lat <= 90) or not (-180 <= lon <= 180):
-            logger.warning(f"Invalid coordinates: {lat}, {lon}")
-            return False
-            
-        # Novi Sad boundaries approximation (simplified for demo)
-        novi_sad_bounds = {
-            'min_lat': 45.20,
-            'max_lat': 45.28,
-            'min_lon': 19.80,
-            'max_lon': 19.90
-        }
-        
-        # First verify within Novi Sad
-        if (novi_sad_bounds['min_lat'] <= lat <= novi_sad_bounds['max_lat'] and
-            novi_sad_bounds['min_lon'] <= lon <= novi_sad_bounds['max_lon']):
-            
-            # District-specific bounds (approximate)
-            district_bounds = {
-                'stari_grad': {'min_lat': 45.25, 'max_lat': 45.26, 'min_lon': 19.84, 'max_lon': 19.85},
-                'liman': {'min_lat': 45.24, 'max_lat': 45.25, 'min_lon': 19.83, 'max_lon': 19.84},
-                'petrovaradin': {'min_lat': 45.25, 'max_lat': 45.26, 'min_lon': 19.86, 'max_lon': 19.88},
-                'podbara': {'min_lat': 45.26, 'max_lat': 45.27, 'min_lon': 19.84, 'max_lon': 19.85},
-                'detelinara': {'min_lat': 45.26, 'max_lat': 45.27, 'min_lon': 19.82, 'max_lon': 19.84},
-                'satelit': {'min_lat': 45.25, 'max_lat': 45.26, 'min_lon': 19.80, 'max_lon': 19.82},
-                'adamovicevo': {'min_lat': 45.24, 'max_lat': 45.25, 'min_lon': 19.81, 'max_lon': 19.82},
-                'sremska_kamenica': {'min_lat': 45.22, 'max_lat': 45.23, 'min_lon': 19.83, 'max_lon': 19.85}
-            }
-            
-            # If we have bounds for this district, check against them
-            if district_id in district_bounds:
-                bounds = district_bounds[district_id]
-                return (bounds['min_lat'] <= lat <= bounds['max_lat'] and
-                        bounds['min_lon'] <= lon <= bounds['max_lon'])
-            else:
-                # If we don't have specific bounds, use the quadrant approach as fallback
-                conn = sqlite3.connect('novi_sad_game.db')
-                cursor = conn.cursor()
-                
-                # Get district's area code to verify it matches the location quadrant
-                cursor.execute("SELECT district_id FROM districts WHERE district_id = ?", (district_id,))
-                result = cursor.fetchone()
-                conn.close()
-                
-                if not result:
-                    logger.warning(f"District {district_id} not found in database")
-                    return False
-                
-                # Novi Sad center coordinates (approximate)
-                novi_sad_center_lat = 45.2551
-                novi_sad_center_lon = 19.8451
-                
-                # Determine which quadrant the location is in
-                quadrant_districts = {
-                    "NE": ['podbara', 'detelinara'],
-                    "NW": ['satelit', 'adamovicevo'],
-                    "SE": ['stari_grad', 'petrovaradin'],
-                    "SW": ['liman', 'sremska_kamenica']
-                }
-                
-                if lat > novi_sad_center_lat and lon > novi_sad_center_lon:
-                    return district_id in quadrant_districts["NE"]
-                elif lat > novi_sad_center_lat and lon <= novi_sad_center_lon:
-                    return district_id in quadrant_districts["NW"]
-                elif lat <= novi_sad_center_lat and lon > novi_sad_center_lon:
-                    return district_id in quadrant_districts["SE"]
-                else:
-                    return district_id in quadrant_districts["SW"]
-        else:
-            logger.warning(f"Location {lat}, {lon} is outside Novi Sad boundaries")
-            return False
-            
-    except Exception as e:
-        logger.error(f"Error verifying location in district: {e}")
-        return False
-
-
-def get_player_presence_status(player_id):
-    """
-    Get the player's current physical presence status in districts.
-    
-    Args:
-        player_id: Telegram user ID
-        
-    Returns:
-        list: List of districts where player is physically present, 
-              with expiry time and resources information
-    """
-    if not player_id:
-        return []
-        
-    conn = None
-    try:
-        conn = get_db_connection()
-        if conn is None:
-            conn = sqlite3.connect('novi_sad_game.db')
-        cursor = conn.cursor()
-        
-        now = datetime.datetime.now().isoformat()
-        
-        # Get active presence records for player
-        cursor.execute("""
-            SELECT district_id, expires_at, location_data 
-            FROM player_presence 
-            WHERE player_id = ? AND expires_at > ?
-        """, (player_id, now))
-        
-        presence_records = cursor.fetchall()
-        
-        if not presence_records:
-            return []
-            
-        # Format presence data for display
-        formatted_records = []
-        
-        for record in presence_records:
-            district_id, expires_at, location_data_str = record
-            
-            # Get district info
-            district_info = get_district_info(district_id)
-            
-            if not district_info:
-                continue
-                
-            # Extract district name from district info
-            district_name = district_info[1]  # Index 1 is the name
-            
-            # Calculate time remaining
-            expires_datetime = datetime.datetime.fromisoformat(expires_at)
-            time_delta = expires_datetime - datetime.datetime.now()
-            
-            # Format time remaining
-            hours, remainder = divmod(time_delta.seconds, 3600)
-            minutes, _ = divmod(remainder, 60)
-            time_remaining = f"{hours}h {minutes}m"
-            
-            # Get player's control points in this district
-            cursor.execute("""
-                SELECT control_points FROM district_control 
-                WHERE player_id = ? AND district_id = ?
-            """, (player_id, district_id))
-            control_row = cursor.fetchone()
-            control_points = control_row[0] if control_row else 0
-            
-            # Calculate resources available for collection
-            resources_available = {
-                "influence": district_info[3] or 0,  # influence_resources
-                "resources": district_info[4] or 0,  # economic_resources
-                "information": district_info[5] or 0,  # information_resources
-                "force": district_info[6] or 0   # force_resources
-            }
-            
-            # Add to formatted records
-            formatted_records.append({
-                "district_id": district_id,
-                "district_name": district_name,
-                "time_remaining": time_remaining,
-                "control_points": control_points,
-                "resources_available": resources_available,
-                "expires_at": expires_at,
-                "location_data": json.loads(location_data_str) if location_data_str else None
-            })
-            
-        return formatted_records
-        
-    except Exception as e:
-        logger.error(f"Database error getting presence status: {e}")
-        return []
-    finally:
-        if conn:
-            release_db_connection(conn)
-
-
-def process_international_politician_events():
-    """Process actions from international politicians for the current cycle."""
-    try:
-        logger.info("Processing international politician events...")
-        
-        # Get 1-3 random active international politicians based on activity probability
-        active_politicians = get_random_international_politicians(min_count=1, max_count=3)
-        
-        logger.info(f"Active international politicians for this cycle: {active_politicians}")
-        
-        # Process each politician's action
-        for politician_id in active_politicians:
-            process_international_politician_action(politician_id)
-            
-        logger.info("International politician events processed successfully")
-        return True
-    except Exception as e:
-        logger.error(f"Error processing international politician events: {e}")
-        return False
-
-
-async def schedule_jobs(application):
-    """Set up scheduled jobs for game cycle processing."""
-    job_queue = application.job_queue
-
-    # Schedule morning cycle results
-    morning_time = datetime.time(hour=MORNING_CYCLE_RESULTS.hour, minute=MORNING_CYCLE_RESULTS.minute)
-    job_queue.run_daily(process_game_cycle, time=morning_time)
-
-    # Schedule evening cycle results
-    evening_time = datetime.time(hour=EVENING_CYCLE_RESULTS.hour, minute=EVENING_CYCLE_RESULTS.minute)
-    job_queue.run_daily(process_game_cycle, time=evening_time)
-
-    # Schedule periodic action refreshes every 3 hours
-    job_queue.run_repeating(refresh_actions, interval=3 * 60 * 60)
-
-    logger.info("Scheduled jobs set up")
-
-
-async def refresh_actions(context):
-    """Refresh actions for all players every 3 hours."""
-    try:
-        # Get all active players
-        conn = sqlite3.connect('novi_sad_game.db')
-        cursor = conn.cursor()
-        cursor.execute("SELECT player_id FROM players")
-        players = cursor.fetchall()
-        conn.close()
-
-        for player_id_tuple in players:
-            player_id = player_id_tuple[0]
-
-            # Refresh their actions
-            refreshed = refresh_player_actions(player_id)
-
-            # Only notify the player if actions were actually refreshed
-            if refreshed:
-                try:
-                    lang = get_player_language(player_id)
-                    await context.bot.send_message(
-                        chat_id=player_id,
-                        text=get_text("actions_refreshed_notification", lang)
-                    )
-                except Exception as e:
-                    logger.error(f"Failed to notify player {player_id} about action refresh: {e}")
-
-        logger.info("Actions refreshed for all players")
-    except Exception as e:
-        logger.error(f"Error in refresh_actions: {e}")
-
-
-def process_international_politician_action(politician_id):
-    """
-    Process an action by an international politician.
-
-    This function determines what effect an international politician has on the
-    game world based on their ideology and role. Effects can include sanctions,
-    support for certain districts, or penalties to opposing ideologies.
-
-    Args:
-        politician_id (int): The ID of the politician to process
-
-    Returns:
-        dict: Details of the action taken, or None if no action was taken
+        tuple: (success, message)
     """
     try:
-        conn = sqlite3.connect('novi_sad_game.db')
-        cursor = conn.cursor()
-
-        cursor.execute("SELECT * FROM politicians WHERE politician_id = ?", (politician_id,))
-        politician = cursor.fetchone()
-
-        if not politician:
-            conn.close()
-            return None
-
-        pol_id, name, role, ideology, district_id, influence, friendliness, is_intl, description = politician
-
-        # Different effects based on politician's ideology
-        news_title = f"International News: {name} Takes Action"
-
-        # Track what action was performed
-        event_details = {
-            "politician_id": politician_id,
-            "name": name,
-            "role": role,
-            "ideology": ideology,
-            "effect_type": "",
-            "effect_description": ""
-        }
-
-        if ideology < -3:  # Strongly pro-reform
-            # Apply sanctions or support opposition
-            news_content = f"{name} ({role}) has announced sanctions against the current regime. Districts supporting conservative policies will receive a penalty to control."
-
-            # Apply penalties to conservative districts
-            cursor.execute(
-                """
-                UPDATE district_control 
-                SET control_points = CASE WHEN control_points > 5 THEN control_points - 5 ELSE control_points END
-                WHERE district_id IN (
-                    SELECT districts.district_id FROM districts 
-                    JOIN politicians ON districts.district_id = politicians.district_id
-                    WHERE politicians.ideology > 3 AND politicians.is_international = 0
-                )
-                """
-            )
-
-            event_details["effect_type"] = "sanctions"
-            event_details["effect_description"] = "Applied sanctions against conservative districts"
-
-        elif ideology > 3:  # Strongly conservative
-            # Support status quo or destabilize
-            news_content = f"{name} ({role}) has pledged support for stability and traditional governance. Districts with reform movements will face challenges."
-
-            # Apply penalties to reform districts
-            cursor.execute(
-                """
-                UPDATE district_control 
-                SET control_points = CASE WHEN control_points > 5 THEN control_points - 5 ELSE control_points END
-                WHERE district_id IN (
-                    SELECT districts.district_id FROM districts 
-                    JOIN politicians ON districts.district_id = politicians.district_id
-                    WHERE politicians.ideology < -3 AND politicians.is_international = 0
-                )
-                """
-            )
-
-            event_details["effect_type"] = "conservative_support"
-            event_details["effect_description"] = "Applied pressure against reform districts"
-
-        else:  # Moderate influence
-            effect_type = random.choice(["economic", "diplomatic", "humanitarian"])
-
-            if effect_type == "economic":
-                news_content = f"{name} ({role}) has announced economic support for moderate districts in Yugoslavia."
-
-                # Apply bonuses to moderate districts
-                cursor.execute(
-                    """
-                    UPDATE district_control 
-                    SET control_points = control_points + 3
-                    WHERE district_id IN (
-                        SELECT districts.district_id FROM districts 
-                        JOIN politicians ON districts.district_id = politicians.district_id
-                        WHERE politicians.ideology BETWEEN -2 AND 2 AND politicians.is_international = 0
-                    )
-                    """
-                )
-
-                event_details["effect_type"] = "economic_support"
-                event_details["effect_description"] = "Provided economic support to moderate districts"
-
-            elif effect_type == "diplomatic":
-                news_content = f"{name} ({role}) has applied diplomatic pressure for peaceful resolution of tensions in Yugoslavia."
-
-                # Generate random diplomatic event
-                event_details["effect_type"] = "diplomatic_pressure"
-                event_details["effect_description"] = "Applied diplomatic pressure"
-
-            else:  # humanitarian
-                news_content = f"{name} ({role}) has announced humanitarian aid to affected regions in Yugoslavia."
-
-                # Small bonus to all districts
-                cursor.execute(
-                    """
-                    UPDATE district_control 
-                    SET control_points = control_points + 2
-                    """
-                )
-
-                event_details["effect_type"] = "humanitarian_aid"
-                event_details["effect_description"] = "Provided humanitarian aid to all districts"
-
-        # Add news about this action
-        add_news(news_title, news_content)
-
-        conn.commit()
-        conn.close()
-
-        return event_details
-    except Exception as e:
-        logger.error(f"Error processing international politician {politician_id}: {e}")
-        return None
-
-
-def _escape_markdown(text):
-    """
-    Escape special characters for Markdown formatting.
-    """
-    if text is None:
-        return ""
-    return text.replace("*", "\\*").replace("_", "\\_").replace("`", "\\`").replace("[", "\\[")
-
-
-async def notify_players_of_results(context, cycle):
-    """Send notifications to all players about cycle results."""
-    try:
-        conn = sqlite3.connect('novi_sad_game.db')
-        cursor = conn.cursor()
-
-        # Get all active players
-        cursor.execute("SELECT player_id FROM players")
-        players = cursor.fetchall()
-
-        for player_id_tuple in players:
-            player_id = player_id_tuple[0]
-
-            try:
-                # Get player's language preference
-                lang = get_player_language(player_id)
-
-                # Get player's districts
-                player_districts = get_player_districts(player_id)
-
-                # Get news
-                recent_news = get_news(limit=3, player_id=player_id)
-
-                # Get player's completed actions in this cycle
-                cursor.execute(
-                    """
-                    SELECT action_type, target_type, target_id, result
-                    FROM actions
-                    WHERE player_id = ? AND cycle = ? AND status = 'completed'
-                    """,
-                    (player_id, cycle)
-                )
-                actions = cursor.fetchall()
-
-                # Create message
-                cycle_name = get_cycle_name(cycle, lang)
-                message = get_text("cycle_results_title", lang, cycle=cycle_name)
-
-                if actions:
-                    message += "\n\n" + get_text("your_actions", lang) + "\n"
-                    for action in actions:
-                        action_type, target_type, target_id, result_json = action
-                        result = json.loads(result_json)
-                        status = result.get('status', 'unknown')
-                        action_msg = _escape_markdown(result.get('message', get_text("no_details", lang)))
-
-                        # Format based on status
-                        if status == 'success':
-                            status_emoji = get_text("status_success", lang)
-                        elif status == 'partial':
-                            status_emoji = get_text("status_partial", lang)
-                        elif status == 'failure':
-                            status_emoji = get_text("status_failure", lang)
-                        else:
-                            status_emoji = get_text("status_info", lang)
-
-                        message += f"{status_emoji} {_escape_markdown(action_type.capitalize())} - {action_msg}\n"
-
-                    message += "\n"
-
-                # District control summary
-                if player_districts:
-                    message += get_text("your_districts", lang) + "\n"
-                    for district in player_districts:
-                        district_id, name, control = district
-
-                        # Determine control status
-                        if control >= 80:
-                            control_status = get_text("control_strong", lang)
-                        elif control >= 60:
-                            control_status = get_text("control_full", lang)
-                        elif control >= 20:
-                            control_status = get_text("control_contested", lang)
-                        else:
-                            control_status = get_text("control_weak", lang)
-
-                        message += f"{name}: {control} {get_text('control_points', lang, count=control)} - {control_status}\n"
-
-                    message += "\n"
-
-                # News summary
-                if recent_news:
-                    message += get_text("recent_news", lang) + "\n"
-                    for news_item in recent_news:
-                        news_id, title, content, timestamp, is_public, target_player, is_fake = news_item
-                        news_time = datetime.datetime.fromisoformat(timestamp).strftime("%H:%M")
-
-                        # Escape special Markdown characters in title and content
-                        safe_title = title.replace("*", "\\*").replace("_", "\\_").replace("`", "\\`").replace("[",
-                                                                                                               "\\[")
-
-                        message += f"📰 {news_time} - *{safe_title}*\n"
-                        # Truncate long content and escape special characters
-                        content_to_show = content[:100] + "..." if len(content) > 100 else content
-                        safe_content = content_to_show.replace("*", "\\*").replace("_", "\\_").replace("`",
-                                                                                                       "\\`").replace(
-                            "[", "\\[")
-                        message += f"{safe_content}\n"
-
-                    message += "\n"
-
-                # Resources update
-                resources = get_player_resources(player_id)
-                if resources:
-                    message += get_text("current_resources", lang) + "\n"
-                    message += f"🔵 {get_text('influence', lang)}: {resources['influence']}\n"
-                    message += f"💰 {get_text('resources', lang)}: {resources['resources']}\n"
-                    message += f"🔍 {get_text('information', lang)}: {resources['information']}\n"
-                    message += f"👊 {get_text('force', lang)}: {resources['force']}\n"
-
-                try:
-                    await context.bot.send_message(
-                        chat_id=player_id,
-                        text=message,
-                        parse_mode='Markdown'
-                    )
-                except Exception as e:
-                    logger.error(f"Failed to send notification to player {player_id}: {e}")
-
-            except Exception as e:
-                logger.error(f"Error preparing notification for player {player_id}: {e}")
-
-        conn.close()
-    except Exception as e:
-        logger.error(f"Error in notify_players_of_results: {e}")
-
-
-async def refresh_actions_job(context):
-    """Refresh actions for all players every 3 hours."""
-    try:
-        # Get all active players
-        conn = sqlite3.connect('novi_sad_game.db')
-        cursor = conn.cursor()
-        cursor.execute("SELECT player_id FROM players")
-        players = cursor.fetchall()
-        conn.close()
-
-        for player_id_tuple in players:
-            player_id = player_id_tuple[0]
-
-            try:
-                # Refresh their actions
-                refresh_player_actions(player_id)
-
-                # Notify the player
-                lang = get_player_language(player_id)
-                await context.bot.send_message(
-                    chat_id=player_id,
-                    text=get_text("actions_refreshed_notification", lang)
-                )
-            except Exception as e:
-                logger.error(f"Failed to refresh actions for player {player_id}: {e}")
-
-        logger.info("Actions refreshed for all players")
-    except Exception as e:
-        logger.error(f"Error in refresh_actions_job: {e}")
-
-
-def get_current_cycle():
-    """Return the current game cycle (morning or evening)."""
-    now = datetime.datetime.now().time()
-    if MORNING_CYCLE_START <= now < EVENING_CYCLE_START:
-        return "morning"
-    else:
-        return "evening"
-
-
-def get_cycle_deadline():
-    """Return the submission deadline for the current cycle."""
-    now = datetime.datetime.now().time()
-    if MORNING_CYCLE_START <= now < EVENING_CYCLE_START:
-        return MORNING_CYCLE_DEADLINE
-    else:
-        return EVENING_CYCLE_DEADLINE
-
-
-def get_cycle_results_time():
-    """Return the results time for the current cycle."""
-    now = datetime.datetime.now().time()
-    if MORNING_CYCLE_START <= now < EVENING_CYCLE_START:
-        return MORNING_CYCLE_RESULTS
-    else:
-        return EVENING_CYCLE_RESULTS
-
-
-def process_coordinated_action(action_id):
-    """Process a coordinated action with combined resources from all participants."""
-    try:
-        # Get the coordinated action
-        conn = sqlite3.connect('novi_sad_game.db')
-        cursor = conn.cursor()
-
+        # Check if player has enough influence
         cursor.execute(
             """
-            SELECT action_type, target_type, target_id, initiator_id
+            SELECT amount 
+            FROM resources 
+            WHERE player_id = ? AND resource_type = 'influence'
+            """,
+            (player_id,)
+        )
+        
+        resource = cursor.fetchone()
+        if not resource or resource[0] < amount:
+            return False, f"You don't have enough influence. You need {amount} but have {resource[0] if resource else 0}."
+        
+        # Reduce influence
+        cursor.execute(
+            """
+            UPDATE resources
+            SET amount = amount - ?
+            WHERE player_id = ? AND resource_type = 'influence'
+            """,
+            (amount, player_id)
+        )
+        
+        # Increase control points
+        control_gain = amount  # 1 influence = 1 control point
+        
+        cursor.execute(
+            """
+            INSERT INTO district_control (player_id, district_id, control_points)
+            VALUES (?, ?, ?)
+            ON CONFLICT(player_id, district_id) 
+            DO UPDATE SET control_points = control_points + ?
+            """,
+            (player_id, district_id, control_gain, control_gain)
+        )
+        
+        # Get new control points
+        cursor.execute(
+            """
+            SELECT control_points 
+            FROM district_control
+            WHERE player_id = ? AND district_id = ?
+            """,
+            (player_id, district_id)
+        )
+        
+        new_control = cursor.fetchone()[0]
+        
+        return True, f"You've increased your control in this district by {control_gain} points. Your total control is now {new_control} points."
+        
+    except Exception as e:
+        logger.error(f"Error handling control action: {e}")
+        return False, "An error occurred while increasing district control."
+
+async def handle_attack_action(cursor, player_id, district_id, amount):
+    """
+    Handle attacking another player's control in a district.
+    
+    Args:
+        cursor: Database cursor
+        player_id: ID of the player
+        district_id: ID of the district
+        amount: Amount of force to spend
+        
+    Returns:
+        tuple: (success, message)
+    """
+    try:
+        # Check if player has enough force
+        cursor.execute(
+            """
+            SELECT amount 
+            FROM resources 
+            WHERE player_id = ? AND resource_type = 'force'
+            """,
+            (player_id,)
+        )
+        
+        resource = cursor.fetchone()
+        if not resource or resource[0] < amount:
+            return False, f"You don't have enough force. You need {amount} but have {resource[0] if resource else 0}."
+        
+        # Get top controller (that isn't the attacking player)
+        cursor.execute(
+            """
+            SELECT player_id, control_points 
+            FROM district_control
+            WHERE district_id = ? AND player_id != ? AND control_points > 0
+            ORDER BY control_points DESC
+            LIMIT 1
+            """,
+            (district_id, player_id)
+        )
+        
+        target = cursor.fetchone()
+        if not target:
+            return False, "There's no one to attack in this district."
+        
+        target_id, target_control = target
+        
+        # Check for defense bonuses
+        cursor.execute(
+            """
+            SELECT defense_bonus 
+            FROM district_defense
+            WHERE district_id = ? AND player_id = ?
+            """,
+            (district_id, target_id)
+        )
+        
+        defense_result = cursor.fetchone()
+        defense_bonus = defense_result[0] if defense_result else 0
+        
+        # Calculate attack effectiveness
+        effectiveness = random.uniform(0.7, 1.3)  # Random factor
+        base_damage = amount
+        final_damage = max(1, int(base_damage * effectiveness - defense_bonus))
+        
+        # Reduce control points of target
+        cursor.execute(
+            """
+            UPDATE district_control
+            SET control_points = MAX(0, control_points - ?)
+            WHERE player_id = ? AND district_id = ?
+            """,
+            (final_damage, target_id, district_id)
+        )
+        
+        # Spend force resource
+        cursor.execute(
+            """
+            UPDATE resources
+            SET amount = amount - ?
+            WHERE player_id = ? AND resource_type = 'force'
+            """,
+            (amount, player_id)
+        )
+        
+        # Get player names for message
+        cursor.execute("SELECT username FROM players WHERE player_id = ?", (target_id,))
+        target_name = cursor.fetchone()[0]
+        
+        # Add small amount of control to attacker
+        control_gain = final_damage // 4  # Attacker gains a fraction of what they took
+        if control_gain > 0:
+            cursor.execute(
+                """
+                INSERT INTO district_control (player_id, district_id, control_points)
+                VALUES (?, ?, ?)
+                ON CONFLICT(player_id, district_id) 
+                DO UPDATE SET control_points = control_points + ?
+                """,
+                (player_id, district_id, control_gain, control_gain)
+            )
+        
+        return True, f"You attacked {target_name}'s control in this district, reducing it by {final_damage} points. You gained {control_gain} control points."
+        
+    except Exception as e:
+        logger.error(f"Error handling attack action: {e}")
+        return False, "An error occurred while attacking."
+
+async def handle_defend_action(cursor, player_id, district_id, amount):
+    """
+    Handle setting up defenses in a district.
+    
+    Args:
+        cursor: Database cursor
+        player_id: ID of the player
+        district_id: ID of the district
+        amount: Amount of resources to spend
+        
+    Returns:
+        tuple: (success, message)
+    """
+    try:
+        # Check if player has enough resources
+        cursor.execute(
+            """
+            SELECT amount 
+            FROM resources 
+            WHERE player_id = ? AND resource_type = 'resources'
+            """,
+            (player_id,)
+        )
+        
+        resource = cursor.fetchone()
+        if not resource or resource[0] < amount:
+            return False, f"You don't have enough resources. You need {amount} but have {resource[0] if resource else 0}."
+        
+        # Check if player has control in the district
+        cursor.execute(
+            """
+            SELECT control_points 
+            FROM district_control
+            WHERE player_id = ? AND district_id = ?
+            """,
+            (player_id, district_id)
+        )
+        
+        control_result = cursor.fetchone()
+        if not control_result or control_result[0] < 10:
+            return False, "You need at least 10 control points in this district to set up defenses."
+        
+        # Calculate defense bonus - diminishing returns
+        defense_bonus = min(10, amount // 10)  # Max 10 bonus from this action
+        
+        # Set expiry to 12 hours from now
+        expires_at = (datetime.datetime.now() + timedelta(hours=12)).isoformat()
+        
+        # Add or update defense bonus
+        cursor.execute(
+            """
+            INSERT OR REPLACE INTO district_defense
+            (district_id, player_id, defense_bonus, expires_at)
+            VALUES (?, ?, ?, ?)
+            """,
+            (district_id, player_id, defense_bonus, expires_at)
+        )
+        
+        # Spend resources
+        cursor.execute(
+            """
+            UPDATE resources
+            SET amount = amount - ?
+            WHERE player_id = ? AND resource_type = 'resources'
+            """,
+            (amount, player_id)
+        )
+        
+        return True, f"You've set up defenses in this district, giving you a +{defense_bonus} defense bonus for the next 12 hours."
+        
+    except Exception as e:
+        logger.error(f"Error handling defend action: {e}")
+        return False, "An error occurred while setting up defenses."
+
+async def handle_influence_action(cursor, player_id, district_id, amount):
+    """
+    Handle influencing politicians in a district.
+    
+    Args:
+        cursor: Database cursor
+        player_id: ID of the player
+        district_id: ID of the district
+        amount: Amount of influence to spend
+        
+    Returns:
+        tuple: (success, message)
+    """
+    try:
+        # Check if player has enough influence
+        cursor.execute(
+            """
+            SELECT amount 
+            FROM resources 
+            WHERE player_id = ? AND resource_type = 'influence'
+            """,
+            (player_id,)
+        )
+        
+        resource = cursor.fetchone()
+        if not resource or resource[0] < amount:
+            return False, f"You don't have enough influence. You need {amount} but have {resource[0] if resource else 0}."
+        
+        # Get politicians in the district
+        cursor.execute(
+            """
+            SELECT politician_id, name, influence
+            FROM politicians
+            WHERE district_id = ?
+            """,
+            (district_id,)
+        )
+        
+        politicians = cursor.fetchall()
+        if not politicians:
+            return False, "There are no politicians to influence in this district."
+        
+        # Choose a random politician weighted by their influence
+        total_influence = sum(pol[2] for pol in politicians)
+        weights = [pol[2]/total_influence for pol in politicians]
+        chosen_politician = random.choices(politicians, weights=weights, k=1)[0]
+        politician_id, politician_name, _ = chosen_politician
+        
+        # Check current friendliness
+        cursor.execute(
+            """
+            SELECT friendliness
+            FROM politician_friendliness
+            WHERE politician_id = ? AND player_id = ?
+            """,
+            (politician_id, player_id)
+        )
+        
+        friendliness_result = cursor.fetchone()
+        current_friendliness = friendliness_result[0] if friendliness_result else 0
+        
+        # Calculate friendliness increase (diminishing returns)
+        if current_friendliness < 0:
+            # Easier to go from negative to neutral
+            friendliness_increase = amount // 5
+        elif current_friendliness < 50:
+            # Moderate difficulty
+            friendliness_increase = amount // 10
+        else:
+            # Hard to increase high friendliness
+            friendliness_increase = amount // 20
+            
+        new_friendliness = min(100, current_friendliness + friendliness_increase)
+        
+        # Update friendliness
+        cursor.execute(
+            """
+            INSERT INTO politician_friendliness (politician_id, player_id, friendliness)
+            VALUES (?, ?, ?)
+            ON CONFLICT(politician_id, player_id) 
+            DO UPDATE SET friendliness = ?
+            """,
+            (politician_id, player_id, new_friendliness, new_friendliness)
+        )
+        
+        # Spend influence
+        cursor.execute(
+            """
+            UPDATE resources
+            SET amount = amount - ?
+            WHERE player_id = ? AND resource_type = 'influence'
+            """,
+            (amount, player_id)
+        )
+        
+        # Determine message based on friendliness level
+        if new_friendliness < 0:
+            relationship = "hostile"
+        elif new_friendliness < 20:
+            relationship = "unfriendly"
+        elif new_friendliness < 50:
+            relationship = "neutral"
+        elif new_friendliness < 80:
+            relationship = "friendly"
+        else:
+            relationship = "very friendly"
+            
+        return True, f"You've influenced {politician_name}, increasing their friendliness to {new_friendliness}/100. They are now {relationship} towards you."
+        
+    except Exception as e:
+        logger.error(f"Error handling influence action: {e}")
+        return False, "An error occurred while influencing politicians."
+
+async def start_coordinated_action(player_id, district_id, action_type, description, min_participants, expires_in_hours):
+    """
+    Start a coordinated action that requires multiple players.
+    
+    Args:
+        player_id: ID of the initiating player
+        district_id: ID of the district
+        action_type: Type of coordinated action
+        description: Description of the action
+        min_participants: Minimum number of participants required
+        expires_in_hours: Hours until the action expires
+        
+    Returns:
+        tuple: (success, message, action_id)
+    """
+    try:
+        conn = sqlite3.connect('novi_sad_game.db')
+        cursor = conn.cursor()
+        
+        # Check if player has presence in district
+        cursor.execute(
+            """
+            SELECT control_points 
+            FROM district_control
+            WHERE player_id = ? AND district_id = ?
+            """,
+            (player_id, district_id)
+        )
+        
+        control_result = cursor.fetchone()
+        if not control_result or control_result[0] < 10:
+            conn.close()
+            return False, "You need at least 10 control points in this district to initiate a coordinated action.", None
+        
+        # Set expiry time
+        created_at = datetime.datetime.now().isoformat()
+        expires_at = (datetime.datetime.now() + timedelta(hours=expires_in_hours)).isoformat()
+        
+        # Create the coordinated action
+        cursor.execute(
+            """
+            INSERT INTO coordinated_actions
+            (initiator_id, district_id, action_type, description, min_participants, created_at, expires_at, status)
+            VALUES (?, ?, ?, ?, ?, ?, ?, 'pending')
+            """,
+            (player_id, district_id, action_type, description, min_participants, created_at, expires_at)
+        )
+        
+        action_id = cursor.lastrowid
+        
+        # Add initiator as first participant
+        cursor.execute(
+            """
+            INSERT INTO coordinated_action_participants
+            (action_id, player_id, joined_at)
+            VALUES (?, ?, ?)
+            """,
+            (action_id, player_id, created_at)
+        )
+        
+        conn.commit()
+        conn.close()
+        
+        return True, f"You've initiated a coordinated action in this district. It requires {min_participants} participants and will expire in {expires_in_hours} hours.", action_id
+        
+    except Exception as e:
+        logger.error(f"Error starting coordinated action: {e}")
+        return False, "An error occurred while initiating the coordinated action.", None
+
+async def join_coordinated_action(player_id, action_id):
+    """
+    Join an existing coordinated action.
+    
+    Args:
+        player_id: ID of the player joining
+        action_id: ID of the coordinated action
+        
+    Returns:
+        tuple: (success, message, is_complete)
+    """
+    try:
+        conn = sqlite3.connect('novi_sad_game.db')
+        cursor = conn.cursor()
+        
+        # Check if action exists and is still pending
+        cursor.execute(
+            """
+            SELECT district_id, min_participants, status, expires_at
             FROM coordinated_actions
             WHERE action_id = ?
             """,
             (action_id,)
         )
-
+        
         action = cursor.fetchone()
         if not action:
-            return False, "Action not found"
-
-        action_type, target_type, target_id, initiator_id = action
-
-        # Get all participants' resources
+            conn.close()
+            return False, "This coordinated action does not exist.", False
+            
+        district_id, min_participants, status, expires_at = action
+        
+        if status != 'pending':
+            conn.close()
+            return False, f"This coordinated action is already {status}.", False
+            
+        if datetime.datetime.fromisoformat(expires_at) < datetime.datetime.now():
+            cursor.execute("UPDATE coordinated_actions SET status = 'expired' WHERE action_id = ?", (action_id,))
+            conn.commit()
+            conn.close()
+            return False, "This coordinated action has expired.", False
+        
+        # Check if player has presence in district
         cursor.execute(
             """
-            SELECT player_id, resources_used
-            FROM coordinated_action_participants
+            SELECT control_points 
+            FROM district_control
+            WHERE player_id = ? AND district_id = ?
+            """,
+            (player_id, district_id)
+        )
+        
+        control_result = cursor.fetchone()
+        if not control_result or control_result[0] < 5:
+            conn.close()
+            return False, "You need at least 5 control points in this district to join the coordinated action.", False
+        
+        # Check if player is already a participant
+        cursor.execute(
+            """
+            SELECT 1 FROM coordinated_action_participants
+            WHERE action_id = ? AND player_id = ?
+            """,
+            (action_id, player_id)
+        )
+        
+        if cursor.fetchone():
+            conn.close()
+            return False, "You are already participating in this coordinated action.", False
+        
+        # Add player as participant
+        joined_at = datetime.datetime.now().isoformat()
+        cursor.execute(
+            """
+            INSERT INTO coordinated_action_participants
+            (action_id, player_id, joined_at)
+            VALUES (?, ?, ?)
+            """,
+            (action_id, player_id, joined_at)
+        )
+        
+        # Check if we've reached the minimum participants
+        cursor.execute(
+            """
+            SELECT COUNT(*) FROM coordinated_action_participants
             WHERE action_id = ?
             """,
             (action_id,)
         )
-
-        participants = cursor.fetchall()
-        if not participants:
-            return False, "No participants"
-
-        # Calculate total resources
-        total_resources = {}
-        for player_id, resources_json in participants:
-            resources = json.loads(resources_json)
-            for resource_type, amount in resources.items():
-                if resource_type in total_resources:
-                    total_resources[resource_type] += amount
-                else:
-                    total_resources[resource_type] = amount
-
-        # Calculate total power based on resources
-        power = calculate_coordinated_power(total_resources, action_type)
-
-        # Apply the coordinated action effect
-        if action_type == ACTION_ATTACK:
-            result = process_coordinated_attack(target_id, power, initiator_id, participants)
-        elif action_type == ACTION_DEFENSE:
-            result = process_coordinated_defense(target_id, power, initiator_id, participants)
-        else:
-            return False, "Invalid action type"
-
-        # Close the coordinated action
-        cursor.execute(
-            "UPDATE coordinated_actions SET status = 'closed' WHERE action_id = ?",
-            (action_id,)
-        )
-
+        
+        participant_count = cursor.fetchone()[0]
+        is_complete = participant_count >= min_participants
+        
+        # If complete, update status
+        if is_complete:
+            cursor.execute(
+                """
+                UPDATE coordinated_actions
+                SET status = 'complete', completed_at = ?
+                WHERE action_id = ?
+                """,
+                (joined_at, action_id)
+            )
+        
         conn.commit()
         conn.close()
-
-        return True, result
-
-    except Exception as e:
-        logger.error(f"Error processing coordinated action {action_id}: {e}")
-        return False, str(e)
-
-
-def calculate_coordinated_power(resources_list, action_type):
-    """
-    Calculate the combined power of a coordinated action based on all participants' resources.
-
-    Args:
-        resources_list: List of resource dictionaries from all participants
-        action_type: Type of action (attack, defense, etc.)
-
-    Returns:
-        int: Total power value
-    """
-    # Combine all resources
-    total_resources = {}
-    for resources in resources_list:
-        for resource_type, amount in resources.items():
-            if resource_type in total_resources:
-                total_resources[resource_type] += amount
-            else:
-                total_resources[resource_type] = amount
-
-    # Calculate base power from combined resources
-    base_power = 0
-    for resource_type, amount in total_resources.items():
-        if action_type == ACTION_ATTACK:
-            if resource_type == "force":
-                base_power += amount * 2
-            elif resource_type == "influence":
-                base_power += amount * 1.5
-            else:
-                base_power += amount
-        elif action_type == ACTION_DEFENSE:
-            if resource_type == "influence":
-                base_power += amount * 2
-            elif resource_type == "force":
-                base_power += amount * 1.5
-            else:
-                base_power += amount
+        
+        if is_complete:
+            return True, "You've joined the coordinated action. The minimum number of participants has been reached!", True
         else:
-            base_power += amount
+            remaining = min_participants - participant_count
+            return True, f"You've joined the coordinated action. {remaining} more participant(s) needed.", False
+        
+    except Exception as e:
+        logger.error(f"Error joining coordinated action: {e}")
+        return False, "An error occurred while joining the coordinated action.", False
 
-    # Apply synergy bonus based on number of participants
-    participant_count = len(resources_list)
-    if participant_count >= 4:
-        synergy_multiplier = 1.3  # 30% bonus for 4+ participants
-    elif participant_count >= 3:
-        synergy_multiplier = 1.2  # 20% bonus for 3 participants
-    elif participant_count >= 2:
-        synergy_multiplier = 1.1  # 10% bonus for 2 participants
-    else:
-        synergy_multiplier = 1.0  # No bonus for solo actions
-
-    # Apply diversity bonus based on resource types
-    resource_types_used = set()
-    for resources in resources_list:
-        resource_types_used.update(resources.keys())
-
-    if len(resource_types_used) >= 4:
-        diversity_multiplier = 1.2  # 20% bonus for using all 4 resource types
-    elif len(resource_types_used) >= 3:
-        diversity_multiplier = 1.1  # 10% bonus for using 3 resource types
-    else:
-        diversity_multiplier = 1.0  # No bonus for less diversity
-
-    # Final power calculation
-    final_power = round(base_power * synergy_multiplier * diversity_multiplier)
-
-    # Log the calculation for debugging
-    logger.info(
-        f"Coordinated {action_type} power: {final_power} (base: {base_power}, participants: {participant_count}, resources: {total_resources})")
-
-    return final_power
-
-
-def process_join_with_resources(player_id, action_id, resources_dict):
+async def process_coordinated_action(action_id):
     """
-    Process a player joining a coordinated action with specified resources.
-
+    Process the effects of a completed coordinated action.
+    
     Args:
-        player_id: Player ID
-        action_id: Coordinated action ID
-        resources_dict: Dictionary of resources {resource_type: amount}
-
+        action_id: ID of the coordinated action
+        
     Returns:
         tuple: (success, message)
     """
     try:
-        # Get action details
         conn = sqlite3.connect('novi_sad_game.db')
         cursor = conn.cursor()
-
-        # Check if action exists and is still open
+        
+        # Get action details
         cursor.execute(
             """
-            SELECT action_id, action_type, target_type, target_id, expires_at, status, initiator_id
-            FROM coordinated_actions 
+            SELECT district_id, action_type, status
+            FROM coordinated_actions
             WHERE action_id = ?
             """,
             (action_id,)
         )
+        
         action = cursor.fetchone()
+        if not action:
+            conn.close()
+            return False, "This coordinated action does not exist."
+            
+        district_id, action_type, status = action
+        
+        if status != 'complete':
+            conn.close()
+            return False, f"This coordinated action is not complete. Current status: {status}."
+        
+        # Get participants
+        cursor.execute(
+            """
+            SELECT player_id FROM coordinated_action_participants
+            WHERE action_id = ?
+            """,
+            (action_id,)
+        )
+        
+        participants = [row[0] for row in cursor.fetchall()]
+        
+        # Get district name
+        cursor.execute("SELECT name FROM districts WHERE district_id = ?", (district_id,))
+        district_name = cursor.fetchone()[0]
+        
+        # Process based on action type
+        if action_type == "rally":
+            # Increase control for all participants
+            control_gain = 10 * len(participants)  # More participants = more gain
+            for player_id in participants:
+                cursor.execute(
+                    """
+                    INSERT INTO district_control (player_id, district_id, control_points)
+                    VALUES (?, ?, ?)
+                    ON CONFLICT(player_id, district_id) 
+                    DO UPDATE SET control_points = control_points + ?
+                    """,
+                    (player_id, district_id, control_gain, control_gain)
+                )
+            
+            message = f"The rally in {district_name} was successful! All {len(participants)} participants gained {control_gain} control points."
+            
+        elif action_type == "protest":
+            # Find top controller who is not a participant
+            participant_list = ", ".join(["?"] * len(participants))
+            cursor.execute(
+                f"""
+                SELECT player_id, control_points 
+                FROM district_control
+                WHERE district_id = ? AND player_id NOT IN ({participant_list}) AND control_points > 0
+                ORDER BY control_points DESC
+                LIMIT 1
+                """,
+                [district_id] + participants
+            )
+            
+            target = cursor.fetchone()
+            if target:
+                target_id, target_control = target
+                
+                # Calculate damage based on participants
+                damage = 15 * len(participants)
+                
+                # Reduce target's control
+                cursor.execute(
+                    """
+                    UPDATE district_control
+                    SET control_points = MAX(0, control_points - ?)
+                    WHERE player_id = ? AND district_id = ?
+                    """,
+                    (damage, target_id, district_id)
+                )
+                
+                # Get target name
+                cursor.execute("SELECT username FROM players WHERE player_id = ?", (target_id,))
+                target_name = cursor.fetchone()[0]
+                
+                message = f"The protest in {district_name} was successful! {target_name}'s control was reduced by {damage} points."
+            else:
+                message = f"The protest in {district_name} had no effect because there were no opposing players with control."
+        
+        elif action_type == "resource_boost":
+            # Temporarily boost district resource production
+            boost_amount = 5 * len(participants)
+            
+            cursor.execute(
+                """
+                UPDATE districts
+                SET influence_resource = influence_resource + ?,
+                    resources_resource = resources_resource + ?,
+                    information_resource = information_resource + ?,
+                    force_resource = force_resource + ?
+                WHERE district_id = ?
+                """,
+                (boost_amount, boost_amount, boost_amount, boost_amount, district_id)
+            )
+            
+            message = f"The coordinated effort in {district_name} has temporarily boosted resource production by {boost_amount} for all resources!"
+            
+        else:
+            message = f"The coordinated action in {district_name} was completed, but its effects are not yet implemented."
+        
+        # Mark action as processed
+        processed_at = datetime.datetime.now().isoformat()
+        cursor.execute(
+            """
+            UPDATE coordinated_actions
+            SET status = 'processed', processed_at = ?
+            WHERE action_id = ?
+            """,
+            (processed_at, action_id)
+        )
+        
+        conn.commit()
+        conn.close()
+        
+        return True, message
+        
+    except Exception as e:
+        logger.error(f"Error processing coordinated action: {e}")
+        return False, "An error occurred while processing the coordinated action."
 
+# Game cycle functions
+def get_current_cycle():
+    """
+    Get the current game cycle (morning or evening).
+    
+    Returns:
+        str: "morning" or "evening"
+    """
+    hour = datetime.datetime.now().hour
+    return "morning" if 6 <= hour < 18 else "evening"
+
+def get_cycle_deadline():
+    """
+    Get the deadline for the current cycle.
+    
+    Returns:
+        datetime: Deadline time
+    """
+    now = datetime.datetime.now()
+    if get_current_cycle() == "morning":
+        # Morning cycle ends at 18:00
+        return now.replace(hour=18, minute=0, second=0, microsecond=0)
+    else:
+        # Evening cycle ends at 06:00 the next day
+        tomorrow = now + timedelta(days=1)
+        return tomorrow.replace(hour=6, minute=0, second=0, microsecond=0)
+
+def get_cycle_results_time():
+    """
+    Get the time when results for the current cycle will be processed.
+    
+    Returns:
+        datetime: Results processing time
+    """
+    deadline = get_cycle_deadline()
+    # Process results 5 minutes after deadline
+    return deadline + timedelta(minutes=5)
+
+async def process_game_cycle(context: ContextTypes.DEFAULT_TYPE = None):
+    """
+    Process the end of a game cycle and calculate results.
+    This function is called by the scheduler when a cycle ends.
+    
+    Args:
+        context: Bot context (optional)
+        
+    Returns:
+        bool: Success flag
+    """
+    try:
+        logger.info(f"Processing game cycle: {get_current_cycle()}")
+        
+        conn = sqlite3.connect('novi_sad_game.db')
+        cursor = conn.cursor()
+        
+        # Reset player action counts for the new cycle
+        cursor.execute(
+            """
+            UPDATE players
+            SET actions_remaining = 3
+            """
+        )
+        
+        # Process district control changes
+        process_district_control_changes(cursor)
+        
+        # Process pending attacks and defenses
+        process_attack_defense_resolution(cursor)
+        
+        # Generate news about significant events
+        generate_cycle_news(cursor)
+        
+        conn.commit()
+        conn.close()
+        
+        logger.info("Game cycle processing completed")
+        return True
+        
+    except Exception as e:
+        logger.error(f"Error processing game cycle: {e}")
+        return False
+
+def process_district_control_changes(cursor):
+    """Process changes in district control"""
+    try:
+        # For each district, calculate control point decay
+        cursor.execute("SELECT district_id FROM districts")
+        districts = cursor.fetchall()
+        
+        for district in districts:
+            district_id = district[0]
+            
+            # Apply 5% decay to control points for inactive players
+            cursor.execute(
+                """
+                UPDATE district_control
+                SET control_points = MAX(0, ROUND(control_points * 0.95))
+                WHERE district_id = ? AND player_id NOT IN (
+                    SELECT player_id FROM actions 
+                    WHERE district_id = ? 
+                    AND timestamp > datetime('now', '-1 day')
+                )
+                """,
+                (district_id, district_id)
+            )
+    except Exception as e:
+        logger.error(f"Error processing district control changes: {e}")
+
+def process_attack_defense_resolution(cursor):
+    """Process attack and defense actions"""
+    try:
+        # Get all pending attacks from this cycle
+        cycle_start = datetime.datetime.now() - timedelta(hours=12)
+        cursor.execute(
+            """
+            SELECT district_id, 
+                   SUM(CASE WHEN action_type = ? THEN amount ELSE 0 END) as total_attack,
+                   SUM(CASE WHEN action_type = ? THEN amount ELSE 0 END) as total_defense
+            FROM actions
+            WHERE (action_type = ? OR action_type = ?) 
+            AND timestamp > ?
+            GROUP BY district_id
+            """,
+            (ACTION_ATTACK, ACTION_DEFENSE, ACTION_ATTACK, ACTION_DEFENSE, cycle_start.isoformat())
+        )
+        
+        results = cursor.fetchall()
+        
+        for district_id, total_attack, total_defense in results:
+            # Skip if no meaningful attack
+            if total_attack <= 0:
+                continue
+                
+            # Calculate net attack (after defense)
+            net_attack = max(0, total_attack - total_defense)
+            
+            if net_attack > 0:
+                # Apply damage to all players' control in the district based on their current control
+                cursor.execute(
+                    """
+                    SELECT player_id, control_points
+                    FROM district_control
+                    WHERE district_id = ? AND control_points > 0
+                    """,
+                    (district_id,)
+                )
+                
+                players = cursor.fetchall()
+                total_control = sum(control for _, control in players)
+                
+                for player_id, control_points in players:
+                    if total_control > 0:
+                        # Distribute damage proportionally to current control
+                        damage_share = (control_points / total_control) * net_attack
+                        new_control = max(0, control_points - round(damage_share))
+                        
+                        cursor.execute(
+                            """
+                            UPDATE district_control
+                            SET control_points = ?
+                            WHERE player_id = ? AND district_id = ?
+                            """,
+                            (new_control, player_id, district_id)
+                        )
+    except Exception as e:
+        logger.error(f"Error processing attack/defense resolution: {e}")
+
+def generate_cycle_news(cursor):
+    """Generate news for the cycle"""
+    try:
+        # Add cycle change news
+        cycle = get_current_cycle()
+        news_text = f"Cycle changed to {cycle.upper()}"
+        
+        cursor.execute(
+            """
+            INSERT INTO news (news_text, importance, timestamp)
+            VALUES (?, ?, ?)
+            """,
+            (news_text, 1, datetime.datetime.now().isoformat())
+        )
+        
+        # Add news about significant control changes
+        cursor.execute(
+            """
+            SELECT dc.player_id, p.name, d.name, dc.control_points
+            FROM district_control dc
+            JOIN players p ON dc.player_id = p.player_id
+            JOIN districts d ON dc.district_id = d.district_id
+            WHERE dc.control_points >= 50
+            """
+        )
+        
+        significant_control = cursor.fetchall()
+        
+        for player_id, player_name, district_name, control_points in significant_control:
+            if control_points >= 80:
+                news_text = f"{player_name} has established strong control ({control_points}%) over {district_name}!"
+                importance = 3
+            elif control_points >= 50:
+                news_text = f"{player_name} has gained majority control ({control_points}%) in {district_name}."
+                importance = 2
+            else:
+                continue
+                
+            cursor.execute(
+                """
+                INSERT INTO news (news_text, importance, timestamp)
+                VALUES (?, ?, ?)
+                """,
+                (news_text, importance, datetime.datetime.now().isoformat())
+            )
+    except Exception as e:
+        logger.error(f"Error generating cycle news: {e}")
+
+def register_player_presence(player_id, district_id):
+    """
+    Register player presence in a district.
+    
+    Args:
+        player_id: ID of the player
+        district_id: ID of the district
+        
+    Returns:
+        bool: Success flag
+    """
+    try:
+        conn = sqlite3.connect('novi_sad_game.db')
+        cursor = conn.cursor()
+        
+        now = datetime.datetime.now().isoformat()
+        
+        # Update presence or insert if not exists
+        cursor.execute(
+            """
+            INSERT INTO player_presence (player_id, district_id, last_presence)
+            VALUES (?, ?, ?)
+            ON CONFLICT(player_id, district_id) 
+            DO UPDATE SET last_presence = ?
+            """,
+            (player_id, district_id, now, now)
+        )
+        
+        conn.commit()
+        conn.close()
+        return True
+    except Exception as e:
+        logger.error(f"Error registering player presence: {e}")
+        return False
+
+def get_player_presence_status(player_id):
+    """
+    Get the district where the player is currently present.
+    
+    Args:
+        player_id: ID of the player
+        
+    Returns:
+        dict or None: District info or None if not present
+    """
+    try:
+        conn = sqlite3.connect('novi_sad_game.db')
+        cursor = conn.cursor()
+        
+        # Get most recent presence
+        cursor.execute(
+            """
+            SELECT pp.district_id, d.name, pp.last_presence
+            FROM player_presence pp
+            JOIN districts d ON pp.district_id = d.district_id
+            WHERE pp.player_id = ?
+            ORDER BY pp.last_presence DESC
+            LIMIT 1
+            """,
+            (player_id,)
+        )
+        
+        presence = cursor.fetchone()
+        conn.close()
+        
+        if not presence:
+            return None
+            
+        # Check if presence is recent (within last 2 hours)
+        last_presence = datetime.datetime.fromisoformat(presence[2])
+        if (datetime.datetime.now() - last_presence).total_seconds() > 7200:  # 2 hours
+            return None
+            
+        return {
+            "district_id": presence[0],
+            "district_name": presence[1],
+            "last_presence": last_presence
+        }
+    except Exception as e:
+        logger.error(f"Error getting player presence: {e}")
+        return None
+
+def calculate_participant_power(player_id, resource_commitments):
+    """
+    Calculate the power a participant contributes to a coordinated action.
+    
+    Args:
+        player_id (str): The ID of the player
+        resource_commitments (dict): Dictionary mapping resource types to amounts
+        
+    Returns:
+        int: The calculated power value
+    """
+    try:
+        # Basic power calculation: sum of all resources with different weights
+        influence_power = resource_commitments.get('influence', 0) * 1.5
+        resources_power = resource_commitments.get('resources', 0) * 1.0
+        information_power = resource_commitments.get('information', 0) * 2.0
+        force_power = resource_commitments.get('force', 0) * 2.5
+        
+        # Add bonus for balanced contribution
+        resource_types_used = sum(1 for amount in resource_commitments.values() if amount > 0)
+        balance_bonus = resource_types_used * 0.1  # 10% bonus per resource type used
+        
+        # Calculate base power
+        base_power = influence_power + resources_power + information_power + force_power
+        
+        # Apply balance bonus
+        total_power = base_power * (1 + balance_bonus)
+        
+        # Round to integer
+        return round(total_power)
+    except Exception as e:
+        logger.error(f"Error calculating participant power: {e}")
+        return 0
+
+async def process_join_with_resources(player_id, action_id, resources_dict):
+    """
+    Process a player joining a coordinated action with specific resources.
+    
+    Args:
+        player_id (int): The ID of the player joining the action
+        action_id (int): The ID of the coordinated action to join
+        resources_dict (dict): A dictionary of resources to use {resource_type: amount}
+    
+    Returns:
+        tuple: (success, message) where success is a boolean and message is a string
+    """
+    try:
+        conn = sqlite3.connect('novi_sad_game.db')
+        cursor = conn.cursor()
+        
+        # Check if action exists and is open
+        cursor.execute(
+            """
+            SELECT action_id, status, target_type, target_id, action_type, initiator_id
+            FROM coordinated_actions
+            WHERE action_id = ?
+            """,
+            (action_id,)
+        )
+        
+        action = cursor.fetchone()
         if not action:
             conn.close()
             return False, "Action not found"
-
-        action_id, action_type, target_type, target_id, expires_at_str, status, initiator_id = action
-
-        # Don't allow initiator to join their own action again
-        if player_id == initiator_id:
+        
+        _, status, target_type, target_id, action_type, initiator_id = action
+        
+        if status != 'open':
             conn.close()
-            return False, "You cannot join your own action again"
-
-        # Check if player already joined this action
+            return False, f"Action is {status}, cannot join"
+        
+        # Check if player is already participating
         cursor.execute(
             """
             SELECT player_id
@@ -1477,560 +1255,121 @@ def process_join_with_resources(player_id, action_id, resources_dict):
             """,
             (action_id, player_id)
         )
+        
         if cursor.fetchone():
             conn.close()
-            return False, "You have already joined this action"
-
-        if status != 'open':
-            conn.close()
-            return False, "Action is no longer open"
-
-        # Check if action has expired
-        expires_at = datetime.datetime.fromisoformat(expires_at_str)
-        if datetime.datetime.now() > expires_at:
-            # Update status to expired
-            cursor.execute("UPDATE coordinated_actions SET status = 'expired' WHERE action_id = ?", (action_id,))
-            conn.commit()
-            conn.close()
-            return False, "Action has expired"
-
-        # Check if player has sufficient resources
+            return False, "Already participating in this action"
+        
+        # Check if the player has resources
+        player_resources = {}
         cursor.execute(
             """
-            SELECT influence, resources, information, force
-            FROM resources
+            SELECT resource_type, amount 
+            FROM resources 
             WHERE player_id = ?
-            """,
+            """, 
             (player_id,)
         )
-        player_resources = cursor.fetchone()
-
-        if not player_resources:
-            conn.close()
-            return False, "Player resources not found"
-
-        # Convert tuple to dict for easier checks
-        available_resources = {
-            "influence": player_resources[0],
-            "resources": player_resources[1],
-            "information": player_resources[2],
-            "force": player_resources[3]
-        }
-
-        # Verify resources are available
+        
+        for row in cursor.fetchall():
+            resource_type, amount = row
+            player_resources[resource_type] = amount
+        
+        # Check if player has enough of each resource
         for resource_type, amount in resources_dict.items():
-            if available_resources.get(resource_type, 0) < amount:
+            if player_resources.get(resource_type, 0) < amount:
                 conn.close()
-                return False, f"Insufficient {resource_type} resources"
-
+                return False, f"Not enough {resource_type}"
+        
+        # Convert resources_dict to JSON for storage
+        resources_json = json.dumps(resources_dict)
+        
+        # Use a main action
+        cursor.execute(
+            """
+            UPDATE players 
+            SET main_actions_left = main_actions_left - 1 
+            WHERE player_id = ? AND main_actions_left > 0
+            """, 
+            (player_id,)
+        )
+        
+        if cursor.rowcount == 0:
+            conn.close()
+            return False, "No main actions left"
+        
         # Deduct resources
         for resource_type, amount in resources_dict.items():
             cursor.execute(
-                f"UPDATE resources SET {resource_type} = {resource_type} - ? WHERE player_id = ?",
-                (amount, player_id)
+                """
+                UPDATE resources
+                SET amount = amount - ?
+                WHERE player_id = ? AND resource_type = ?
+                """,
+                (amount, player_id, resource_type)
             )
-
-        # Add participant
+        
+        # Add player to participants
+        joined_at = datetime.datetime.now().isoformat()
         cursor.execute(
             """
-            INSERT INTO coordinated_action_participants 
+            INSERT INTO coordinated_action_participants
             (action_id, player_id, resources_used, joined_at)
             VALUES (?, ?, ?, ?)
             """,
-            (action_id, player_id, json.dumps(resources_dict), datetime.datetime.now().isoformat())
+            (action_id, player_id, resources_json, joined_at)
         )
-
-        conn.commit()
-        conn.close()
-
-        return True, "Successfully joined action"
-
-    except Exception as e:
-        logger.error(f"Error processing join with resources: {e}")
-        return False, f"Error: {str(e)}"
-
-
-def calculate_participant_power(resources, action_type):
-    """
-    Calculate a participant's power contribution based on resources.
-
-    Args:
-        resources: Dictionary of resources {resource_type: amount}
-        action_type: Type of action (attack, defense, etc.)
-
-    Returns:
-        int: Power contribution value
-    """
-    base_power = 0
-
-    for resource_type, amount in resources.items():
-        if action_type == ACTION_ATTACK:
-            if resource_type == "force":
-                base_power += amount * 2  # Force is most effective for attacks
-            elif resource_type == "influence":
-                base_power += amount * 1.5  # Influence is moderately effective
-            else:
-                base_power += amount  # Other resources contribute base value
-        elif action_type == ACTION_DEFENSE:
-            if resource_type == "influence":
-                base_power += amount * 2  # Influence is most effective for defense
-            elif resource_type == "force":
-                base_power += amount * 1.5  # Force is moderately effective
-            else:
-                base_power += amount  # Other resources contribute base value
-        else:
-            # Default contribution for other action types
-            base_power += amount
-
-    return round(base_power)
-
-
-def process_coordinated_attack(district_id, attack_power, initiator_id, participants):
-    """Process a coordinated attack action on a district."""
-    try:
-        # Get current control data for the district
-        from db.queries import get_district_control
-        control_data = get_district_control(district_id)
-
-        # Get the district name for messages
-        from game.districts import get_district_by_id
-        district = get_district_by_id(district_id)
-        district_name = district['name'] if district else district_id
-
-        # Get participant names for messages
-        participant_names = []
-        for p in participants:
-            # Participant tuple structure: (player_id, resources_json, joined_at, character_name)
-            if len(p) >= 4:
-                participant_names.append(p[3])
-            else:
-                participant_names.append(f"Player {p[0]}")
-
-        if not control_data:
-            # No one controls the district, so attackers gain control
-            # Distribute control points proportionally among participants
-            for participant in participants:
-                participant_id = participant[0]  # First element is player_id
-
-                # Give each participant a share of the control points
-                participant_share = round(attack_power / len(participants))
-                from db.queries import update_district_control
-                update_district_control(participant_id, district_id, participant_share)
-
-            return {
-                "success": True,
-                "message": f"Coordinated attack successful on uncontrolled district {district_name}",
-                "participants": participant_names,
-                "control_gained": attack_power
-            }
-
-        # Find the player with the most control points (the defender)
-        defender_id, defender_control, defender_name = max(control_data, key=lambda x: x[1])
-
-        # Don't attack yourself or other participants
-        participant_ids = [p[0] for p in participants]
-        if defender_id in participant_ids:
-            # Find the next highest controller not in participants
-            filtered_control_data = [c for c in control_data if c[0] not in participant_ids]
-            if not filtered_control_data:
-                return {
-                    "success": False,
-                    "message": f"No suitable target found in {district_name}.",
-                    "participants": participant_names
-                }
-            defender_id, defender_control, defender_name = max(filtered_control_data, key=lambda x: x[1])
-
-        # Check if the defender has active defense
-        conn = sqlite3.connect('novi_sad_game.db')
-        cursor = conn.cursor()
+        
+        # Check if this action has enough participants to complete
+        # For now, let's assume 2 participants (initiator + 1) is enough
         cursor.execute(
             """
-            SELECT defense_bonus FROM district_defense 
-            WHERE district_id = ? AND player_id = ? AND expires_at > ?
+            SELECT COUNT(*) 
+            FROM coordinated_action_participants
+            WHERE action_id = ?
             """,
-            (district_id, defender_id, datetime.datetime.now().isoformat())
+            (action_id,)
         )
-        defense_result = cursor.fetchone()
-        conn.close()
-
-        defense_bonus = defense_result[0] if defense_result else 0
-
-        # Calculate effect of attack vs defense
-        net_attack = max(0, attack_power - defense_bonus)
-
-        # Reduce defender control
-        defender_new_control = max(0, defender_control - net_attack)
-        defender_loss = defender_control - defender_new_control
-
-        # Update defender control
-        from db.queries import update_district_control
-        update_district_control(defender_id, district_id, -defender_loss)
-
-        # If defense completely blocked the attack
-        if defender_loss == 0:
-            return {
-                "success": False,
-                "message": f"Attack on {district_name} was blocked by {defender_name}'s defenses.",
-                "participants": participant_names,
-                "target_player": defender_name,
-                "defense_bonus": defense_bonus
-            }
-
-        # Distribute gained control among participants proportionally
-        for participant in participants:
-            participant_id = participant[0]
-
-            # Calculate participant's contribution to the attack
-            participant_resources = json.loads(participant[1])  # Parse resource JSON
-            participant_power = calculate_participant_power(participant_resources, ACTION_ATTACK)
-
-            # Share of gained control based on contribution
-            contribution_ratio = participant_power / max(1, attack_power)
-            participant_share = round(defender_loss * contribution_ratio)
-
-            update_district_control(participant_id, district_id, participant_share)
-
-        # Add a news item about the attack
-        from db.queries import add_news
-        news_title = f"Coordinated Attack on {district_name}"
-        news_content = f"A coordinated attack led by {participant_names[0]} with {len(participants)} participants successfully reduced {defender_name}'s control by {defender_loss} points."
-        add_news(news_title, news_content)
-
-        return {
-            "success": True,
-            "message": f"Coordinated attack successful against {defender_name} in {district_name}",
-            "participants": participant_names,
-            "defender": defender_name,
-            "control_taken": defender_loss,
-            "defense_blocked": defense_bonus
-        }
-
-    except Exception as e:
-        logger.error(f"Error processing coordinated attack: {e}")
-        return {"success": False, "message": str(e)}
-
-
-def process_coordinated_defense(district_id, defense_power, initiator_id, participants):
-    """Process a coordinated defense action on a district."""
-    try:
-        # Get the district name for messages
-        from game.districts import get_district_by_id
-        district = get_district_by_id(district_id)
-        district_name = district['name'] if district else district_id
-
-        # Get participant names for messages
-        participant_names = []
-        for p in participants:
-            if len(p) >= 4:
-                participant_names.append(p[3])
-            else:
-                participant_names.append(f"Player {p[0]}")
-
-        # Set up the defense to last until the end of the cycle
-        now = datetime.datetime.now()
-
-        # Determine cycle end time based on current time
-        if now.hour < 13:  # Morning cycle
-            expires_at = datetime.datetime.combine(now.date(), datetime.time(13, 0))
-        else:  # Evening cycle
-            if now.hour < 19:
-                expires_at = datetime.datetime.combine(now.date(), datetime.time(19, 0))
-            else:
-                # If it's after 19:00, set to 13:00 next day
-                tomorrow = now.date() + datetime.timedelta(days=1)
-                expires_at = datetime.datetime.combine(tomorrow, datetime.time(13, 0))
-
-        # Record defense bonuses for each participant
-        conn = sqlite3.connect('novi_sad_game.db')
-        cursor = conn.cursor()
-
-        for participant in participants:
-            participant_id = participant[0]
-
-            # Calculate participant's individual defense contribution
-            participant_resources = json.loads(participant[1])
-            participant_power = calculate_participant_power(participant_resources, ACTION_DEFENSE)
-
-            # Insert or update defense bonus
+        
+        participant_count = cursor.fetchone()[0]
+        
+        if participant_count >= 2:
+            # Set action to complete
             cursor.execute(
                 """
-                INSERT OR REPLACE INTO district_defense
-                (district_id, player_id, defense_bonus, expires_at)
-                VALUES (?, ?, ?, ?)
+                UPDATE coordinated_actions
+                SET status = 'complete'
+                WHERE action_id = ?
                 """,
-                (district_id, participant_id, participant_power, expires_at.isoformat())
+                (action_id,)
             )
-
-            # Also increment control points for the district (reinforcement)
-            from db.queries import update_district_control
-            control_increase = round(participant_power / 2)  # Half of defense power translates to control
-            update_district_control(participant_id, district_id, control_increase)
-
+        
         conn.commit()
+        
+        # Get target name for the message
+        target_name = str(target_id)
+        if target_type == "district":
+            cursor.execute("SELECT name FROM districts WHERE district_id = ?", (target_id,))
+            district = cursor.fetchone()
+            if district:
+                target_name = district[0]
+        elif target_type == "politician":
+            cursor.execute("SELECT name FROM politicians WHERE politician_id = ?", (target_id,))
+            politician = cursor.fetchone()
+            if politician:
+                target_name = politician[0]
+        
         conn.close()
-
-        # Add a news item about the defense
-        from db.queries import add_news
-        news_title = f"Coordinated Defense of {district_name}"
-        news_content = f"A coordinated defense led by {participant_names[0]} with {len(participants)} participants has fortified their positions in {district_name}."
-        add_news(news_title, news_content)
-
-        return {
-            "success": True,
-            "message": f"Coordinated defense successful in {district_name}",
-            "participants": participant_names,
-            "defense_power": defense_power,
-            "expires_at": expires_at.isoformat()
-        }
-
-    except Exception as e:
-        logger.error(f"Error processing coordinated defense: {e}")
-        return {"success": False, "message": str(e)}
-
-
-def process_attack(district_id, resources):
-    """Process an attack action with combined resources."""
-    try:
-        # Get current control points
-        current_control = get_district_control(district_id)
-
-        # Calculate attack power
-        attack_power = 0
-        for resource_type, amount in resources.items():
-            if resource_type == "force":
-                attack_power += amount * 2  # Force is most effective for attacks
-            elif resource_type == "influence":
-                attack_power += amount * 1.5  # Influence is moderately effective
-            else:
-                attack_power += amount  # Other resources are less effective
-
-        # Apply attack
-        new_control = max(0, current_control - attack_power)
-        update_district_control(district_id, new_control)
-
-        return {
-            "success": True,
-            "message": f"Attack successful. District control reduced by {attack_power} points.",
-            "new_control": new_control
-        }
-    except Exception as e:
-        logger.error(f"Error processing attack: {e}")
-        return {"success": False, "message": str(e)}
-
-
-def process_defense(district_id, resources):
-    """Process a defense action with combined resources."""
-    try:
-        # Get current control points
-        current_control = get_district_control(district_id)
-
-        # Calculate defense power
-        defense_power = 0
-        for resource_type, amount in resources.items():
-            if resource_type == "influence":
-                defense_power += amount * 2  # Influence is most effective for defense
-            elif resource_type == "force":
-                defense_power += amount * 1.5  # Force is moderately effective
-            else:
-                defense_power += amount  # Other resources are less effective
-
-        # Apply defense
-        new_control = min(100, current_control + defense_power)
-        update_district_control(district_id, new_control)
-
-        return {
-            "success": True,
-            "message": f"Defense successful. District control increased by {defense_power} points.",
-            "new_control": new_control
-        }
-    except Exception as e:
-        logger.error(f"Error processing defense: {e}")
-        return {"success": False, "message": str(e)}
-
-
-def get_next_cycle_time(is_morning=True):
-    """Calculate the next time for a morning (8:00) or evening (20:00) cycle."""
-    now = datetime.datetime.now()
-    target_hour = 8 if is_morning else 20
-    
-    # Create a datetime for today at the target hour
-    target_time = now.replace(hour=target_hour, minute=0, second=0, microsecond=0)
-    
-    # If that time has already passed today, move to tomorrow
-    if now >= target_time:
-        target_time += datetime.timedelta(days=1)
-    
-    # Calculate seconds until that time
-    time_diff = (target_time - now).total_seconds()
-    return time_diff
-
-
-async def morning_cycle(context: ContextTypes.DEFAULT_TYPE):
-    """Run the morning cycle tasks: distributing resources, resetting actions."""
-    try:
-        logger.info("Starting morning cycle...")
         
-        # Notify users
-        await send_cycle_notification(context, is_morning=True)
-        
-        # Reset player operations
-        reset_player_operations()
-        
-        # Distribute resources
-        distribute_resources()
-        
-        # Create news about the cycle
-        create_cycle_news(is_morning=True)
-        
-        logger.info("Morning cycle completed successfully")
-    except Exception as e:
-        logger.error(f"Error during morning cycle: {e}", exc_info=True)
-
-
-async def evening_cycle(context: ContextTypes.DEFAULT_TYPE):
-    """Run the evening cycle tasks: distributing resources, resetting actions."""
-    try:
-        logger.info("Starting evening cycle...")
-        
-        # Notify users
-        await send_cycle_notification(context, is_morning=False)
-        
-        # Reset player operations
-        reset_player_operations()
-        
-        # Distribute resources
-        distribute_resources()
-        
-        # Create news about the cycle
-        create_cycle_news(is_morning=False)
-        
-        logger.info("Evening cycle completed successfully")
-    except Exception as e:
-        logger.error(f"Error during evening cycle: {e}", exc_info=True)
-
-
-async def cleanup_expired_actions(context: ContextTypes.DEFAULT_TYPE):
-    """Clean up expired coordinated actions."""
-    try:
-        logger.info("Cleaning up expired coordinated actions...")
-        
-        # Get expired actions and notify their initiators
-        from db.queries import cleanup_expired_actions as db_cleanup
-        expired_count = db_cleanup()
-        
-        if expired_count > 0:
-            logger.info(f"Cleaned up {expired_count} expired coordinated actions")
+        # Check if the action is now complete
+        if participant_count >= 2:
+            return True, f"Joined and completed the {action_type} action on {target_name}"
         else:
-            logger.info("No expired coordinated actions found")
-            
+            return True, f"Joined the {action_type} action on {target_name}"
+    
     except Exception as e:
-        logger.error(f"Error during cleanup of expired actions: {e}", exc_info=True)
-
-
-@db_transaction
-def reset_player_operations(cursor):
-    """Reset the operations_left counter for all players."""
-    cursor.execute("UPDATE players SET main_actions_left = 3, quick_actions_left = 3")
-    logger.info("Reset actions for all players")
-
-
-@db_transaction
-def distribute_resources(cursor):
-    """Distribute resources to players based on district control."""
-    # Get all players
-    cursor.execute("SELECT player_id FROM players")
-    players = cursor.fetchall()
-    
-    for player_id in [p[0] for p in players]:
-        # Count controlled districts
-        cursor.execute("""
-            SELECT COUNT(*) FROM district_control 
-            WHERE player_id = ? AND control_points > 30
-        """, (player_id,))
-        district_count = cursor.fetchone()[0]
-        
-        # Base resource amount
-        base_amount = 5
-        
-        # Calculate resource amounts based on district control
-        # More districts = more resources
-        influence = base_amount + (district_count * 3)
-        information = base_amount + (district_count * 2)
-        force = base_amount + (district_count * 2)
-        
-        # Update player resources
-        cursor.execute(
-            """
-            UPDATE resources 
-            SET influence = influence + ?, 
-                information = information + ?, 
-                force = force + ?
-            WHERE player_id = ?
-            """, 
-            (influence, information, force, player_id)
-        )
-        
-        logger.info(f"Distributed resources to player {player_id}: I:{influence} S:{information} F:{force}")
-
-
-@db_transaction
-def create_cycle_news(cursor, is_morning=True):
-    """Create a news entry for the game cycle."""
-    cycle_type = "Morning" if is_morning else "Evening"
-    
-    # Create news entry
-    cursor.execute(
-        """
-        INSERT INTO news (content) 
-        VALUES (?)
-        """,
-        (
-            f"The {cycle_type.lower()} cycle has begun. All players have received resources and actions have been reset.",
-        )
-    )
-    
-    logger.info(f"Created news entry for {cycle_type.lower()} cycle")
-
-
-async def send_cycle_notification(context: ContextTypes.DEFAULT_TYPE, is_morning=True):
-    """Send notifications to all players about the new cycle."""
-    try:
-        # Connect to database
-        with get_db_connection() as conn:
-            cursor = conn.cursor()
-            
-            # Get all players
-            cursor.execute("SELECT player_id, lang FROM players")
-            players = cursor.fetchall()
-            
-            cycle_type = "cycle_morning" if is_morning else "cycle_evening"
-            
-            # Send notifications
-            for player_id, lang in players:
-                try:
-                    await context.bot.send_message(
-                        chat_id=player_id,
-                        text=get_text(cycle_type, lang)
-                    )
-                    logger.info(f"Sent cycle notification to player {player_id}")
-                except Exception as e:
-                    logger.error(f"Failed to send cycle notification to player {player_id}: {e}")
-    except Exception as e:
-        logger.error(f"Error during cycle notification: {e}", exc_info=True)
-
-
-def process_action_attack(player_id, district_id, resources_used):
-    """Process an attack action on a district."""
-    response = {}
-    
-    # Get player's language
-    lang = get_player_language(player_id)
-    
-    # Get player's districts
-    player_districts = get_player_districts(player_id)
-    
-    # Check if district is already controlled by player
-    if any(d['district_id'] == district_id for d in player_districts):
-        response['success'] = False
-        response['message'] = get_text("error_attack_own_district", lang)
-        return response
+        logger.error(f"Error joining coordinated action: {e}")
+        if conn:
+            conn.rollback()
+            conn.close()
+        return False, "An error occurred while joining the action"

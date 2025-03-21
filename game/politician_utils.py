@@ -54,7 +54,7 @@ def get_politician_action_options(politician_id: int, player_id: int, lang="en")
         friendliness = relationship.get('friendliness', 50) if relationship else 50
 
         # Get politician data
-        conn = sqlite3.connect('belgrade_game.db')
+        conn = sqlite3.connect('novi_sad_game.db')
         cursor = conn.cursor()
         cursor.execute("SELECT name, is_international FROM politicians WHERE politician_id = ?", (politician_id,))
         politician_data = cursor.fetchone()
@@ -197,7 +197,7 @@ def get_politician_relationship(politician_id: int, player_id: int) -> Dict[str,
     """
     conn = None
     try:
-        conn = sqlite3.connect('belgrade_game.db')
+        conn = sqlite3.connect('novi_sad_game.db')
         cursor = conn.cursor()
 
         # Check if a relationship record exists
@@ -254,7 +254,7 @@ def process_international_politician_activation(cycle_name: str) -> List[Dict[st
         List[Dict]: List of activated politicians and their actions
     """
     try:
-        conn = sqlite3.connect('belgrade_game.db')
+        conn = sqlite3.connect('novi_sad_game.db')
         cursor = conn.cursor()
 
         # Get all international politicians
@@ -328,7 +328,7 @@ def process_international_action(pol_id: int, name: str, role: str, ideology: in
         Dict: Action effect details
     """
     try:
-        conn = sqlite3.connect('belgrade_game.db')
+        conn = sqlite3.connect('novi_sad_game.db')
         cursor = conn.cursor()
 
         result = {
@@ -637,7 +637,7 @@ def generate_politician_influence_report(lang="en"):
     from languages import get_text, format_ideology
 
     try:
-        conn = sqlite3.connect('belgrade_game.db')
+        conn = sqlite3.connect('novi_sad_game.db')
         cursor = conn.cursor()
 
         # Get all local politicians with their details

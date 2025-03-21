@@ -936,33 +936,33 @@ ACTION_NAMES = {
 DISTRICT_NAMES = {
     "en": {
         "stari_grad": "Stari Grad",
-        "novi_beograd": "Novi Beograd",
-        "zemun": "Zemun",
-        "savski_venac": "Savski Venac",
-        "vozdovac": "Voždovac",
-        "cukarica": "Čukarica",
-        "palilula": "Palilula",
-        "vracar": "Vračar"
+        "liman": "Liman",
+        "petrovaradin": "Petrovaradin",
+        "podbara": "Podbara",
+        "detelinara": "Detelinara",
+        "grbavica": "Grbavica",
+        "novo_naselje": "Novo Naselje",
+        "salajka": "Salajka"
     },
     "ru": {
         "stari_grad": "Старый город",
-        "novi_beograd": "Новый Белград",
-        "zemun": "Земун",
-        "savski_venac": "Савски Венац",
-        "vozdovac": "Вождовац",
-        "cukarica": "Чукарица",
-        "palilula": "Палилула",
-        "vracar": "Врачар"
+        "liman": "Лиман",
+        "petrovaradin": "Петроварадин",
+        "podbara": "Подбара",
+        "detelinara": "Детелинара",
+        "grbavica": "Грбавица",
+        "novo_naselje": "Ново Насеље",
+        "salajka": "Салайка"
     },
     "sr": {
         "stari_grad": "Стари Град",
-        "novi_beograd": "Нови Београд",
-        "zemun": "Земун",
-        "savski_venac": "Савски Венац",
-        "vozdovac": "Вождовац",
-        "cukarica": "Чукарица",
-        "palilula": "Палилула",
-        "vracar": "Врачар"
+        "liman": "Лиман",
+        "petrovaradin": "Петроварадин",
+        "podbara": "Подбара",
+        "detelinara": "Детелинара",
+        "grbavica": "Грбавица",
+        "novo_naselje": "Ново Насеље",
+        "salajka": "Салајка"
     }
 }
 
@@ -1064,7 +1064,7 @@ def get_district_name(district_id, lang="en"):
             
         # As a fallback, get the name from the database
         import sqlite3
-        conn = sqlite3.connect('belgrade_game.db')
+        conn = sqlite3.connect('novi_sad_game.db')
         cursor = conn.cursor()
         cursor.execute("SELECT name FROM districts WHERE district_id = ?", (district_id,))
         result = cursor.fetchone()

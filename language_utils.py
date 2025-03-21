@@ -57,7 +57,7 @@ def _update_detected_language(user_id: int, language: str) -> None:
         language: Language code to set
     """
     try:
-        conn = sqlite3.connect('belgrade_game.db')
+        conn = sqlite3.connect('novi_sad_game.db')
         cursor = conn.cursor()
 
         # Check if player exists first

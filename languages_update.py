@@ -39,6 +39,26 @@ ADDITIONAL_TRANSLATIONS = {
         "medium_influence": "Medium influence",
         "low_influence": "Low influence",
         "international_politicians": "International Politicians",
+        
+        # Missing translations based on logs
+        "unnamed": "Unnamed",
+        "status_ideology": "Ideology",
+        "status_no_districts": "You don't control any districts yet",
+        "info_spreading": "Information Spreading",
+        "select_action_type": "Select action type",
+        "action_cancel": "Cancel action",
+        "operation_cancelled": "Operation cancelled",
+        "help_message": "Help message",
+        "politicians_title": "Politicians",
+        "ideology": "Ideology",
+        "error_invalid_data": "Invalid data received",
+        "news_title": "News",
+        "no_coordinated_actions": "No coordinated actions available",
+        "language_button_en": "English",
+        "language_button_ru": "Russian",
+        "language_select": "Select language",
+        "enter_character_name": "Enter character name",
+        "info_from_user": "Information from user",
 
         # Politician action button labels
         "action_pol_info": "Gather Information",
@@ -112,6 +132,41 @@ ADDITIONAL_TRANSLATIONS = {
         "role": "Role",
         "district": "District",
         "key_relationships": "Key Relationships",
+
+        # Missing Serbian translations
+        "welcome_sr": "Welcome to the Novi Sad Game! This is a strategic role-playing game set in 1990s Yugoslavia.",
+        "cycle_evening_sr": "Evening",
+        "game_cycles_heading_sr": "Game Cycles",
+        "quick_start_1_sr": "Quick Start Guide - Step 1",
+        "basic_commands_sr": "Basic Commands",
+        "districts_command_help_sr": "View districts information",
+        "tips_heading_sr": "Tips",
+        "game_cycles_help_text_sr": "Game cycles help text",
+        "help_tips_sr": "Help tips",
+        "join_command_help_sr": "Join a game action",
+        "status_command_help_sr": "Check your status",
+        "admin_help_hint_sr": "Admin help hint",
+        "news_command_help_sr": "View recent news",
+        "resources_help_text_sr": "Resources help text",
+        "cycle_morning_sr": "Morning",
+        "action_expired_sr": "Action expired",
+        "help_footer_sr": "Help footer",
+        "quick_start_3_sr": "Quick Start Guide - Step 3",
+        "quick_start_2_sr": "Quick Start Guide - Step 2",
+        "help_command_help_sr": "Show help information",
+        "quick_start_4_sr": "Quick Start Guide - Step 4",
+        "need_more_help_sr": "Need more help?",
+        "information_commands_sr": "Information Commands",
+        "resources_heading_sr": "Resources",
+        "contact_admin_sr": "Contact administrator",
+        "language_command_help_sr": "Change language",
+        "politicians_command_help_sr": "View politicians information",
+        "quick_start_5_sr": "Quick Start Guide - Step 5",
+        "start_command_help_sr": "Start the game",
+        "act_command_help_sr": "Perform an action",
+        "admin_commands_sr": "Admin Commands",
+        "game_actions_sr": "Game Actions",
+        "quick_start_guide_sr": "Quick Start Guide",
     },
 
     "ru": {
@@ -122,22 +177,42 @@ ADDITIONAL_TRANSLATIONS = {
         "coordinated_actions_help_text": "• Используйте опцию \"Присоединиться\" в меню основных действий, чтобы присоединиться к действию другого игрока\n• Создайте координированное действие, используя опции меню \"Атака\" или \"Защита\"\n• Чем больше игроков присоединятся, тем сильнее будет действие",
         "your_resources": "Ваши ресурсы",
         # District report translations
-        "district_report_title": "Отчет о состоянии районов",
-        "controlled_by": "Контролируется",
+        "district_report_title": "Отчет о состоянии района",
+        "controlled_by": "Под контролем",
         "contested_by": "Оспаривается",
         "not_controlled": "Не контролируется",
-        "players": "игроками",
+        "players": "игроки",
         "high_importance": "Высокая важность",
         "medium_importance": "Средняя важность",
         "low_importance": "Низкая важность",
         "error_generating_report": "Ошибка при создании отчета",
 
         # Politician action translations
-        "politician_influence_title": "Отчет о влиянии политиков",
+        "politician_influence_title": "Отчет о влиянии политика",
         "high_influence": "Высокое влияние",
         "medium_influence": "Среднее влияние",
         "low_influence": "Низкое влияние",
         "international_politicians": "Международные политики",
+        
+        # Missing translations based on logs
+        "unnamed": "Без имени",
+        "status_ideology": "Идеология",
+        "status_no_districts": "Вы пока не контролируете ни одного района",
+        "info_spreading": "Распространение информации",
+        "select_action_type": "Выберите тип действия",
+        "action_cancel": "Отменить действие",
+        "operation_cancelled": "Операция отменена",
+        "help_message": "Справочное сообщение",
+        "politicians_title": "Политики",
+        "ideology": "Идеология",
+        "error_invalid_data": "Неверные данные получены",
+        "news_title": "Новости",
+        "no_coordinated_actions": "Нет доступных координированных действий",
+        "language_button_en": "Английский",
+        "language_button_ru": "Русский",
+        "language_select": "Выберите язык",
+        "enter_character_name": "Введите имя персонажа",
+        "info_from_user": "Информация от пользователя",
 
         # Politician action button labels
         "action_pol_info": "Собрать информацию",
@@ -211,6 +286,140 @@ ADDITIONAL_TRANSLATIONS = {
         "role": "Роль",
         "district": "Район",
         "key_relationships": "Ключевые отношения",
+
+        # Missing translations from logs
+        "select_action_type": "Выберите тип действия",
+        "action_cancel": "Отменить действие",
+        "operation_cancelled": "Операция отменена",
+        "help_message": "Справочное сообщение",
+        "politicians_title": "Политики",
+        "ideology": "Идеология",
+        "status_ideology": "Идеология",
+        "unnamed": "Без имени",
+        "status_no_districts": "Вы пока не контролируете ни одного района",
+        "info_spreading": "Распространение информации",
+        
+        # Serbian translations in Russian
+        "welcome_sr": "Добро пожаловать в игру Нови-Сад! Это стратегическая ролевая игра, действие которой происходит в Югославии 1990-х годов.",
+        "cycle_evening_sr": "Вечер",
+        "game_cycles_heading_sr": "Игровые циклы",
+        "quick_start_1_sr": "1. Используйте /join, чтобы стать политиком в Нови-Саде.",
+        "basic_commands_sr": "Основные команды",
+        "districts_command_help_sr": "/districts - Просмотр информации о городских районах",
+        "tips_heading_sr": "Советы",
+        "game_cycles_help_text_sr": "• Ежедневные циклы: Утро и Вечер\n• Ресурсы распределяются утром\n• Действия завершаются вечером\n• Планирование имеет важное значение!",
+        "help_tips_sr": "• Контроль районов дает ресурсы\n• Сотрудничайте или противостойте другим игрокам\n• Следите за новостями о важных событиях\n• Используйте влияние политиков в своих интересах",
+        "join_command_help_sr": "/join - Присоединиться к игре в качестве политика",
+        "status_command_help_sr": "/status - Проверьте свой статус, ресурсы и контролируемые районы",
+        "admin_help_hint_sr": "Доступны команды администратора. Используйте /adminhelp для получения подробной информации.",
+        "news_command_help_sr": "/news - Смотрите последние новости из Нови-Сада",
+        "resources_help_text_sr": "• **Влияние**: Используется для политических действий и убеждения\n• **Информация**: Необходима для стратегии и планирования\n• **Физические ресурсы**: Используются для конкретных действий в районах\n• **Поддержка безопасности**: Защищает ваши интересы и позволяет проводить секретные операции",
+        "cycle_morning_sr": "Утро",
+        "action_expired_sr": "Действие истекло и больше не действительно.",
+        "help_footer_sr": "Для получения дополнительной информации свяжитесь с администратором игры.",
+        "quick_start_3_sr": "3. Исследуйте районы с помощью /districts и выберите свои цели.",
+        "quick_start_2_sr": "2. Проверьте свои ресурсы и статус с помощью /status.",
+        "help_command_help_sr": "/help - Показать это справочное сообщение",
+        "quick_start_4_sr": "4. Используйте /act для выполнения действий и расширения своего влияния.",
+        "need_more_help_sr": "Нужна дополнительная помощь?",
+        "information_commands_sr": "Информационные команды",
+        "resources_heading_sr": "Ресурсы",
+        "contact_admin_sr": "Свяжитесь с администратором",
+        "language_command_help_sr": "/language - Измените язык интерфейса",
+        "politicians_command_help_sr": "/politicians - Просмотр информации об активных политиках",
+        "quick_start_5_sr": "5. Следите за /news для получения последних событий в городе.",
+        "start_command_help_sr": "/start - Запустите или сбросьте бота",
+        "act_command_help_sr": "/act - Выполнить действие в районе",
+        "admin_commands_sr": "Команды администратора",
+        "game_actions_sr": "Игровые действия",
+        "quick_start_guide_sr": "Краткое руководство по началу работы",
+
+        # Missing translations found in the latest run
+        "basic_commands": "Основные команды",
+        "game_actions": "Игровые действия",
+        "information_commands": "Информационные команды",
+        "resources_heading": "Ресурсы",
+        "resources_help_text": "Справка по ресурсам",
+        "game_cycles_heading": "Игровые циклы",
+        "game_cycles_help_text": "Справка по игровым циклам",
+        "player_id_title": "ID игрока",
+        "admin_commands": "Команды администратора",
+        "admin_help_hint": "Подсказка для администратора",
+        "tips_heading": "Советы",
+        "help_tips": "Советы по игре",
+        "help_footer": "Нижний колонтитул справки",
+        "language_current": "Текущий язык",
+        "admin_resources_desc": "Управление ресурсами",
+        "admin_control_desc": "Управление контролем",
+        "admin_ideology_desc": "Управление идеологией",
+        "admin_list_desc": "Список игроков",
+        "admin_reset_desc": "Сбросить игрока",
+        "admin_reset_all_desc": "Сбросить всех игроков",
+
+        # Add these key translations
+        "select_action_type": "Выберите тип действия",
+        "action_cancel": "Отменить действие"
+    },
+
+    "sr": {
+        # Previously defined Serbian translations
+        "unnamed": "Неименован",
+        "status_ideology": "Идеологија",
+        "status_no_districts": "Још uvek ne kontrolišete nijedan okrug",
+        "info_spreading": "Ширење информација",
+        "select_action_type": "Изаберите тип акције",
+        "action_cancel": "Откажи акцију",
+        "operation_cancelled": "Операција је отказана",
+        "help_message": "Порука помоћи",
+        "politicians_title": "Политичари",
+        "ideology": "Идеологија",
+        "error_invalid_data": "Примљени неважећи подаци",
+        "news_title": "Вести",
+        "no_coordinated_actions": "Нема доступних координисаних акција",
+        "language_button_en": "Енглески",
+        "language_button_ru": "Руски",
+        "language_select": "Изаберите језик",
+        "enter_character_name": "Унесите име лика",
+        "info_from_user": "Информације од корисника",
+        
+        # All translations that were missing in the logs
+        "quick_start_3_sr": "Поставите име свог карактера када се то затражи",
+        "districts_command_help_sr": "Погледајте информације о областима",
+        "status_command_help_sr": "Погледајте статус вашег карактера и ресурсе",
+        "quick_start_4_sr": "Користите /status да бисте видели своје ресурсе",
+        "need_more_help_sr": "Потребна вам је додатна помоћ?",
+        "game_cycles_heading_sr": "Циклуси игре:",
+        "resources_heading_sr": "Ресурси:",
+        "cycle_morning_sr": "🌅 Добро јутро! Започео је нови циклус. Ваше операције су ресетоване и ресурси допуњени.",
+        "quick_start_2_sr": "Изаберите свој језик користећи /language",
+        "quick_start_5_sr": "Почните да играте са /act да бисте извршили акције",
+        "help_command_help_sr": "Прикажи ову поруку помоћи",
+        "welcome_sr": "Добродошли у игру Нови Сад! Ово је стратешка улога игре смештена у Југославији 1990-их.",
+        "join_command_help_sr": "Придружите се координисаним акцијама",
+        "help_footer_sr": "Ако вам је потребна помоћ, контактирајте администратора игре.",
+        "quick_start_1_sr": "Укуцајте /start да се региструјете и почнете да играте",
+        "cycle_evening_sr": "🌃 Добро вече! Започео је нови циклус. Ваше операције су ресетоване и ресурси допуњени.",
+        "tips_heading_sr": "Корисни савети:",
+        "action_expired_sr": "⌛ Ваша координисана акција је истекла. Можете започети нову помоћу команде /act.",
+        "basic_commands_sr": "Основне команде:",
+        "contact_admin_sr": "Контактирајте администратора игре за помоћ.",
+        "admin_commands_sr": "Админ команде:",
+        "act_command_help_sr": "Извршите акције игре",
+        "quick_start_guide_sr": "Водич за брзи почетак:",
+        "language_command_help_sr": "Промените своја језичка подешавања",
+        "politicians_command_help_sr": "Погледајте информације о политичарима",
+        "start_command_help_sr": "Региструјте се или проверите свој статус",
+        "information_commands_sr": "Информационе команде:",
+        "news_command_help_sr": "Проверите најновије вести из игре",
+        "resources_help_text_sr": "• Добијате ресурсе из области које контролишете\n• Различите акције захтевају различите ресурсе\n• Пажљиво планирајте коришћење ресурса",
+        "game_cycles_help_text_sr": "• Игра има јутарње и вечерње циклусе\n• Ваше акције се обнављају на почетку сваког циклуса\n• Ресурси се дистрибуирају на почетку сваког циклуса",
+        "help_tips_sr": "• Формирајте савезе са другим играчима\n• Пратите вести за важне догађаје\n• Пажљиво балансирајте коришћење ресурса",
+        "game_actions_sr": "Акције игре:",
+        "admin_help_hint_sr": "Користите /admin_help да видите све админ команде.",
+
+        # Add these key translations
+        "select_action_type": "Изаберите тип акције",
+        "action_cancel": "Откажи акцију"
     }
 }
 
@@ -253,21 +462,32 @@ ADMIN_TRANSLATIONS = {
 }
 
 def update_translations():
-    """
-    Update the main translations dictionary with additional translations
-
-    This function must be called before translations are used to ensure all
-    new translations are available
-    """
+    """Update the base translations with additional translations."""
+    from languages_base import TRANSLATIONS as BASE_TRANSLATIONS
+    
+    # Add Serbian language dictionary if it doesn't exist
+    if "sr" not in BASE_TRANSLATIONS:
+        BASE_TRANSLATIONS["sr"] = {}
+    
+    # First update with additional translations
     for lang in ADDITIONAL_TRANSLATIONS:
-        if lang in TRANSLATIONS:
-            # Update existing language with new translations
-            for key, value in ADDITIONAL_TRANSLATIONS[lang].items():
-                TRANSLATIONS[lang][key] = value
-        else:
-            # Add new language
-            TRANSLATIONS[lang] = ADDITIONAL_TRANSLATIONS[lang]
-
+        if lang not in BASE_TRANSLATIONS:
+            BASE_TRANSLATIONS[lang] = {}
+        
+        for key, value in ADDITIONAL_TRANSLATIONS[lang].items():
+            BASE_TRANSLATIONS[lang][key] = value
+    
+    # Handle Serbian keys with _sr suffix
+    # These need to be in the main language dictionary, not just in "sr"
+    for lang in BASE_TRANSLATIONS:
+        if lang != "sr":  # Skip Serbian itself
+            sr_keys = [k for k in BASE_TRANSLATIONS[lang].keys() if k.endswith('_sr')]
+            for key in sr_keys:
+                if key not in BASE_TRANSLATIONS["sr"]:
+                    # Copy the key to Serbian language
+                    BASE_TRANSLATIONS["sr"][key] = BASE_TRANSLATIONS[lang][key]
+                    logger.info(f"Added {key} to Serbian translations from {lang}")
+    
     logger.info("Translations updated with additional entries")
 
 def update_admin_translations():
@@ -391,7 +611,11 @@ def get_ordinal_suffix(num: int, lang: str = "en") -> str:
     return f"{num}{suffix}"
 
 def init_language_support():
-    """Initialize language support by updating translations"""
+    """Initialize language support by integrating additional translations and admin translations."""
+    # First update with additional translations
     update_translations()
+    
+    # Then update with admin translations
     update_admin_translations()
+    
     logger.info("Language support initialized")
