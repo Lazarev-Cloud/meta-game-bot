@@ -1459,34 +1459,25 @@ async def join_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def exchange_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Interactive resource exchange system using buttons."""
+    """Show resource exchange options."""
     user = update.effective_user
     lang = get_player_language(user.id)
-
+    
     # Check if player is registered
     player = get_player(user.id)
     if not player:
         await update.message.reply_text(get_text("not_registered", lang))
         return
-
-    # Get player's current resources
+    
+    # Get player resources
     resources = get_player_resources(user.id)
     if not resources:
-        await update.message.reply_text(get_text("not_registered", lang))
+        await update.message.reply_text(get_text("resources_error", lang))
         return
-
-    # Create buttons for resource exchange options
+    
+    # Create keyboard with exchange options
     keyboard = []
     
-    # Create color indicators for resource amounts
-    def get_resource_indicator(amount):
-        if amount < 5:
-            return "🔴"  # Red for low
-        elif amount < 10:
-            return "🟡"  # Yellow for medium
-        else:
-            return "🟢"  # Green for high
-
     # Resources → Influence (2:1)
     if resources['resources'] >= 2:
         keyboard.append([
@@ -2013,3 +2004,73 @@ async def check_presence_command(update: Update, context: ContextTypes.DEFAULT_T
             get_text("presence_check_error", lang, 
                     default="An error occurred while checking your presence status. Please try again later.")
         )
+
+
+def register_commands(application):
+    """Register all command handlers with the application."""
+    # Basic commands
+    application.add_handler(CommandHandler("start", start_command))
+    application.add_handler(CommandHandler("help", help_command))
+    application.add_handler(CommandHandler("status", status_command))
+    
+    # Action commands
+    application.add_handler(CommandHandler("action", action_command))
+    application.add_handler(CommandHandler("quick", quick_action_command))
+    application.add_handler(CommandHandler("cancel", cancel_action_command))
+    application.add_handler(CommandHandler("actions", actions_left_command))
+    
+    # View commands
+    application.add_handler(CommandHandler("districts", view_district_command))
+    application.add_handler(CommandHandler("politicians", politicians_command))
+    application.add_handler(CommandHandler("map", map_command))
+    application.add_handler(CommandHandler("news", news_command))
+    application.add_handler(CommandHandler("time", time_command))
+    
+    # Resource commands
+    application.add_handler(CommandHandler("resources", resources_command))
+    application.add_handler(CommandHandler("convert", convert_resource_command))
+    application.add_handler(CommandHandler("income", check_income_command))
+    application.add_handler(CommandHandler("exchange", exchange_command))
+    
+    # Settings commands
+    application.add_handler(CommandHandler("language", language_command))
+    application.add_handler(CommandHandler("setname", set_name_command))
+    
+    # Coordination commands
+    application.add_handler(CommandHandler("join", join_command))
+    application.add_handler(CommandHandler("list", list_coordinated_actions_command))
+    
+    # Presence commands
+    application.add_handler(CommandHandler("presence", presence_command))
+    application.add_handler(CommandHandler("check_presence", check_presence_command))
+    
+    # Admin commands
+    application.add_handler(CommandHandler("admin_help", admin_help_command))
+    application.add_handler(CommandHandler("admin_add_resources", admin_add_resources))
+    application.add_handler(CommandHandler("admin_set_control", admin_set_control))
+    application.add_handler(CommandHandler("admin_list_players", admin_list_players))
+    application.add_handler(CommandHandler("admin_reset_actions", admin_reset_actions))
+    application.add_handler(CommandHandler("admin_reset_all_actions", admin_reset_all_actions))
+    application.add_handler(CommandHandler("admin_set_ideology", admin_set_ideology))
+    application.add_handler(CommandHandler("admin_add_news", admin_add_news))
+    application.add_handler(CommandHandler("admin_process_cycle", admin_process_cycle))
+    
+    # Message handlers
+    from telegram.ext import MessageHandler, filters
+    application.add_handler(MessageHandler(filters.LOCATION, presence_command))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, receive_info_content))
+    
+    # Conversation handlers
+    from telegram.ext import ConversationHandler
+    
+    # Set name conversation handler
+    set_name_conv_handler = ConversationHandler(
+        entry_points=[CommandHandler("setname", set_name_command)],
+        states={
+            1: [MessageHandler(filters.TEXT & ~filters.COMMAND, set_name_handler)]
+        },
+        fallbacks=[CommandHandler("cancel", cancel_handler)]
+    )
+    application.add_handler(set_name_conv_handler)
+    
+    logger.info("Command handlers registered")

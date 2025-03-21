@@ -1,29 +1,30 @@
 import logging
 import sqlite3
 import json
+from datetime import datetime, timedelta
 
-from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
-from telegram.constants import ParseMode
+from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton, ParseMode
 from telegram.ext import CallbackQueryHandler, ContextTypes, ConversationHandler
 
-from languages import get_text, get_player_language, set_player_language, get_action_name, get_resource_name, get_cycle_name
+from languages import get_text, get_player_language, set_player_language, get_action_name, get_resource_name, get_cycle_name, get_district_name
 from db.queries import (
     get_player, get_player_language, get_player_resources, set_player_language,
     set_player_name, update_player_resources, get_coordinated_action_details,
     join_coordinated_action, get_open_coordinated_actions, get_district_info,
     get_politician_info, get_coordinated_action_participants, exchange_resources,
     cancel_action, get_district_players, get_remaining_actions, update_action_counts,
-    get_player_districts, get_news, add_news, add_action, use_action
+    get_player_districts, get_news, add_news, add_action, use_action,
+    get_district_control, update_politician_friendliness
 )
 from game.districts import (
     format_district_info, get_district_by_name, generate_text_map, get_all_districts
 )
 from game.politicians import (
-    get_politician_by_name, format_politician_info, format_politicians_list, get_all_politicians
+    get_politician_by_name, format_politician_info, format_politicians_list, get_all_politicians, get_politician_stats
 )
 from game.actions import (
     ACTION_ATTACK, ACTION_DEFENSE, get_current_cycle, get_cycle_deadline, get_cycle_results_time,
-    get_player_presence_status
+    get_player_presence_status, calculate_participant_power, process_join_with_resources
 )
 from utils import format_resources, notify_player, log_game_event
 
@@ -32,6 +33,16 @@ logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
 )
 logger = logging.getLogger(__name__)
+
+# Resource indicator helper function
+def get_resource_indicator(amount):
+    """Return a colored indicator emoji based on resource amount."""
+    if amount < 5:
+        return "🔴"  # Red for low
+    elif amount < 10:
+        return "🟡"  # Yellow for medium
+    else:
+        return "🟢"  # Green for high
 
 
 async def show_district_selection(query, message_text):
@@ -139,46 +150,43 @@ async def show_resource_selection(query, action_type, district_id):
 async def exchange_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle resource exchange."""
     query = update.callback_query
-    user = query.from_user
-    lang = get_player_language(user.id)
-
     await query.answer()
-
-    # Parse callback data
-    parts = query.data.split(":")
-    from_resource = parts[1]
-    to_resource = parts[2]
-    amount = int(parts[3])
-
-    # Calculate required resources
-    required_amount = amount * 2  # 2:1 exchange rate
-
-    # Check if player has enough resources
-    resources = get_player_resources(user.id)
-    if resources[from_resource] < required_amount:
-        await query.edit_message_text(
-            get_text("not_enough_resources", lang,
-                     needed=required_amount,
-                     available=resources[from_resource])
-        )
-        return
-
-    # Perform the exchange
-    update_player_resources(user.id, from_resource, -required_amount)
-    update_player_resources(user.id, to_resource, amount)
-
-    # Get updated resources
-    updated_resources = get_player_resources(user.id)
     
-    # Add colored indicators for resource display
-    def get_resource_indicator(amount):
-        if amount < 5:
-            return "🔴"  # Red for low
-        elif amount < 10:
-            return "🟡"  # Yellow for medium
-        else:
-            return "🟢"  # Green for high
-            
+    # Get user language
+    user_id = query.from_user.id
+    lang = get_player_language(user_id)
+    
+    # Parse callback data: exchange:from_resource:to_resource:amount
+    data = query.data.split(":")
+    if len(data) != 4:
+        await query.edit_message_text(get_text("error_invalid_data", lang))
+        return
+    
+    from_resource = data[1]
+    to_resource = data[2]
+    amount = int(data[3])
+    
+    # Calculate required resources (2:1 ratio)
+    required_amount = amount * 2
+    
+    # Get player resources
+    resources = get_player_resources(user_id)
+    if not resources:
+        await query.edit_message_text(get_text("resources_error", lang))
+        return
+    
+    # Check if player has enough resources
+    if resources[from_resource] < required_amount:
+        await query.edit_message_text(get_text("not_enough_resources", lang))
+        return
+    
+    # Update resources (subtract from_resource, add to_resource)
+    update_player_resources(user_id, from_resource, -required_amount)
+    update_player_resources(user_id, to_resource, amount)
+    
+    # Get updated resources
+    updated_resources = get_player_resources(user_id)
+    
     # Create resource indicators
     influence_indicator = get_resource_indicator(updated_resources['influence'])
     resources_indicator = get_resource_indicator(updated_resources['resources']) 
@@ -220,25 +228,20 @@ async def exchange_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def exchange_again_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle request to make another exchange."""
+    """Show the exchange options menu again."""
     query = update.callback_query
-    user = query.from_user
-    lang = get_player_language(user.id)
-
     await query.answer()
-
-    # Get player's current resources
-    resources = get_player_resources(user.id)
     
-    # Add colored indicators for resource display
-    def get_resource_indicator(amount):
-        if amount < 5:
-            return "🔴"  # Red for low
-        elif amount < 10:
-            return "🟡"  # Yellow for medium
-        else:
-            return "🟢"  # Green for high
-            
+    # Get user language
+    user_id = query.from_user.id
+    lang = get_player_language(user_id)
+    
+    # Get current resources
+    resources = get_player_resources(user_id)
+    if not resources:
+        await query.edit_message_text(get_text("resources_error", lang))
+        return
+    
     # Create resource indicators
     influence_indicator = get_resource_indicator(resources['influence'])
     resources_indicator = get_resource_indicator(resources['resources']) 
