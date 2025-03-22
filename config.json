@@ -1,0 +1,25 @@
+{
+    "logging": {
+        "level": "INFO",
+        "format": "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+        "file": "meta_game.log"
+    },
+    "game": {
+        "cycle_duration_hours": 6,
+        "morning_deadline_hour": 12,
+        "evening_deadline_hour": 18,
+        "resource_exchange_ratio": 2,
+        "physical_presence_bonus": 20,
+        "district_control_threshold": 60,
+        "strong_control_threshold": 80,
+        "control_decay_per_cycle": 5,
+        "max_actions_per_cycle": 1,
+        "max_quick_actions_per_cycle": 2
+    },
+    "bot": {
+        "rate_limit_requests_per_minute": 15,
+        "rate_limit_warning_threshold": 3,
+        "max_message_length": 4000,
+        "web_map_url": "https://your-map-url.com"
+    }
+}

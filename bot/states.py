@@ -17,6 +17,7 @@ from telegram.ext import (
     filters
 )
 
+from bot.callbacks import join_collective_action_callback
 # Import constants instead of defining states here (breaking circular import)
 from bot.constants import (
     NAME_ENTRY,
@@ -1295,6 +1296,7 @@ async def cancel_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     return ConversationHandler.END
 
 
+
 # Initialize conversation handlers
 registration_handler = ConversationHandler(
     entry_points=[CommandHandler("start", start_command)],
@@ -1307,7 +1309,8 @@ registration_handler = ConversationHandler(
             CallbackQueryHandler(ideology_choice, pattern=r"^ideology:")
         ]
     },
-    fallbacks=[CommandHandler("cancel", cancel_handler)]
+    fallbacks=[CommandHandler("cancel", cancel_handler)],
+    per_message=True  # Fix warning
 )
 
 action_handler = ConversationHandler(
@@ -1337,7 +1340,8 @@ action_handler = ConversationHandler(
     fallbacks=[
         CallbackQueryHandler(lambda u, c: ConversationHandler.END, pattern=r"^cancel_selection$"),
         CommandHandler("cancel", cancel_handler)
-    ]
+    ],
+    per_message=True  # Fix warning
 )
 
 resource_conversion_handler = ConversationHandler(
@@ -1361,7 +1365,8 @@ resource_conversion_handler = ConversationHandler(
     fallbacks=[
         CallbackQueryHandler(lambda u, c: ConversationHandler.END, pattern=r"^cancel_selection$"),
         CommandHandler("cancel", cancel_handler)
-    ]
+    ],
+    per_message=True  # Fix warning
 )
 
 collective_action_handler = ConversationHandler(
@@ -1394,12 +1399,14 @@ collective_action_handler = ConversationHandler(
     fallbacks=[
         CallbackQueryHandler(lambda u, c: ConversationHandler.END, pattern=r"^cancel_selection$"),
         CommandHandler("cancel", cancel_handler)
-    ]
+    ],
+    per_message=True  # Fix warning
 )
 
 join_action_handler = ConversationHandler(
     entry_points=[
-        CommandHandler("join", join_collective_action_start)
+        CommandHandler("join", join_collective_action_start),
+        CallbackQueryHandler(join_collective_action_callback, pattern=r"^join_collective_action:")
     ],
     states={
         JOIN_ACTION_RESOURCE: [
@@ -1418,7 +1425,8 @@ join_action_handler = ConversationHandler(
     fallbacks=[
         CallbackQueryHandler(lambda u, c: ConversationHandler.END, pattern=r"^cancel_selection$"),
         CommandHandler("cancel", cancel_handler)
-    ]
+    ],
+    per_message=True  # Fix warning
 )
 
 # List of all conversation handlers

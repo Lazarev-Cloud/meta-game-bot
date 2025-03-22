@@ -9,8 +9,9 @@ import logging
 import json
 from typing import Dict, Any, Optional
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
-from telegram.ext import ContextTypes, CallbackQueryHandler
+from telegram.ext import ContextTypes, CallbackQueryHandler, ConversationHandler
 
+from bot.constants import user_context
 from bot.keyboards import (
     get_start_keyboard,
     get_help_keyboard,
@@ -27,8 +28,7 @@ from bot.keyboards import (
     get_back_keyboard
 )
 from bot.states import (
-    resource_conversion_start,
-    action_select_district, user_context, ACTION_SELECT_RESOURCE, JOIN_ACTION_RESOURCE
+     get_user_context, ACTION_SELECT_RESOURCE, JOIN_ACTION_RESOURCE
 )
 from db import (
     get_player,
@@ -541,7 +541,7 @@ async def exchange_resources_callback(update: Update, context: ContextTypes.DEFA
     return await resource_conversion_start(update, context)
 
 
-async def join_collective_action_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def join_collective_action_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle joining collective actions from a button click."""
     query = update.callback_query
     await query.answer()
@@ -555,7 +555,7 @@ async def join_collective_action_callback(update: Update, context: ContextTypes.
         await query.edit_message_text(
             _("Invalid action format. Please try again.", language)
         )
-        return
+        return ConversationHandler.END
 
     action_id = action_data[1]
 
@@ -564,7 +564,8 @@ async def join_collective_action_callback(update: Update, context: ContextTypes.
         user_context[telegram_id] = {}
 
     # Store action ID in context
-    user_context[telegram_id]["join_action_id"] = action_id
+    user_data = get_user_context(telegram_id)
+    user_data["join_action_id"] = action_id
 
     # Prompt for resource selection
     await query.edit_message_text(
@@ -575,9 +576,7 @@ async def join_collective_action_callback(update: Update, context: ContextTypes.
         reply_markup=get_resource_type_keyboard(language)
     )
 
-    # This will continue in states.py with the JOIN_ACTION_RESOURCE state
     return JOIN_ACTION_RESOURCE
-
 async def check_income_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle income check callback."""
     query = None

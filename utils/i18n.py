@@ -4,7 +4,7 @@
 """
 Internationalization (i18n) utilities for the Meta Game bot.
 """
-
+import asyncio
 import logging
 import json
 import os
@@ -146,7 +146,9 @@ def clear_language_cache(telegram_id: str = None) -> None:
 
 def setup_i18n() -> None:
     """Initialize the internationalization system."""
-    # Initialize with default English translations
+    logger.info("Initializing internationalization system")
+
+    # Initialize with default translations
     _translations["en_US"] = {
         # Common terms
         "Influence": "Influence",
@@ -165,8 +167,11 @@ def setup_i18n() -> None:
         "Status": "Status",
         "Map": "Map",
         "News": "News",
-        "Action": "Action",
+        "Main Action": "Main Action",
         "Quick Action": "Quick Action",
+        "Resources": "Resources",
+        "Politicians": "Politicians",
+        "Collective Actions": "Collective Actions",
         "Help": "Help",
 
         # Actions
@@ -185,13 +190,37 @@ def setup_i18n() -> None:
 
         # Status-related
         "Action Submitted": "Action Submitted",
+        "You are not registered as a player. Please use the /start command to register.": "You are not registered as a player. Please use the /start command to register.",
+        "You don't have permission to use admin commands.": "You don't have permission to use admin commands.",
 
         # Collective actions
         "Active Collective Actions": "Active Collective Actions",
         "Join collective action": "Join collective action",
         "There are no active collective actions at the moment.": "There are no active collective actions at the moment.",
+        "You are joining collective action {action_id}.\n\nWhat resource would you like to contribute?": "You are joining collective action {action_id}.\n\nWhat resource would you like to contribute?",
 
-        # Other strings will be loaded from database or files
+        # Resources
+        "You don't have enough resources for this action.": "You don't have enough resources for this action.",
+        "Resource conversion successful": "Resource conversion successful",
+        "Resource conversion failed": "Resource conversion failed",
+
+        # Districts
+        "Please select a district to view:": "Please select a district to view:",
+        "Error retrieving district information for {district}. The district may not exist or there was a server error.": "Error retrieving district information for {district}. The district may not exist or there was a server error.",
+
+        # Error messages
+        "An error occurred while processing your request.": "An error occurred while processing your request.",
+        "Database connection error. Please try again later.": "Database connection error. Please try again later.",
+        "Invalid action format. Please try again.": "Invalid action format. Please try again.",
+
+        # Conversation prompts
+        "What type of main action would you like to take?": "What type of main action would you like to take?",
+        "What type of quick action would you like to take?": "What type of quick action would you like to take?",
+        "Please select a resource type to use for this action:": "Please select a resource type to use for this action:",
+        "How much {resource} do you want to use for this action?": "How much {resource} do you want to use for this action?",
+        "Will you be physically present for this action? Being present gives +20 control points.": "Will you be physically present for this action? Being present gives +20 control points.",
+        "Please confirm your action:": "Please confirm your action:",
+        "Action canceled.": "Action canceled.",
     }
 
     # Initialize Russian translations with some basic terms
@@ -213,8 +242,11 @@ def setup_i18n() -> None:
         "Status": "Статус",
         "Map": "Карта",
         "News": "Новости",
-        "Action": "Действие",
+        "Main Action": "Основное действие",
         "Quick Action": "Быстрое действие",
+        "Resources": "Ресурсы",
+        "Politicians": "Политики",
+        "Collective Actions": "Коллективные действия",
         "Help": "Помощь",
 
         # Actions
@@ -233,14 +265,45 @@ def setup_i18n() -> None:
 
         # Status-related
         "Action Submitted": "Заявка отправлена",
+        "You are not registered as a player. Please use the /start command to register.": "Вы не зарегистрированы как игрок. Используйте команду /start для регистрации.",
+        "You don't have permission to use admin commands.": "У вас нет прав для использования команд администратора.",
 
         # Collective actions
         "Active Collective Actions": "Активные коллективные действия",
         "Join collective action": "Присоединиться к коллективному действию",
         "There are no active collective actions at the moment.": "В настоящее время нет активных коллективных действий.",
+        "You are joining collective action {action_id}.\n\nWhat resource would you like to contribute?": "Вы присоединяетесь к коллективному действию {action_id}.\n\nКакой ресурс вы хотите внести?",
 
-        # Other strings will be loaded from database or files
+        # Resources
+        "You don't have enough resources for this action.": "У вас недостаточно ресурсов для этого действия.",
+        "Resource conversion successful": "Конвертация ресурсов успешна",
+        "Resource conversion failed": "Ошибка конвертации ресурсов",
+
+        # Districts
+        "Please select a district to view:": "Выберите район для просмотра:",
+        "Error retrieving district information for {district}. The district may not exist or there was a server error.": "Ошибка получения информации о районе {district}. Район может не существовать или произошла ошибка сервера.",
+
+        # Error messages
+        "An error occurred while processing your request.": "Произошла ошибка при обработке вашего запроса.",
+        "Database connection error. Please try again later.": "Ошибка подключения к базе данных. Пожалуйста, попробуйте позже.",
+        "Invalid action format. Please try again.": "Неверный формат действия. Пожалуйста, попробуйте снова.",
+
+        # Conversation prompts
+        "What type of main action would you like to take?": "Какой тип основного действия вы хотите предпринять?",
+        "What type of quick action would you like to take?": "Какой тип быстрого действия вы хотите предпринять?",
+        "Please select a resource type to use for this action:": "Выберите тип ресурса для этого действия:",
+        "How much {resource} do you want to use for this action?": "Сколько {resource} вы хотите использовать для этого действия?",
+        "Will you be physically present for this action? Being present gives +20 control points.": "Будете ли вы физически присутствовать при этом действии? Присутствие дает +20 очков контроля.",
+        "Please confirm your action:": "Пожалуйста, подтвердите свое действие:",
+        "Action canceled.": "Действие отменено.",
     }
 
     # Add additional translations from i18n_additions.py
     update_translations(_translations)
+
+    # Try to load translations from files or DB
+    try:
+        asyncio.run(load_translations_from_file())
+        asyncio.run(load_translations_from_db())
+    except Exception as e:
+        logger.error(f"Error loading translations: {e}")

@@ -7,7 +7,8 @@ A political strategy game set in Novi-Sad, Yugoslavia in 1999.
 """
 
 import os
-
+import logging
+import traceback
 from dotenv import load_dotenv
 from telegram import Update
 from telegram.ext import (
@@ -26,13 +27,15 @@ from db.supabase_client import init_supabase
 from utils.config import load_config
 from utils.i18n import setup_i18n, _, get_user_language
 # Import utility functions
-from utils.logger import setup_logger
+from utils.logger import setup_logger, configure_telegram_logger, configure_supabase_logger
 
 # Load environment variables
 load_dotenv()
 
 # Setup logging
-logger = setup_logger()
+logger = setup_logger(name="meta_game", level="INFO", log_file="logs/meta_game.log")
+configure_telegram_logger()
+configure_supabase_logger()
 
 
 async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -52,8 +55,6 @@ async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     logger.error(f"Exception while handling an update: {context.error}")
 
     # Get detailed error info for logging
-    import traceback
-    traceback.print_exc()
     error_details = ''.join(traceback.format_exception(None, context.error, context.error.__traceback__))
     logger.error(f"Detailed error: {error_details}")
 
@@ -123,13 +124,10 @@ def main():
     # Set up internationalization
     setup_i18n()
 
-    # Initialize the Application
+    # Initialize the Application with better error handling
     application = Application.builder().token(token).build()
 
-    # Set up middleware
-    setup_middleware(application, admin_ids)
-
-    # Register command handlers
+    # Register command handlers first
     register_commands(application)
 
     # Register callback query handlers
@@ -138,6 +136,9 @@ def main():
     # Add conversation handlers
     for handler in conversation_handlers:
         application.add_handler(handler)
+
+    # Set up middleware (AFTER all other handlers)
+    setup_middleware(application, admin_ids)
 
     # Register error handler
     application.add_error_handler(error_handler)
