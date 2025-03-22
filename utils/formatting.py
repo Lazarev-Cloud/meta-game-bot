@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 """
-Complete formatting utilities for the Belgrade Game bot.
+Complete formatting utilities for the Meta Game bot.
 """
 
 import logging

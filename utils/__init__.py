@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 """
-Utility module for the Belgrade Game bot.
+Utility module for the Meta Game bot.
 """
 
 from utils.i18n import _, get_user_language, set_user_language

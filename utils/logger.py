@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 """
-Logging setup for the Belgrade Game bot.
+Logging setup for the Meta Game bot.
 """
 
 import os

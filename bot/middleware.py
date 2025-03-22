@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 """
-Complete middleware implementation for the Belgrade Game bot including 
+Complete middleware implementation for the Meta Game bot including 
 authentication, logging, and rate limiting.
 """
 

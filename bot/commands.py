@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 """
-Complete command handlers implementation for the Belgrade Game bot.
+Complete command handlers implementation for the Meta Game bot.
 """
 
 import logging

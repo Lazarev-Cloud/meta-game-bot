@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 """
-Belgrade Game - Telegram Bot
+Meta Game - Telegram Bot
 A political strategy game set in Novi-Sad, Yugoslavia in 1999.
 """
 
@@ -88,7 +88,7 @@ def main():
     application.add_error_handler(error_handler)
     
     # Start the bot
-    logger.info("Starting Belgrade Game bot...")
+    logger.info("Starting Meta Game bot...")
     application.run_polling(allowed_updates=Update.ALL_TYPES)
 
 if __name__ == "__main__":

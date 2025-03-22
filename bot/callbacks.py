@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 """
-Callback query handlers for the Belgrade Game bot.
+Callback query handlers for the Meta Game bot.
 """
 
 import logging

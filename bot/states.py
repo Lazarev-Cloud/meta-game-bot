@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 """
-Complete implementation of conversation states and handlers for the Belgrade Game bot.
+Complete implementation of conversation states and handlers for the Meta Game bot.
 """
 
 import logging

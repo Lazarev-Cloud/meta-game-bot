@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 """
-Bot module for the Belgrade Game bot.
+Bot module for the Meta Game bot.
 """
 
 from bot.commands import register_commands

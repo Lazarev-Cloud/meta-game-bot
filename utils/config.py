@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 """
-Configuration management for the Belgrade Game bot.
+Configuration management for the Meta Game bot.
 """
 
 import os

@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 """
-Database module for the Belgrade Game.
+Database module for the Meta Game.
 """
 
 from db.supabase_client import (

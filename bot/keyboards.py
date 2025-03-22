@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 """
-Keyboard layouts and builders for the Belgrade Game bot.
+Keyboard layouts and builders for the Meta Game bot.
 """
 
 import logging

@@ -1,4 +1,4 @@
-# Belgrade Game Bot Architecture
+# Meta Game Bot Architecture
 
 This Telegram bot implements a complex political strategy game set in Novi-Sad, Yugoslavia in 1999. The architecture follows a modular design with clear separation of concerns.
 

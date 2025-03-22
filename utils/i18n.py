@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 """
-Internationalization (i18n) utilities for the Belgrade Game bot.
+Internationalization (i18n) utilities for the Meta Game bot.
 """
 
 import logging
