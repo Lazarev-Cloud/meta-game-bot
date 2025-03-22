@@ -113,7 +113,7 @@ INSERT INTO game.translations (translation_key, en_US, ru_RU) VALUES
 -- Create initial game cycle
 DO $$
 DECLARE
-    current_date DATE := CURRENT_DATE;
+    today_date DATE := CURRENT_DATE;
     current_time TIME := CURRENT_TIME;
     cycle_type TEXT;
     submission_deadline TIMESTAMP WITH TIME ZONE;
@@ -122,20 +122,20 @@ BEGIN
     -- Determine cycle type based on current time
     IF current_time < '12:00:00' THEN
         cycle_type := 'morning';
-        submission_deadline := current_date + TIME '12:00:00';
-        results_time := current_date + TIME '13:00:00';
+        submission_deadline := today_date + TIME '12:00:00';
+        results_time := today_date + TIME '13:00:00';
     ELSIF current_time < '18:00:00' THEN
         cycle_type := 'evening';
-        submission_deadline := current_date + TIME '18:00:00';
-        results_time := current_date + TIME '19:00:00';
+        submission_deadline := today_date + TIME '18:00:00';
+        results_time := today_date + TIME '19:00:00';
     ELSE
         -- If after 18:00, create morning cycle for next day
         cycle_type := 'morning';
-        current_date := current_date + 1;
-        submission_deadline := current_date + TIME '12:00:00';
-        results_time := current_date + TIME '13:00:00';
+        today_date := today_date + 1;
+        submission_deadline := today_date + TIME '12:00:00';
+        results_time := today_date + TIME '13:00:00';
     END IF;
-    
+
     -- Create cycle
     INSERT INTO game.cycles (
         cycle_type,
@@ -145,7 +145,7 @@ BEGIN
         is_active
     ) VALUES (
         cycle_type,
-        current_date,
+        today_date,
         submission_deadline,
         results_time,
         TRUE
