@@ -409,3 +409,105 @@ def setup_i18n():
 
     # Initialize with default translations
     setup_i18n()
+
+
+def get_settings_keyboard(language: str) -> InlineKeyboardMarkup:
+    """Get keyboard for settings menu."""
+    keyboard = [
+        [
+            InlineKeyboardButton(_("Language", language), callback_data="settings:language"),
+            InlineKeyboardButton(_("Notifications", language), callback_data="settings:notifications")
+        ],
+        [
+            InlineKeyboardButton(_("Back to Menu", language), callback_data="back_to_menu")
+        ]
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
+
+def get_news_keyboard(language: str, page: int = 0, has_next: bool = False) -> InlineKeyboardMarkup:
+    """Get keyboard for news display with pagination."""
+    buttons = []
+
+    # Add pagination buttons if needed
+    navigation_row = []
+
+    if page > 0:
+        navigation_row.append(InlineKeyboardButton("◀️ " + _("Previous", language), callback_data="news_page:prev"))
+
+    if has_next:
+        navigation_row.append(InlineKeyboardButton(_("Next", language) + " ▶️", callback_data="news_page:next"))
+
+    if navigation_row:
+        buttons.append(navigation_row)
+
+    # Add other navigation buttons
+    buttons.append([
+        InlineKeyboardButton(_("Back to Menu", language), callback_data="back_to_menu")
+    ])
+
+    return InlineKeyboardMarkup(buttons)
+
+
+def get_cancel_button(language: str) -> InlineKeyboardMarkup:
+    """Get a simple cancel button keyboard."""
+    keyboard = [
+        [
+            InlineKeyboardButton(_("Cancel", language), callback_data="cancel_selection")
+        ]
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
+
+def get_yes_no_cancel_keyboard(language: str) -> InlineKeyboardMarkup:
+    """Get keyboard with Yes/No/Cancel options."""
+    keyboard = [
+        [
+            InlineKeyboardButton(_("Yes", language), callback_data="yes"),
+            InlineKeyboardButton(_("No", language), callback_data="no")
+        ],
+        [
+            InlineKeyboardButton(_("Cancel", language), callback_data="cancel_selection")
+        ]
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
+
+def get_join_collective_action_keyboard(action_id: str, language: str) -> InlineKeyboardMarkup:
+    """Get keyboard for joining a specific collective action."""
+    keyboard = [
+        [
+            InlineKeyboardButton(_("Join", language), callback_data=f"join_collective_action:{action_id}")
+        ],
+        [
+            InlineKeyboardButton(_("Back", language), callback_data="back_to_menu")
+        ]
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
+
+def get_extended_start_keyboard(language: str) -> InlineKeyboardMarkup:
+    """Get an extended version of the welcome keyboard with more options."""
+    keyboard = [
+        [
+            InlineKeyboardButton(_("Status", language), callback_data="status"),
+            InlineKeyboardButton(_("Map", language), callback_data="map"),
+            InlineKeyboardButton(_("News", language), callback_data="news")
+        ],
+        [
+            InlineKeyboardButton(_("Main Action", language), callback_data="action"),
+            InlineKeyboardButton(_("Quick Action", language), callback_data="quick_action")
+        ],
+        [
+            InlineKeyboardButton(_("Resources", language), callback_data="resources"),
+            InlineKeyboardButton(_("Politicians", language), callback_data="politicians:all")
+        ],
+        [
+            InlineKeyboardButton(_("Collective Actions", language), callback_data="view_collective_actions"),
+            InlineKeyboardButton(_("Settings", language), callback_data="settings")
+        ],
+        [
+            InlineKeyboardButton(_("Help", language), callback_data="help")
+        ]
+    ]
+    return InlineKeyboardMarkup(keyboard)

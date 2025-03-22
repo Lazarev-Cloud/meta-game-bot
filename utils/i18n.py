@@ -4,13 +4,11 @@
 """
 Internationalization (i18n) utilities for the Meta Game bot.
 """
-import asyncio
-import json
 import logging
+import json
 import os
 from typing import Dict
 
-from db.supabase_client import get_supabase
 from utils.i18n_additions import update_translations
 
 # Initialize logger
@@ -29,6 +27,7 @@ _user_languages: Dict[str, str] = {}
 async def load_translations_from_db() -> None:
     """Load translations from the database."""
     try:
+        from db.supabase_client import get_supabase
         client = get_supabase()
 
         # Check if the translations table exists
@@ -97,6 +96,7 @@ async def get_user_language(telegram_id: str) -> str:
 
     try:
         # Get from database
+        from db.supabase_client import get_supabase
         client = get_supabase()
         try:
             response = client.table("players").select("language").eq("telegram_id", telegram_id).execute()
@@ -123,6 +123,7 @@ async def set_user_language(telegram_id: str, language: str) -> bool:
 
     try:
         # Update database
+        from db.supabase_client import get_supabase
         client = get_supabase()
         client.table("players").update({"language": language}).eq("telegram_id", telegram_id).execute()
 
@@ -314,10 +315,5 @@ def setup_i18n() -> None:
     # Add additional translations from i18n_additions.py
     update_translations(_translations)
 
-    # Try to load translations from files or DB
-    try:
-        asyncio.run(load_translations_from_file())
-        asyncio.run(load_translations_from_db())
-    except Exception as e:
-        logger.error(f"Error loading translations: {e}")
-        # Continue with default translations
+    # We don't call the async functions directly here anymore
+    # They will be called from main.py in the initialization sequence

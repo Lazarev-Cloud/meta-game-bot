@@ -751,6 +751,118 @@ async def help_section_callback(update: Update, context: ContextTypes.DEFAULT_TY
     )
 
 
+async def news_page_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle news pagination navigation."""
+    query = update.callback_query
+    await query.answer()
+
+    telegram_id = str(update.effective_user.id)
+    language = await get_user_language(telegram_id)
+
+    # Extract page action (next/prev)
+    action = query.data.split(":", 1)[1]
+
+    # Get current page or initialize
+    page = context.user_data.get("news_page", 0)
+
+    # Update page based on action
+    if action == "next":
+        page += 1
+    elif action == "prev" and page > 0:
+        page -= 1
+
+    # Store updated page
+    context.user_data["news_page"] = page
+
+    # Forward to main news handler with updated page
+    await news_callback(update, context)
+
+
+async def language_setting_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle language setting callbacks."""
+    query = update.callback_query
+    await query.answer()
+
+    telegram_id = str(update.effective_user.id)
+
+    # Extract selected language
+    selected_language = query.data.split(":", 1)[1]
+
+    # Update user's language preference
+    success = await set_user_language(telegram_id, selected_language)
+    language = await get_user_language(telegram_id)
+
+    if success:
+        await query.edit_message_text(
+            _("Language set to {language}. You can change it at any time from the settings menu.", language).format(
+                language=_("English", language) if selected_language == "en_US" else _("Russian", language)
+            ),
+            reply_markup=get_back_keyboard(language)
+        )
+    else:
+        await query.edit_message_text(
+            _("Failed to set language. Please try again later.", language),
+            reply_markup=get_back_keyboard(language)
+        )
+
+
+async def settings_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle settings menu."""
+    query = update.callback_query
+    await query.answer()
+
+    telegram_id = str(update.effective_user.id)
+    language = await get_user_language(telegram_id)
+
+    # Create settings menu
+    settings_text = _("*Settings*\n\nHere you can change your preferences.", language)
+
+    # Create settings keyboard
+    keyboard = [
+        [
+            InlineKeyboardButton(_("Language", language), callback_data="settings:language")
+        ],
+        [
+            InlineKeyboardButton(_("Back to Menu", language), callback_data="back_to_menu")
+        ]
+    ]
+
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    await query.edit_message_text(
+        settings_text,
+        parse_mode="Markdown",
+        reply_markup=reply_markup
+    )
+
+
+async def language_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Show language selection menu."""
+    query = update.callback_query
+    await query.answer()
+
+    telegram_id = str(update.effective_user.id)
+    language = await get_user_language(telegram_id)
+
+    await query.edit_message_text(
+        _("Select your preferred language:", language),
+        reply_markup=get_language_keyboard()
+    )
+
+
+# Register these additional callbacks in register_callbacks function:
+def register_additional_callbacks(application) -> None:
+    """Register additional callback handlers."""
+    # News pagination
+    application.add_handler(CallbackQueryHandler(news_page_callback, pattern=r"^news_page:"))
+
+    # Settings and language
+    application.add_handler(CallbackQueryHandler(settings_menu_callback, pattern=r"^settings$"))
+    application.add_handler(CallbackQueryHandler(language_menu_callback, pattern=r"^settings:language$"))
+    application.add_handler(CallbackQueryHandler(language_setting_callback, pattern=r"^language:"))
+
+
+
 async def politicians_type_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle politician type selection callback."""
     query = update.callback_query
@@ -1048,3 +1160,9 @@ def register_callbacks(application) -> None:
 
     # Register catch-all handler for any remaining patterns
     application.add_handler(CallbackQueryHandler(general_callback))
+    # News pagination
+    application.add_handler(CallbackQueryHandler(news_page_callback, pattern=r"^news_page:"))
+    # Settings and language
+    application.add_handler(CallbackQueryHandler(settings_menu_callback, pattern=r"^settings$"))
+    application.add_handler(CallbackQueryHandler(language_menu_callback, pattern=r"^settings:language$"))
+    application.add_handler(CallbackQueryHandler(language_setting_callback, pattern=r"^language:"))

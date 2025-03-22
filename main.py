@@ -26,7 +26,7 @@ from bot.states import conversation_handlers
 # Import database client
 from db.supabase_client import init_supabase
 from utils.config import load_config
-from utils.i18n import setup_i18n, _, get_user_language
+from utils.i18n import setup_i18n, _, get_user_language, load_translations_from_file, load_translations_from_db
 # Import utility functions
 from utils.logger import setup_logger, configure_telegram_logger, configure_supabase_logger
 
@@ -104,6 +104,17 @@ async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     return True
 
 
+async def init_translations():
+    """Initialize translations asynchronously."""
+    try:
+        # Load translations in the correct order
+        await load_translations_from_file()
+        await load_translations_from_db()
+        logger.info("Translations initialized successfully")
+    except Exception as e:
+        logger.error(f"Error initializing translations: {e}")
+
+
 async def main():
     """Initialize and start the bot."""
     # Load bot token
@@ -122,8 +133,11 @@ async def main():
     # Initialize Supabase client
     init_supabase()
 
-    # Set up internationalization
+    # Set up internationalization (init default translations)
     setup_i18n()
+
+    # Asynchronously load translations
+    await init_translations()
 
     # Initialize the Application with better error handling
     application = Application.builder().token(token).build()

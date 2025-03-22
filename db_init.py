@@ -11,6 +11,7 @@ It reads the SQL files in the db directory and executes them in the correct orde
 import asyncio
 import os
 import sys
+from typing import List, Optional
 
 from dotenv import load_dotenv
 
@@ -49,15 +50,14 @@ async def execute_sql_file(file_path: str) -> None:
         client = get_supabase()
 
         # For larger files, split into separate statements
-        statements = sql.split(";")
+        statements = split_sql_statements(sql)
         executed = 0
 
         for statement in statements:
-            # Skip empty statements
             if statement.strip():
                 try:
                     # Execute the SQL statement
-                    client.postgrest.rpc("exec_sql", {"sql": statement + ";"})
+                    client.postgrest.rpc("exec_sql", {"sql": statement})
                     executed += 1
                 except Exception as e:
                     logger.error(f"Error executing SQL statement: {e}")
@@ -69,6 +69,51 @@ async def execute_sql_file(file_path: str) -> None:
         raise
 
 
+def split_sql_statements(sql: str) -> List[str]:
+    """Split a SQL string into individual statements, handling edge cases."""
+    statements = []
+    current_statement = []
+    in_function_body = False
+    in_string = False
+    string_delimiter = None
+
+    lines = sql.split('\n')
+
+    for line in lines:
+        # Skip comment lines
+        if line.strip().startswith('--'):
+            continue
+
+        # Check for function body start/end
+        if 'CREATE OR REPLACE FUNCTION' in line or 'CREATE FUNCTION' in line:
+            in_function_body = True
+
+        # Process the line character by character for string detection
+        for char in line:
+            if char in ['"', "'"] and not in_string:
+                in_string = True
+                string_delimiter = char
+            elif char == string_delimiter and in_string:
+                in_string = False
+
+        # Check for function body end
+        if in_function_body and line.strip().endswith('LANGUAGE plpgsql;'):
+            in_function_body = False
+
+        current_statement.append(line)
+
+        # If we hit a statement end and we're not in a function body or string
+        if line.strip().endswith(';') and not in_function_body and not in_string:
+            statements.append('\n'.join(current_statement))
+            current_statement = []
+
+    # Add any remaining statements
+    if current_statement:
+        statements.append('\n'.join(current_statement))
+
+    return statements
+
+
 async def init_database() -> None:
     """Initialize the database with all necessary tables and data."""
     try:
@@ -78,12 +123,14 @@ async def init_database() -> None:
 
         # Check if DB already initialized
         try:
-            response = client.table("players").select("count").execute()
+            # Instead of directly accessing tables, use a simple check query
+            response = client.postgrest.rpc("exec_sql", {
+                "sql": "SELECT 1 FROM information_schema.schemata WHERE schema_name = 'game';"})
             if response.data:
-                logger.warning("Database already appears to be initialized. Proceeding anyway.")
+                logger.warning("Database schema 'game' already exists. Proceeding anyway.")
         except Exception as e:
-            # Table doesn't exist yet, which is expected
-            logger.info("Database tables don't exist yet. Initializing...")
+            # Schema doesn't exist yet, which is expected
+            logger.info("Database schema doesn't exist yet. Initializing...")
 
         # Get database folder path
         script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -112,15 +159,12 @@ async def init_database() -> None:
 
         logger.info("Database initialization complete")
 
-        # Verify if the critical tables were created
+        # Verify initialization with a simple query
         try:
-            response = client.table("players").select("count").limit(1).execute()
-            logger.info("Players table initialized successfully")
-
-            response = client.table("translations").select("count").limit(1).execute()
-            logger.info("Translations table initialized successfully")
+            response = client.postgrest.rpc("exec_sql", {"sql": "SELECT COUNT(*) FROM game.players;"})
+            logger.info("Successfully verified database initialization!")
         except Exception as e:
-            logger.error(f"Error verifying tables: {e}")
+            logger.error(f"Error verifying database: {e}")
             logger.error("Database may not be fully initialized. Please check the logs for errors.")
 
     except Exception as e:

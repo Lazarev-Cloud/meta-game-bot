@@ -7,7 +7,8 @@ Conversation states and handlers for the Meta Game bot.
 
 import logging
 
-from telegram import Update
+
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     ContextTypes,
     ConversationHandler,
@@ -1295,7 +1296,8 @@ registration_handler = ConversationHandler(
             CallbackQueryHandler(ideology_choice, pattern=r"^ideology:")
         ]
     },
-    fallbacks=[CommandHandler("cancel", cancel_handler)]
+    fallbacks=[CommandHandler("cancel", cancel_handler)],
+    per_message=True  # Add this parameter
 )
 
 action_handler = ConversationHandler(
@@ -1325,7 +1327,8 @@ action_handler = ConversationHandler(
     fallbacks=[
         CallbackQueryHandler(lambda u, c: ConversationHandler.END, pattern=r"^cancel_selection$"),
         CommandHandler("cancel", cancel_handler)
-    ]
+    ],
+    per_message=True  # Add this parameter
 )
 
 resource_conversion_handler = ConversationHandler(
@@ -1349,7 +1352,8 @@ resource_conversion_handler = ConversationHandler(
     fallbacks=[
         CallbackQueryHandler(lambda u, c: ConversationHandler.END, pattern=r"^cancel_selection$"),
         CommandHandler("cancel", cancel_handler)
-    ]
+    ],
+    per_message=True  # Add this parameter
 )
 
 collective_action_handler = ConversationHandler(
@@ -1382,7 +1386,8 @@ collective_action_handler = ConversationHandler(
     fallbacks=[
         CallbackQueryHandler(lambda u, c: ConversationHandler.END, pattern=r"^cancel_selection$"),
         CommandHandler("cancel", cancel_handler)
-    ]
+    ],
+    per_message=True  # Add this parameter
 )
 
 join_action_handler = ConversationHandler(
@@ -1407,7 +1412,8 @@ join_action_handler = ConversationHandler(
     fallbacks=[
         CallbackQueryHandler(lambda u, c: ConversationHandler.END, pattern=r"^cancel_selection$"),
         CommandHandler("cancel", cancel_handler)
-    ]
+    ],
+    per_message=True  # Add this parameter
 )
 
 # List of all conversation handlers
