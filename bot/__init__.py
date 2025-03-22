@@ -25,7 +25,8 @@ from bot.keyboards import (
     get_yes_no_keyboard,
     get_physical_presence_keyboard,
     get_back_keyboard,
-    get_language_keyboard
+    get_language_keyboard,
+    get_collective_action_keyboard
 )
 from bot.states import (
     NAME_ENTRY,
@@ -78,6 +79,7 @@ __all__ = [
     'get_physical_presence_keyboard',
     'get_back_keyboard',
     'get_language_keyboard',
+    'get_collective_action_keyboard',
     'NAME_ENTRY',
     'IDEOLOGY_CHOICE',
     'ACTION_SELECT_DISTRICT',

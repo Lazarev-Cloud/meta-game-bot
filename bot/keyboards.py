@@ -341,3 +341,23 @@ def get_language_keyboard() -> InlineKeyboardMarkup:
         ]
     ]
     return InlineKeyboardMarkup(keyboard)
+
+def get_collective_action_keyboard(language: str) -> InlineKeyboardMarkup:
+    """Get keyboard for collective action type selection."""
+    keyboard = [
+        [
+            InlineKeyboardButton(_("Attack", language), callback_data="collective:attack"),
+            InlineKeyboardButton(_("Defense", language), callback_data="collective:defense")
+        ],
+        [
+            InlineKeyboardButton(_("Cancel", language), callback_data="cancel_selection")
+        ]
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
+def setup_i18n():
+    """Initialize the internationalization system."""
+    logger.info("Initializing internationalization system")
+    
+    # Initialize with default translations
+    setup_i18n()

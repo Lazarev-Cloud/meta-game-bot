@@ -733,19 +733,9 @@ async def collective_action_start(update: Update, context: ContextTypes.DEFAULT_
         user_context[telegram_id] = {}
     
     # Ask for action type (attack or defense)
-    keyboard = [
-        [
-            InlineKeyboardButton(_("Attack", language), callback_data="collective:attack"),
-            InlineKeyboardButton(_("Defense", language), callback_data="collective:defense")
-        ],
-        [
-            InlineKeyboardButton(_("Cancel", language), callback_data="cancel_selection")
-        ]
-    ]
-    
     await update.message.reply_text(
         _("You're initiating a collective action. What type of action?", language),
-        reply_markup=InlineKeyboardMarkup(keyboard)
+        reply_markup=get_collective_action_keyboard(language)
     )
     
     return COLLECTIVE_ACTION_TYPE

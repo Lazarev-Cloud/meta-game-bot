@@ -797,12 +797,8 @@ def register_commands(application) -> None:
     application.add_handler(CommandHandler("politicians", politicians_command))
     application.add_handler(CommandHandler("politician_status", politician_status_command))
     application.add_handler(CommandHandler("international", international_command))
-    # application.add_handler(CommandHandler("collective", collective_command))
-    # application.add_handler(CommandHandler("join", join_command))
+    # Note: collective and join commands are handled by conversation handlers in states.py
     
     # Admin commands 
     application.add_handler(CommandHandler("admin_process", admin_process_actions_command))
     application.add_handler(CommandHandler("admin_generate", admin_generate_effects_command))
-    
-    # Note: Start command is handled by conversation handler in states.py
-    # Collective and Join commands are handled by conversation handlers in states.py
