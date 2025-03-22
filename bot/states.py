@@ -17,6 +17,7 @@ from telegram.ext import (
     filters
 )
 
+from bot.callbacks import join_collective_action_callback
 # Import constants instead of defining states here (breaking circular import)
 from bot.constants import (
     NAME_ENTRY,

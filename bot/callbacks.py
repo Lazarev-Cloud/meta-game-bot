@@ -11,7 +11,7 @@ from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import ContextTypes, CallbackQueryHandler, ConversationHandler
 
 from bot.constants import ACTION_SELECT_RESOURCE, JOIN_ACTION_RESOURCE
-from bot.context import get_user_context
+from bot.context import get_user_context, user_context
 from bot.keyboards import (
     get_start_keyboard,
     get_help_keyboard,
