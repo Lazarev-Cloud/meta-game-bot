@@ -2,7 +2,8 @@
 # -*- coding: utf-8 -*-
 
 """
-Middleware for the Belgrade Game bot including authentication, logging, and rate limiting.
+Complete middleware implementation for the Belgrade Game bot including 
+authentication, logging, and rate limiting.
 """
 
 import logging
@@ -11,7 +12,7 @@ from typing import Dict, Set, List, Any, Optional, Callable
 from telegram import Update
 from telegram.ext import ContextTypes, Application
 
-from db import player_exists
+from db import player_exists, get_player
 from utils.i18n import _, get_user_language
 
 # Initialize logger
@@ -166,32 +167,60 @@ async def error_handler_middleware(update: Update, context: ContextTypes.DEFAULT
         except Exception as e:
             logger.error(f"Failed to send error message to user: {e}")
 
+async def language_middleware(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Store user's language preference in context for easy access."""
+    if update.effective_user:
+        telegram_id = str(update.effective_user.id)
+        language = await get_user_language(telegram_id)
+        context.user_data["language"] = language
+
+async def game_state_middleware(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Fetch and update game state information as needed."""
+    if update.effective_user:
+        telegram_id = str(update.effective_user.id)
+        
+        # Only try to get player data if the user is registered
+        registered = await player_exists(telegram_id)
+        if registered:
+            player_data = await get_player(telegram_id)
+            if player_data:
+                # Store relevant game state in context.user_data for easy access
+                context.user_data["player_data"] = player_data
+                context.user_data["resources"] = player_data.get("resources", {})
+                context.user_data["actions_remaining"] = player_data.get("actions_remaining", 0)
+                context.user_data["quick_actions_remaining"] = player_data.get("quick_actions_remaining", 0)
+
+async def combined_middleware(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Combined middleware handler to run all middleware functions."""
+    try:
+        # Always log first
+        await log_middleware(update, context)
+        
+        # Run rate limiting check
+        if not await rate_limit_middleware(update, context):
+            return
+        
+        # Run authentication check
+        if not await authentication_middleware(update, context):
+            return
+        
+        # Set language in context
+        await language_middleware(update, context)
+        
+        # Update game state if needed
+        await game_state_middleware(update, context)
+        
+    except Exception as e:
+        # Handle any errors in middleware
+        await error_handler_middleware(update, context, e)
+
 def setup_middleware(application: Application, admin_user_ids: List[int]) -> None:
     """Set up all middleware for the application."""
     global admin_ids
     admin_ids = admin_user_ids
     
-    # Create the middleware function that will run all checks
-    async def middleware_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Combined middleware handler."""
-        try:
-            # Always log first
-            await log_middleware(update, context)
-            
-            # Run rate limiting check
-            if not await rate_limit_middleware(update, context):
-                return
-            
-            # Run authentication check
-            if not await authentication_middleware(update, context):
-                return
-            
-        except Exception as e:
-            # Handle any errors in middleware
-            await error_handler_middleware(update, context, e)
-    
-    # Register middleware
-    application.add_handler(middleware_handler, -1)  # negative number means it runs before regular handlers
+    # Register the combined middleware handler
+    application.add_handler(combined_middleware, -1)  # negative number means it runs before regular handlers
     
     # Register error handler
     application.add_error_handler(

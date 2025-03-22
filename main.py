@@ -23,7 +23,7 @@ from telegram.ext import (
 from bot.commands import register_commands
 from bot.callbacks import register_callbacks
 from bot.middleware import setup_middleware
-from bot.states import STATES, conversation_handlers
+from bot.states import conversation_handlers
 
 # Import database client
 from db.supabase_client import init_supabase

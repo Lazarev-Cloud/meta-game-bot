@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 """
-Text formatting utilities for the Belgrade Game bot.
+Complete formatting utilities for the Belgrade Game bot.
 """
 
 import logging
@@ -46,6 +46,40 @@ async def format_player_status(player_data: Dict[str, Any], language: str) -> st
         # Count controlled districts
         controlled_districts = player_data.get("controlled_districts", [])
         district_count = len(controlled_districts)
+        district_names = []
+        
+        if district_count > 0:
+            district_names = [district.get("district_name", "Unknown") for district in controlled_districts]
+        
+        # Calculate total resources per cycle
+        total_influence = 0
+        total_money = 0
+        total_information = 0
+        total_force = 0
+        
+        for district in controlled_districts:
+            control_points = district.get("control_points", 0)
+            influence_base = district.get("resource_influence", 0)
+            money_base = district.get("resource_money", 0)
+            information_base = district.get("resource_information", 0)
+            force_base = district.get("resource_force", 0)
+            
+            # Calculate multiplier based on control level
+            if control_points >= 75:
+                multiplier = 1.2  # 120%
+            elif control_points >= 50:
+                multiplier = 1.0  # 100%
+            elif control_points >= 35:
+                multiplier = 0.8  # 80%
+            elif control_points >= 20:
+                multiplier = 0.6  # 60%
+            else:
+                multiplier = 0.4  # 40%
+            
+            total_influence += int(influence_base * multiplier)
+            total_money += int(money_base * multiplier)
+            total_information += int(information_base * multiplier)
+            total_force += int(force_base * multiplier)
         
         # Build status message
         status_text = _(
@@ -58,8 +92,7 @@ async def format_player_status(player_data: Dict[str, Any], language: str) -> st
             "🔹 Force: {force}\n\n"
             "*Actions Remaining:*\n"
             "🔹 Main Actions: {actions}\n"
-            "🔹 Quick Actions: {quick_actions}\n\n"
-            "*Districts Controlled:* {district_count}",
+            "🔹 Quick Actions: {quick_actions}\n\n",
             language
         ).format(
             name=player_name,
@@ -70,9 +103,35 @@ async def format_player_status(player_data: Dict[str, Any], language: str) -> st
             information=information,
             force=force,
             actions=actions_remaining,
-            quick_actions=quick_actions_remaining,
-            district_count=district_count
+            quick_actions=quick_actions_remaining
         )
+        
+        # Add districts section
+        if district_count > 0:
+            districts_text = _(
+                "*Districts Controlled:* {district_count}\n"
+                "{district_list}\n\n"
+                "*Resource Income Per Cycle:*\n"
+                "🔹 Influence: +{income_influence}\n"
+                "🔹 Money: +{income_money}\n"
+                "🔹 Information: +{income_information}\n"
+                "🔹 Force: +{income_force}\n",
+                language
+            ).format(
+                district_count=district_count,
+                district_list=", ".join(district_names),
+                income_influence=total_influence,
+                income_money=total_money,
+                income_information=total_information,
+                income_force=total_force
+            )
+            status_text += districts_text
+        else:
+            status_text += _("*Districts Controlled:* 0\n\n", language)
+            status_text += _("Control districts to gain resource income each cycle.\n", language)
+        
+        # Add tip
+        status_text += _("\n*Tip:* Use /help to see available commands.", language)
         
         return status_text
     except Exception as e:
@@ -141,6 +200,27 @@ async def format_district_info(district_data: Dict[str, Any], language: str) -> 
                 )
                 politicians_text += "\n"
         
+        # Add resource income explanation
+        control_text = _("\n*Resource Income based on Control:*\n", language)
+        if player_control >= 75:
+            control_text += _("• 75-100 CP = 120% resources\n", language)
+            control_text += _("• Current: 120% income", language)
+        elif player_control >= 50:
+            control_text += _("• 50-74 CP = 100% resources\n", language)
+            control_text += _("• Current: 100% income", language)
+        elif player_control >= 35:
+            control_text += _("• 35-49 CP = 80% resources\n", language)
+            control_text += _("• Current: 80% income", language)
+        elif player_control >= 20:
+            control_text += _("• 20-34 CP = 60% resources\n", language)
+            control_text += _("• Current: 60% income", language)
+        elif player_control > 0:
+            control_text += _("• <20 CP = 40% resources\n", language)
+            control_text += _("• Current: 40% income", language)
+        else:
+            control_text += _("• No control = No income\n", language)
+            control_text += _("• Current: No income", language)
+        
         # Build district info message
         district_text = _(
             "*District: {name}*\n\n"
@@ -151,7 +231,7 @@ async def format_district_info(district_data: Dict[str, Any], language: str) -> 
             "🔹 Influence: {influence}\n"
             "🔹 Money: {money}\n"
             "🔹 Information: {information}\n"
-            "🔹 Force: {force}{politicians_text}",
+            "🔹 Force: {force}{control_text}{politicians_text}",
             language
         ).format(
             name=name,
@@ -163,6 +243,7 @@ async def format_district_info(district_data: Dict[str, Any], language: str) -> 
             money=money,
             information=information,
             force=force,
+            control_text=control_text,
             politicians_text=politicians_text
         )
         
@@ -207,6 +288,21 @@ async def format_cycle_info(cycle_info: Dict[str, Any], language: str) -> str:
         
         is_accepting_submissions = cycle_info.get("is_accepting_submissions", False)
         
+        # Format deadline and results time to be more readable
+        if isinstance(deadline, str):
+            try:
+                dt = datetime.fromisoformat(deadline.replace('Z', '+00:00'))
+                deadline = dt.strftime("%H:%M")
+            except:
+                pass
+        
+        if isinstance(results_time, str):
+            try:
+                dt = datetime.fromisoformat(results_time.replace('Z', '+00:00'))
+                results_time = dt.strftime("%H:%M")
+            except:
+                pass
+        
         # Format status message
         status_text = _(
             "*Current Game Cycle*\n\n"
@@ -226,6 +322,16 @@ async def format_cycle_info(cycle_info: Dict[str, Any], language: str) -> str:
             time_to_deadline=await format_time(time_to_deadline, language),
             time_to_results=await format_time(time_to_results, language),
             accepting=_("Yes", language) if is_accepting_submissions else _("No", language)
+        )
+        
+        # Add explanation of cycles
+        status_text += _(
+            "\n\n*Game Cycles*\n"
+            "• Morning cycle: 12:00 deadline, 13:00 results\n"
+            "• Evening cycle: 18:00 deadline, 19:00 results\n"
+            "• Actions reset each cycle\n"
+            "• Resources are distributed at the end of each cycle",
+            language
         )
         
         return status_text
@@ -257,6 +363,9 @@ async def format_news(news_data: Dict[str, Any], language: str) -> str:
                     cycle_type=cycle_type,
                     date=cycle_date
                 )
+        else:
+            news_text += _("📰 *Public News*\n", language)
+            news_text += _("No recent public news.\n\n", language)
         
         # Add faction news
         if faction_news:
@@ -267,16 +376,26 @@ async def format_news(news_data: Dict[str, Any], language: str) -> str:
                 content = news.get("content", "")
                 cycle_type = news.get("cycle_type", "")
                 cycle_date = news.get("cycle_date", "")
+                district = news.get("district", "")
                 
                 news_text += f"*{title}*\n"
                 news_text += f"{content}\n"
-                news_text += _("({cycle_type} cycle, {date})\n\n", language).format(
+                
+                location_info = ""
+                if district:
+                    location_info = f" - {district}"
+                
+                news_text += _("({cycle_type} cycle, {date}{location})\n\n", language).format(
                     cycle_type=cycle_type,
-                    date=cycle_date
+                    date=cycle_date,
+                    location=location_info
                 )
+        else:
+            news_text += _("🔒 *Faction Intel*\n", language)
+            news_text += _("No recent intelligence reports.\n\n", language)
         
-        if not public_news and not faction_news:
-            news_text += _("No recent news available.", language)
+        # Add tip to view more news
+        news_text += _("\n*Tip:* Use /news [count] to see more news items.", language)
         
         return news_text
     except Exception as e:
@@ -314,6 +433,10 @@ async def format_income_info(income_data: Dict[str, Any], language: str) -> str:
                 information = income.get("information", 0)
                 force = income.get("force", 0)
                 
+                # Skip districts with no income
+                if influence == 0 and money == 0 and information == 0 and force == 0:
+                    continue
+                
                 income_text += f"*{name}* ({control_points} CP, {control_percentage})\n"
                 
                 resources = []
@@ -330,6 +453,9 @@ async def format_income_info(income_data: Dict[str, Any], language: str) -> str:
                     income_text += _("Income: ", language) + ", ".join(resources) + "\n\n"
                 else:
                     income_text += _("No income from this district\n\n", language)
+        else:
+            income_text += _("*No District Income*\n", language)
+            income_text += _("You don't control any districts yet.\n\n", language)
         
         # Add totals
         influence_total = totals.get("influence", 0)
@@ -349,6 +475,19 @@ async def format_income_info(income_data: Dict[str, Any], language: str) -> str:
             money=money_total,
             information=information_total,
             force=force_total
+        )
+        
+        # Add explanation of income mechanics
+        income_text += _(
+            "\n\n*Income Mechanics:*\n"
+            "• Resources are awarded at the end of each cycle\n"
+            "• Higher control points give better resource yields\n"
+            "• 75+ CP: 120% resource yield\n"
+            "• 50-74 CP: 100% resource yield\n"
+            "• 35-49 CP: 80% resource yield\n"
+            "• 20-34 CP: 60% resource yield\n"
+            "• <20 CP: 40% resource yield",
+            language
         )
         
         return income_text
@@ -397,6 +536,35 @@ async def format_politicians_list(politicians_data: Dict[str, Any], language: st
             # Just show the filtered list
             for politician in politicians:
                 politicians_text += await format_single_politician(politician, player_ideology, language)
+        
+        # Add explanation of politician mechanics
+        if type_filter == "local" or type_filter == "all":
+            politicians_text += _(
+                "\n*Local Politicians:*\n"
+                "• Have influence in specific districts\n"
+                "• 🟢 Friendly (70-100): Provides support and resources\n"
+                "• 🟡 Neutral (30-69): Limited interaction\n"
+                "• 🔴 Hostile (0-29): Works against your interests\n",
+                language
+            )
+        
+        if type_filter == "international" or type_filter == "all":
+            politicians_text += _(
+                "\n*International Politicians:*\n"
+                "• Represent foreign countries and organizations\n"
+                "• Can impose sanctions or provide support\n"
+                "• Their actions affect districts and resources\n",
+                language
+            )
+        
+        # Add compatibility explanation
+        politicians_text += _(
+            "\n*Ideology Compatibility:*\n"
+            "• ✓✓: Strong compatibility (0-2 points difference)\n"
+            "• ✓: Moderate compatibility (3-4 points difference)\n"
+            "• ✗: Incompatible (5+ points difference)\n",
+            language
+        )
         
         return politicians_text
     except Exception as e:
@@ -474,6 +642,13 @@ async def format_politician_info(politician_data: Dict[str, Any], language: str)
         elif friendliness_status == "hostile":
             stance_description = _("Actively works against your interests", language)
         
+        # Format friendliness progress bar
+        bar_length = 10
+        filled_length = int(round(friendliness / 10))
+        empty_length = bar_length - filled_length
+        
+        bar = "■" * filled_length + "□" * empty_length
+        
         # Build politician info message
         politician_text = _(
             "*{name}*\n\n"
@@ -500,7 +675,7 @@ async def format_politician_info(politician_data: Dict[str, Any], language: str)
         politician_text += _(
             "*Ideological Position:* {ideology}\n"
             "*Compatibility with You:* {compatibility}\n"
-            "*Friendliness Level:* {friendliness}/100\n"
+            "*Friendliness Level:* {friendliness}/100 {bar}\n"
             "*Current Stance:* {stance_status} - {stance_description}{active_effects}",
             language
         ).format(
@@ -509,12 +684,141 @@ async def format_politician_info(politician_data: Dict[str, Any], language: str)
                         _("Incompatible ({penalty} CP)", language).format(penalty=ideology_compatibility) if ideology_compatibility < 0 else
                         _("Neutral", language),
             friendliness=friendliness,
+            bar=bar,
             stance_status=friendliness_status.capitalize(),
             stance_description=stance_description,
             active_effects=active_effects_text
+        )
+        
+        # Add explanation of possible actions
+        politician_text += _(
+            "\n\n*Possible Actions:*\n",
+            language
+        )
+        
+        if friendliness < 90:
+            politician_text += _("• *Influence:* Increase friendliness level\n", language)
+        
+        politician_text += _("• *Attack Reputation:* Reduce their influence (-2 CP)\n", language)
+        
+        if friendliness < 50:
+            politician_text += _("• *Displacement:* Significantly reduce influence (-5 CP)\n", language)
+        
+        if friendliness >= 70:
+            politician_text += _("• *Request Resources:* Gain resources through their support\n", language)
+        
+        # Add tip about ideology compatibility
+        politician_text += _(
+            "\n*Ideology Compatibility:*\n"
+            "• Small difference (0-2): +2 CP per cycle\n"
+            "• Large difference (3+): -5 CP per cycle\n",
+            language
         )
         
         return politician_text
     except Exception as e:
         logger.error(f"Error formatting politician info: {str(e)}")
         return _("Error formatting politician information", language)
+
+async def format_action_confirmation(action_data: Dict[str, Any], language: str) -> str:
+    """Format action confirmation message."""
+    try:
+        action_type = action_data.get("action_type", "unknown")
+        district = action_data.get("district", "unknown")
+        resources = action_data.get("resources_used", {})
+        resource_type = resources.get("type", "unknown")
+        resource_amount = resources.get("amount", 0)
+        physical_presence = action_data.get("physical_presence", False)
+        
+        # Format confirmation message
+        confirmation_text = _(
+            "*{title}*\n\n"
+            "Your {action_type} action has been submitted successfully.\n\n"
+            "*Details:*\n"
+            "• District: {district}\n"
+            "• Resources: {amount} {resource_type}\n"
+            "• Physical Presence: {physical}\n\n"
+            "*Result:* Action will be processed at the end of the current cycle.",
+            language
+        ).format(
+            title=_("Action Submitted", language),
+            action_type=_(action_type, language),
+            district=district,
+            amount=resource_amount,
+            resource_type=_(resource_type, language),
+            physical=_("Yes", language) if physical_presence else _("No", language)
+        )
+        
+        # Add explanation based on action type
+        if action_type == "influence":
+            confirmation_text += _(
+                "\n\n*Expected outcome:*\n"
+                "Success (+10 CP) or partial success (+5 CP).\n"
+                "Physical presence adds +20 CP bonus.",
+                language
+            )
+        elif action_type == "attack":
+            confirmation_text += _(
+                "\n\n*Expected outcome:*\n"
+                "Success (-10 CP to target, +10 CP to you) or\n"
+                "partial success (-5 CP to target, +5 CP to you).\n"
+                "Physical presence adds +20 CP bonus.",
+                language
+            )
+        elif action_type == "defense":
+            confirmation_text += _(
+                "\n\n*Expected outcome:*\n"
+                "Success (block up to 10 CP damage) or\n"
+                "partial success (block up to 5 CP damage).\n"
+                "Physical presence adds +20 CP bonus.",
+                language
+            )
+        
+        return confirmation_text
+    except Exception as e:
+        logger.error(f"Error formatting action confirmation: {str(e)}")
+        return _("Action submitted successfully.", language)
+
+async def format_collective_action_info(action_data: Dict[str, Any], language: str) -> str:
+    """Format collective action information."""
+    try:
+        action_id = action_data.get("collective_action_id", "unknown")
+        action_type = action_data.get("action_type", "unknown")
+        district = action_data.get("district", "unknown")
+        initiator = action_data.get("initiator", "unknown")
+        join_command = action_data.get("join_command", "/join [id]")
+        
+        # Format collective action info
+        action_text = _(
+            "*Collective {action_type} Action*\n"
+            "ID: {action_id}\n\n"
+            "Initiated by: {initiator}\n"
+            "Target District: {district}\n\n"
+            "To join this action, use the command:\n"
+            "`{join_command}`\n\n"
+            "Players who join will combine their resources for a stronger effect.",
+            language
+        ).format(
+            action_type=_(action_type, language),
+            action_id=action_id,
+            initiator=initiator,
+            district=district,
+            join_command=join_command
+        )
+        
+        # Add explanation
+        action_text += _(
+            "\n\n*Collective Actions:*\n"
+            "• Combine resources from multiple players\n"
+            "• Higher success chance and stronger effect\n"
+            "• All participants receive control points based on contribution\n"
+            "• Results are processed at the end of the cycle",
+            language
+        )
+        
+        return action_text
+    except Exception as e:
+        logger.error(f"Error formatting collective action info: {str(e)}")
+        return _("Collective action created successfully. Use {join_command} to join.", language).format(
+            join_command=action_data.get("join_command", "/join [id]")
+        )

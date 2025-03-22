@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 """
-Command handlers for the Belgrade Game bot.
+Complete command handlers implementation for the Belgrade Game bot.
 """
 
 import logging
@@ -29,11 +29,23 @@ from db import (
     get_latest_news,
     cancel_latest_action,
     get_player_info,
-    get_map_data
+    get_map_data,
+    check_income,
+    get_politicians,
+    get_politician_status
 )
 from bot.states import IDEOLOGY_CHOICE, NAME_ENTRY
 from utils.i18n import _, get_user_language
-from utils.formatting import format_player_status, format_time, format_cycle_info, format_news
+from utils.formatting import (
+    format_player_status,
+    format_time,
+    format_cycle_info,
+    format_news,
+    format_district_info,
+    format_income_info,
+    format_politicians_list,
+    format_politician_info
+)
 
 # Initialize logger
 logger = logging.getLogger(__name__)
@@ -97,7 +109,11 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         "*Politicians Commands*\n"
         "/politicians - List available politicians\n"
         "/politician_status [name] - Information about a politician\n"
-        "/international - Information about international politicians",
+        "/international - Information about international politicians\n\n"
+        
+        "*Collective Action Commands*\n"
+        "/collective - Initiate a collective action\n"
+        "/join [action_id] - Join a collective action",
         language
     )
     
@@ -430,9 +446,26 @@ async def view_district_command(update: Update, context: ContextTypes.DEFAULT_TY
     # Get district name from args
     district_name = " ".join(context.args)
     
-    # Call the district info handler
-    from bot.callbacks import district_info_callback
-    await district_info_callback(update, context, district_name)
+    # Get district info
+    district_data = await get_district_info(telegram_id, district_name, language)
+    
+    if not district_data:
+        await update.message.reply_text(
+            _("Error retrieving district information for {district}. The district may not exist or there was a server error.", language).format(
+                district=district_name
+            )
+        )
+        return
+    
+    # Format district info
+    district_text = await format_district_info(district_data, language)
+    
+    # Send district info
+    await update.message.reply_text(
+        district_text,
+        parse_mode="Markdown",
+        reply_markup=await get_districts_keyboard(language)
+    )
 
 async def resources_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle the /resources command - show current resources."""
@@ -509,7 +542,7 @@ async def convert_resource_command(update: Update, context: ContextTypes.DEFAULT
         return
     
     # Let the callback handle the conversion
-    from bot.callbacks import resource_conversion_start
+    from bot.states import resource_conversion_start
     resource_type = context.args[0].lower()
     try:
         amount = int(context.args[1])
@@ -533,9 +566,23 @@ async def check_income_command(update: Update, context: ContextTypes.DEFAULT_TYP
         )
         return
     
-    # Call the income check handler
-    from bot.callbacks import check_income_callback
-    await check_income_callback(update, context)
+    # Get income data
+    income_data = await check_income(telegram_id, language)
+    
+    if not income_data:
+        await update.message.reply_text(
+            _("Error retrieving income information. Please try again later.", language)
+        )
+        return
+    
+    # Format income info
+    income_text = await format_income_info(income_data, language)
+    
+    # Send income info
+    await update.message.reply_text(
+        income_text,
+        parse_mode="Markdown"
+    )
 
 async def politicians_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle the /politicians command - list available politicians."""
@@ -582,9 +629,26 @@ async def politician_status_command(update: Update, context: ContextTypes.DEFAUL
     # Get politician name from args
     politician_name = " ".join(context.args)
     
-    # Call the politician info handler
-    from bot.callbacks import politician_info_callback
-    await politician_info_callback(update, context, politician_name)
+    # Get politician info
+    politician_data = await get_politician_status(telegram_id, politician_name, language)
+    
+    if not politician_data:
+        await update.message.reply_text(
+            _("Error retrieving information for politician {name}. The politician may not exist or there was a server error.", language).format(
+                name=politician_name
+            )
+        )
+        return
+    
+    # Format politician info
+    politician_text = await format_politician_info(politician_data, language)
+    
+    # Send politician info
+    await update.message.reply_text(
+        politician_text,
+        parse_mode="Markdown",
+        reply_markup=get_politician_interaction_keyboard(language, politician_data)
+    )
 
 async def international_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle the /international command - show international politicians."""
@@ -600,9 +664,120 @@ async def international_command(update: Update, context: ContextTypes.DEFAULT_TY
         )
         return
     
-    # Call the international politicians handler
-    from bot.callbacks import international_politicians_callback
-    await international_politicians_callback(update, context)
+    # Get international politicians
+    politicians_data = await get_politicians(telegram_id, "international", language)
+    
+    if not politicians_data:
+        await update.message.reply_text(
+            _("Error retrieving international politicians. Please try again later.", language)
+        )
+        return
+    
+    # Format politicians list
+    politicians_text = await format_politicians_list(politicians_data, language)
+    
+    # Send politicians info
+    await update.message.reply_text(
+        politicians_text,
+        parse_mode="Markdown",
+        reply_markup=get_politicians_keyboard(language)
+    )
+
+async def collective_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle the /collective command - initiate a collective action."""
+    # This command is handled by the collective_action_handler ConversationHandler
+    # from bot.states import collective_action_start
+    # await collective_action_start(update, context)
+    pass
+
+async def join_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle the /join command - join a collective action."""
+    # This command is handled by the join_action_handler ConversationHandler
+    # from bot.states import join_collective_action_start
+    # await join_collective_action_start(update, context)
+    pass
+
+# Admin commands
+async def admin_process_actions_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle the /admin_process command - process all pending actions (admin only)."""
+    telegram_id = str(update.effective_user.id)
+    language = await get_user_language(telegram_id)
+    
+    # Import admin function
+    from db import admin_process_actions
+    
+    try:
+        result = await admin_process_actions(telegram_id)
+        
+        if result and result.get("success"):
+            actions_processed = result.get("actions_processed", 0)
+            collective_actions_processed = result.get("collective_actions_processed", 0)
+            
+            await update.message.reply_text(
+                _("Actions processed successfully:\n\n"
+                  "Regular actions: {actions}\n"
+                  "Collective actions: {collective_actions}\n\n"
+                  "New cycle has been created.", language).format(
+                      actions=actions_processed,
+                      collective_actions=collective_actions_processed
+                  )
+            )
+        else:
+            await update.message.reply_text(
+                _("Error processing actions. Make sure you have admin privileges.", language)
+            )
+    except Exception as e:
+        logger.error(f"Error in admin_process_actions: {str(e)}")
+        await update.message.reply_text(
+            _("An error occurred while processing actions: {error}", language).format(error=str(e))
+        )
+
+async def admin_generate_effects_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle the /admin_generate command - generate international effects (admin only)."""
+    telegram_id = str(update.effective_user.id)
+    language = await get_user_language(telegram_id)
+    
+    # Import admin function
+    from db import admin_generate_international_effects
+    
+    # Get count parameter if provided
+    count = 2
+    if context.args and len(context.args) > 0:
+        try:
+            count = int(context.args[0])
+        except ValueError:
+            pass
+    
+    try:
+        result = await admin_generate_international_effects(telegram_id, count)
+        
+        if result and result.get("success"):
+            effects_generated = result.get("effects_generated", 0)
+            effects = result.get("effects", [])
+            
+            effects_text = ""
+            for effect in effects:
+                politician = effect.get("politician", "Unknown")
+                effect_type = effect.get("effect_type", "Unknown")
+                description = effect.get("description", "No details")
+                
+                effects_text += f"• {politician}: {effect_type}\n  {description}\n\n"
+            
+            await update.message.reply_text(
+                _("Generated {count} international effects:\n\n{effects}", language).format(
+                    count=effects_generated,
+                    effects=effects_text
+                )
+            )
+        else:
+            await update.message.reply_text(
+                _("Error generating international effects. Make sure you have admin privileges.", language)
+            )
+    except Exception as e:
+        logger.error(f"Error in admin_generate_effects: {str(e)}")
+        await update.message.reply_text(
+            _("An error occurred while generating effects: {error}", language).format(error=str(e))
+        )
 
 def register_commands(application) -> None:
     """Register all command handlers."""
@@ -622,5 +797,12 @@ def register_commands(application) -> None:
     application.add_handler(CommandHandler("politicians", politicians_command))
     application.add_handler(CommandHandler("politician_status", politician_status_command))
     application.add_handler(CommandHandler("international", international_command))
+    # application.add_handler(CommandHandler("collective", collective_command))
+    # application.add_handler(CommandHandler("join", join_command))
     
-    # Start command is handled by conversation handler in states.py
+    # Admin commands 
+    application.add_handler(CommandHandler("admin_process", admin_process_actions_command))
+    application.add_handler(CommandHandler("admin_generate", admin_generate_effects_command))
+    
+    # Note: Start command is handled by conversation handler in states.py
+    # Collective and Join commands are handled by conversation handlers in states.py
