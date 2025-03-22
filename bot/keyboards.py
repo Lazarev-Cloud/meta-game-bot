@@ -38,6 +38,7 @@ def get_start_keyboard(language: str) -> InlineKeyboardMarkup:
     ]
     return InlineKeyboardMarkup(keyboard)
 
+
 def get_ideology_keyboard(language: str) -> InlineKeyboardMarkup:
     """Get keyboard for ideology selection."""
     keyboard = [
@@ -95,6 +96,7 @@ def get_status_keyboard(language: str) -> InlineKeyboardMarkup:
         ]
     ]
     return InlineKeyboardMarkup(keyboard)
+
 
 
 def get_map_keyboard(language: str) -> InlineKeyboardMarkup:
@@ -156,6 +158,7 @@ def get_action_keyboard(language: str) -> InlineKeyboardMarkup:
     ]
     return InlineKeyboardMarkup(keyboard)
 
+
 def get_quick_action_keyboard(language: str) -> InlineKeyboardMarkup:
     """Get keyboard for quick action selection."""
     keyboard = [
@@ -173,14 +176,15 @@ def get_quick_action_keyboard(language: str) -> InlineKeyboardMarkup:
     ]
     return InlineKeyboardMarkup(keyboard)
 
+
 async def get_districts_keyboard(language: str) -> InlineKeyboardMarkup:
     """Get keyboard with all districts."""
     districts = await get_districts()
-    
+
     # Group districts into rows of 2
     keyboard = []
     row = []
-    
+
     for district in districts:
         district_name = district.get("name", "Unknown")
         if len(row) < 2:
@@ -188,14 +192,15 @@ async def get_districts_keyboard(language: str) -> InlineKeyboardMarkup:
         else:
             keyboard.append(row)
             row = [InlineKeyboardButton(district_name, callback_data=f"district:{district_name}")]
-    
+
     if row:  # Add any remaining items
         keyboard.append(row)
-    
+
     # Add back button
     keyboard.append([InlineKeyboardButton(_("Back", language), callback_data="back_to_menu")])
-    
+
     return InlineKeyboardMarkup(keyboard)
+
 
 def get_resources_keyboard(language: str) -> InlineKeyboardMarkup:
     """Get keyboard for resource management."""
@@ -210,21 +215,22 @@ def get_resources_keyboard(language: str) -> InlineKeyboardMarkup:
     ]
     return InlineKeyboardMarkup(keyboard)
 
+
 def get_resource_type_keyboard(language: str, exclude_type: str = None) -> InlineKeyboardMarkup:
     """Get keyboard for selecting resource type, optionally excluding one type."""
     keyboard = []
-    
+
     resources = [
         ("influence", _("Influence", language)),
         ("money", _("Money", language)),
         ("information", _("Information", language)),
         ("force", _("Force", language))
     ]
-    
+
     # Filter out excluded type
     if exclude_type:
         resources = [r for r in resources if r[0] != exclude_type]
-    
+
     # Group into rows of 2
     row = []
     for resource_type, label in resources:
@@ -233,33 +239,35 @@ def get_resource_type_keyboard(language: str, exclude_type: str = None) -> Inlin
         else:
             keyboard.append(row)
             row = [InlineKeyboardButton(label, callback_data=f"resource:{resource_type}")]
-    
+
     if row:  # Add any remaining items
         keyboard.append(row)
-    
+
     # Add cancel button
     keyboard.append([InlineKeyboardButton(_("Cancel", language), callback_data="cancel_selection")])
-    
+
     return InlineKeyboardMarkup(keyboard)
+
 
 def get_resource_amount_keyboard(language: str, max_amount: int = 5) -> InlineKeyboardMarkup:
     """Get keyboard for selecting resource amount."""
     keyboard = []
-    
+
     # Create buttons for amounts 1-5 (or max_amount)
     amounts = list(range(1, min(max_amount + 1, 6)))
-    
+
     # Group into rows of 3
     for i in range(0, len(amounts), 3):
         row = []
-        for amount in amounts[i:i+3]:
+        for amount in amounts[i:i + 3]:
             row.append(InlineKeyboardButton(str(amount), callback_data=f"amount:{amount}"))
         keyboard.append(row)
-    
+
     # Add cancel button
     keyboard.append([InlineKeyboardButton(_("Cancel", language), callback_data="cancel_selection")])
-    
+
     return InlineKeyboardMarkup(keyboard)
+
 
 def get_politicians_keyboard(language: str) -> InlineKeyboardMarkup:
     """Get keyboard for politician type selection."""
@@ -277,48 +285,50 @@ def get_politicians_keyboard(language: str) -> InlineKeyboardMarkup:
     ]
     return InlineKeyboardMarkup(keyboard)
 
+
 def get_politician_interaction_keyboard(language: str, politician_data: Dict[str, Any]) -> InlineKeyboardMarkup:
     """Get keyboard for interacting with a politician."""
     possible_actions = politician_data.get("possible_actions", {})
-    
+
     keyboard = []
-    
+
     # Add possible actions based on politician data
     actions = []
-    
+
     if possible_actions.get("influence", False):
         actions.append(InlineKeyboardButton(
-            _("Increase Influence", language), 
+            _("Increase Influence", language),
             callback_data=f"politician_action:influence:{politician_data.get('name')}"
         ))
-    
+
     if possible_actions.get("attack_reputation", False):
         actions.append(InlineKeyboardButton(
-            _("Attack Reputation", language), 
+            _("Attack Reputation", language),
             callback_data=f"politician_action:attack:{politician_data.get('name')}"
         ))
-    
+
     if possible_actions.get("displacement", False):
         actions.append(InlineKeyboardButton(
-            _("Displacement", language), 
+            _("Displacement", language),
             callback_data=f"politician_action:displace:{politician_data.get('name')}"
         ))
-    
+
     if possible_actions.get("request_resources", False):
         actions.append(InlineKeyboardButton(
-            _("Request Resources", language), 
+            _("Request Resources", language),
             callback_data=f"politician_action:request:{politician_data.get('name')}"
         ))
-    
+
     # Group actions into rows of 2
     for i in range(0, len(actions), 2):
-        row = actions[i:i+2]
+        row = actions[i:i + 2]
         keyboard.append(row)
-    
+
     # Add back button
     keyboard.append([InlineKeyboardButton(_("Back", language), callback_data="back_to_politicians")])
-    
+
     return InlineKeyboardMarkup(keyboard)
+
 
 def get_confirmation_keyboard(language: str) -> InlineKeyboardMarkup:
     """Get keyboard for confirmation dialogs."""
@@ -329,6 +339,7 @@ def get_confirmation_keyboard(language: str) -> InlineKeyboardMarkup:
         ]
     ]
     return InlineKeyboardMarkup(keyboard)
+
 
 def get_yes_no_keyboard(language: str) -> InlineKeyboardMarkup:
     """Get keyboard with Yes/No options."""
