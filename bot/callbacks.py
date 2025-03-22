@@ -8,7 +8,7 @@ Callback query handlers for the Meta Game bot.
 import logging
 import json
 from typing import Dict, Any, Optional
-from telegram import Update, InlineKeyboardMarkup
+from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import ContextTypes, CallbackQueryHandler
 
 from bot.keyboards import (
@@ -28,7 +28,7 @@ from bot.keyboards import (
 )
 from bot.states import (
     resource_conversion_start,
-    action_select_district
+    action_select_district, user_context, ACTION_SELECT_RESOURCE, JOIN_ACTION_RESOURCE
 )
 from db import (
     get_player,
@@ -37,7 +37,7 @@ from db import (
     check_income,
     get_politicians,
     get_politician_status,
-    exchange_resources
+    exchange_resources, submit_action, get_latest_news, get_active_collective_actions
 )
 from utils.i18n import _, get_user_language
 from utils.formatting import (
@@ -159,23 +159,121 @@ async def map_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         reply_markup=get_map_keyboard(language)
     )
 
+
 async def news_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle news callback."""
+    """Handle news callback with improved interactivity."""
     query = update.callback_query
     await query.answer()
-    
-    # Forward to news command handler
-    from bot.commands import news_command
-    
-    # Create a message that news_command can respond to
-    context._message = query.message
-    update.message = query.message
-    
-    # Call the news command handler
-    await news_command(update, context)
-    
-    # Restore update.message
-    update.message = None
+
+    telegram_id = str(update.effective_user.id)
+    language = await get_user_language(telegram_id)
+
+    # Get page number from context or initialize
+    page = context.user_data.get("news_page", 0)
+
+    # Extract page action if there is one
+    if query.data.startswith("news_page:"):
+        action = query.data.split(":", 1)[1]
+        if action == "next":
+            page += 1
+        elif action == "prev" and page > 0:
+            page -= 1
+        context.user_data["news_page"] = page
+
+    # Get news with pagination (5 per page)
+    news_count = 5
+    news_offset = page * news_count
+
+    news_data = await get_latest_news(telegram_id, count=news_count + 1,
+                                      language=language)  # +1 to check if there's more
+
+    if not news_data:
+        await query.edit_message_text(
+            _("Error retrieving news. Please try again later.", language)
+        )
+        return
+
+    # Format and build news message
+    news_text = _("*Latest News*\n\n", language)
+
+    # Add public news
+    public_news = news_data.get("public", [])
+    if public_news:
+        news_text += _("📰 *Public News*\n", language)
+
+        for i, news in enumerate(public_news[:news_count]):  # Show news_count items per page
+            title = news.get("title", "")
+            content = news.get("content", "")
+            cycle_type = news.get("cycle_type", "")
+            cycle_date = news.get("cycle_date", "")
+
+            news_text += f"*{title}*\n"
+            news_text += f"{content}\n"
+            news_text += _("({cycle_type} cycle, {date})\n\n", language).format(
+                cycle_type=cycle_type,
+                date=cycle_date
+            )
+    else:
+        news_text += _("📰 *Public News*\n", language)
+        news_text += _("No recent public news.\n\n", language)
+
+    # Add faction news
+    faction_news = news_data.get("faction", [])
+    if faction_news:
+        news_text += _("🔒 *Faction Intel*\n", language)
+
+        for i, news in enumerate(faction_news[:news_count]):  # Show news_count items per page
+            title = news.get("title", "")
+            content = news.get("content", "")
+            cycle_type = news.get("cycle_type", "")
+            cycle_date = news.get("cycle_date", "")
+            district = news.get("district", "")
+
+            news_text += f"*{title}*\n"
+            news_text += f"{content}\n"
+
+            location_info = ""
+            if district:
+                location_info = f" - {district}"
+
+            news_text += _("({cycle_type} cycle, {date}{location})\n\n", language).format(
+                cycle_type=cycle_type,
+                date=cycle_date,
+                location=location_info
+            )
+    else:
+        news_text += _("🔒 *Faction Intel*\n", language)
+        news_text += _("No recent intelligence reports.\n\n", language)
+
+    # Create pagination buttons
+    buttons = []
+
+    # Add navigation row
+    navigation_row = []
+
+    # Previous page button if not on first page
+    if page > 0:
+        navigation_row.append(InlineKeyboardButton("◀️ " + _("Previous", language), callback_data="news_page:prev"))
+
+    # Next page button if there are more news
+    if len(public_news) > news_count or len(faction_news) > news_count:
+        navigation_row.append(InlineKeyboardButton(_("Next", language) + " ▶️", callback_data="news_page:next"))
+
+    if navigation_row:
+        buttons.append(navigation_row)
+
+    # Add back to menu button
+    buttons.append([InlineKeyboardButton(_("Back to Menu", language), callback_data="back_to_menu")])
+
+    # Create keyboard
+    keyboard = InlineKeyboardMarkup(buttons)
+
+    await query.edit_message_text(
+        news_text,
+        parse_mode="Markdown",
+        reply_markup=keyboard
+    )
+
 
 async def district_info_callback(update: Update, context: ContextTypes.DEFAULT_TYPE, district_name: str = None) -> None:
     """Handle district info callback."""
@@ -334,6 +432,151 @@ async def controlled_districts_callback(update: Update, context: ContextTypes.DE
         parse_mode="Markdown",
         reply_markup=get_back_keyboard(language)
     )
+
+
+async def politician_action_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle politician action buttons."""
+    query = update.callback_query
+    await query.answer()
+
+    telegram_id = str(update.effective_user.id)
+    language = await get_user_language(telegram_id)
+
+    # Extract action details
+    action_data = query.data.split(":", 2)
+    if len(action_data) < 3:
+        await query.edit_message_text(
+            _("Invalid action format. Please try again.", language)
+        )
+        return
+
+    action_type = action_data[1]
+    politician_name = action_data[2]
+
+    # Initialize user context for action
+    if telegram_id not in user_context:
+        user_context[telegram_id] = {}
+
+    # Get politician info to verify
+    politician_data = await get_politician_status(telegram_id, politician_name, language)
+
+    if not politician_data:
+        await query.edit_message_text(
+            _("Politician not found. Please try again.", language)
+        )
+        return
+
+    # Map button action type to actual action type
+    action_map = {
+        "influence": "politician_influence",
+        "attack": "politician_reputation_attack",
+        "displace": "politician_displacement",
+        "request": "politician_request_resources"
+    }
+
+    actual_action_type = action_map.get(action_type)
+
+    if not actual_action_type:
+        await query.edit_message_text(
+            _("Invalid action type. Please try again.", language)
+        )
+        return
+
+    # Store action info in user context
+    user_context[telegram_id]["action_type"] = actual_action_type
+    user_context[telegram_id]["is_quick_action"] = False
+    user_context[telegram_id]["target_politician_name"] = politician_name
+
+    # For request resources, handle differently
+    if actual_action_type == "politician_request_resources":
+        # This is a special case that doesn't use the normal action flow
+        try:
+            result = await submit_action(
+                telegram_id=telegram_id,
+                action_type=actual_action_type,
+                is_quick_action=False,
+                target_politician_name=politician_name,
+                resource_type="influence",  # Default resource type
+                resource_amount=1,  # Default resource amount
+                language=language
+            )
+
+            if result and result.get("success"):
+                # Success message
+                await query.edit_message_text(
+                    _("Resource request submitted to {politician_name}. You will receive resources soon if they approve your request.",
+                      language).format(
+                        politician_name=politician_name
+                    )
+                )
+            else:
+                await query.edit_message_text(
+                    _("Failed to submit resource request. Please try again.", language)
+                )
+        except Exception as e:
+            logger.error(f"Error requesting resources: {str(e)}")
+            await query.edit_message_text(
+                _("An error occurred: {error}", language).format(error=str(e))
+            )
+        return
+
+    # For other actions, proceed with normal action flow
+    # Ask for resource type
+    await query.edit_message_text(
+        _("What resource would you like to use for this action?", language),
+        reply_markup=get_resource_type_keyboard(language)
+    )
+
+    # This will continue the action flow in states.py from ACTION_SELECT_RESOURCE state
+    return ACTION_SELECT_RESOURCE
+
+
+async def exchange_resources_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle resource exchange initiation."""
+    query = update.callback_query
+    await query.answer()
+
+    # This is the entry point for resource conversion from a button click
+    from bot.states import resource_conversion_start
+    return await resource_conversion_start(update, context)
+
+
+async def join_collective_action_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle joining collective actions from a button click."""
+    query = update.callback_query
+    await query.answer()
+
+    telegram_id = str(update.effective_user.id)
+    language = await get_user_language(telegram_id)
+
+    # Extract action ID
+    action_data = query.data.split(":", 1)
+    if len(action_data) < 2:
+        await query.edit_message_text(
+            _("Invalid action format. Please try again.", language)
+        )
+        return
+
+    action_id = action_data[1]
+
+    # Initialize user context for joining action
+    if telegram_id not in user_context:
+        user_context[telegram_id] = {}
+
+    # Store action ID in context
+    user_context[telegram_id]["join_action_id"] = action_id
+
+    # Prompt for resource selection
+    await query.edit_message_text(
+        _("You are joining collective action {action_id}.\n\nWhat resource would you like to contribute?",
+          language).format(
+            action_id=action_id
+        ),
+        reply_markup=get_resource_type_keyboard(language)
+    )
+
+    # This will continue in states.py with the JOIN_ACTION_RESOURCE state
+    return JOIN_ACTION_RESOURCE
 
 async def check_income_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle income check callback."""
@@ -591,6 +834,116 @@ async def politician_info_callback(update: Update, context: ContextTypes.DEFAULT
             reply_markup=keyboard
         )
 
+
+async def action_button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle the action button from main menu."""
+    query = update.callback_query
+    await query.answer()
+
+    telegram_id = str(update.effective_user.id)
+    language = await get_user_language(telegram_id)
+
+    # Show action options
+    await query.edit_message_text(
+        _("What type of main action would you like to take?", language),
+        reply_markup=get_action_keyboard(language)
+    )
+
+
+async def quick_action_button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle the quick action button from main menu."""
+    query = update.callback_query
+    await query.answer()
+
+    telegram_id = str(update.effective_user.id)
+    language = await get_user_language(telegram_id)
+
+    # Show quick action options
+    await query.edit_message_text(
+        _("What type of quick action would you like to take?", language),
+        reply_markup=get_quick_action_keyboard(language)
+    )
+
+
+async def politicians_button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle the politicians button from main menu."""
+    query = update.callback_query
+    await query.answer()
+
+    telegram_id = str(update.effective_user.id)
+    language = await get_user_language(telegram_id)
+
+    # Show politician options
+    await query.edit_message_text(
+        _("Which politicians would you like to see?", language),
+        reply_markup=get_politicians_keyboard(language)
+    )
+
+
+async def view_collective_actions_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle view collective actions button."""
+    query = update.callback_query
+    await query.answer()
+
+    telegram_id = str(update.effective_user.id)
+    language = await get_user_language(telegram_id)
+
+    # Get active collective actions
+    active_actions = await get_active_collective_actions()
+
+    if not active_actions:
+        await query.edit_message_text(
+            _("There are no active collective actions at the moment.", language),
+            reply_markup=get_back_keyboard(language)
+        )
+        return
+
+    # Format and display active actions
+    actions_text = _("*Active Collective Actions*\n\n", language)
+
+    for action in active_actions:
+        action_id = action.get("collective_action_id", "unknown")
+        action_type = action.get("action_type", "unknown")
+        district = action.get("district_id", {}).get("name", "unknown")
+        initiator = action.get("initiator_player_id", {}).get("name", "unknown")
+
+        actions_text += _(
+            "*Action ID:* {id}\n"
+            "*Type:* {type}\n"
+            "*District:* {district}\n"
+            "*Initiated by:* {initiator}\n\n",
+            language
+        ).format(
+            id=action_id,
+            type=_(action_type, language),
+            district=district,
+            initiator=initiator
+        )
+
+    # Add button to join a collective action
+    buttons = []
+    for action in active_actions[:3]:  # Limit to first 3 for cleaner UI
+        action_id = action.get("collective_action_id", "unknown")
+        action_type = action.get("action_type", "unknown")
+        district = action.get("district_id", {}).get("name", "unknown")
+
+        button_text = f"{_(action_type, language)} in {district}"
+        buttons.append([InlineKeyboardButton(button_text, callback_data=f"join_collective_action:{action_id}")])
+
+    # Add back button
+    buttons.append([InlineKeyboardButton(_("Back", language), callback_data="back_to_menu")])
+
+    # Create keyboard with join buttons
+    keyboard = InlineKeyboardMarkup(buttons)
+
+    # Send message with formatted text and join buttons
+    await query.edit_message_text(
+        actions_text,
+        parse_mode="Markdown",
+        reply_markup=keyboard
+    )
+
+
 async def back_to_politicians_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle back to politicians list callback."""
     query = update.callback_query
@@ -649,22 +1002,43 @@ async def cancel_selection_callback(update: Update, context: ContextTypes.DEFAUL
         _("Action canceled.", language)
     )
 
+
 def register_callbacks(application) -> None:
     """Register all callback query handlers."""
-    # General callbacks
+    # Main menu callbacks
     application.add_handler(CallbackQueryHandler(status_callback, pattern=r"^status$"))
     application.add_handler(CallbackQueryHandler(map_callback, pattern=r"^map$"))
     application.add_handler(CallbackQueryHandler(news_callback, pattern=r"^news$"))
     application.add_handler(CallbackQueryHandler(resources_callback, pattern=r"^resources$"))
+    application.add_handler(CallbackQueryHandler(action_button_callback, pattern=r"^action$"))
+    application.add_handler(CallbackQueryHandler(quick_action_button_callback, pattern=r"^quick_action$"))
+    application.add_handler(CallbackQueryHandler(politicians_button_callback, pattern=r"^politicians$"))
+
+    # Secondary menu callbacks
     application.add_handler(CallbackQueryHandler(actions_left_callback, pattern=r"^actions_left$"))
     application.add_handler(CallbackQueryHandler(controlled_districts_callback, pattern=r"^controlled_districts$"))
     application.add_handler(CallbackQueryHandler(check_income_callback, pattern=r"^check_income$"))
     application.add_handler(CallbackQueryHandler(select_district_callback, pattern=r"^select_district$"))
+    application.add_handler(
+        CallbackQueryHandler(view_collective_actions_callback, pattern=r"^view_collective_actions$"))
+
+    # Information callbacks
     application.add_handler(CallbackQueryHandler(district_info_callback, pattern=r"^district:"))
     application.add_handler(CallbackQueryHandler(back_to_politicians_callback, pattern=r"^back_to_politicians$"))
     application.add_handler(CallbackQueryHandler(politicians_type_callback, pattern=r"^politicians:"))
     application.add_handler(CallbackQueryHandler(politician_info_callback, pattern=r"^politician:"))
+
+    # Action callbacks
+    application.add_handler(CallbackQueryHandler(exchange_resources_callback, pattern=r"^exchange_resources$"))
+    application.add_handler(CallbackQueryHandler(politician_action_handler, pattern=r"^politician_action:"))
+    application.add_handler(CallbackQueryHandler(join_collective_action_callback, pattern=r"^join_collective_action:"))
     application.add_handler(CallbackQueryHandler(cancel_selection_callback, pattern=r"^cancel_selection$"))
-    
+
+    # Help callbacks
+    application.add_handler(CallbackQueryHandler(help_section_callback, pattern=r"^help:"))
+
+    # Navigation callbacks
+    application.add_handler(CallbackQueryHandler(general_callback, pattern=r"^(back_to_menu|help)$"))
+
     # Register catch-all handler for any remaining patterns
     application.add_handler(CallbackQueryHandler(general_callback))

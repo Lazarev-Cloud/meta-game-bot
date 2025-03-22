@@ -19,7 +19,7 @@ from bot.keyboards import (
     get_quick_action_keyboard,
     get_districts_keyboard,
     get_resources_keyboard,
-    get_politicians_keyboard
+    get_politicians_keyboard, get_politician_interaction_keyboard
 )
 from db import (
     player_exists,
@@ -32,7 +32,7 @@ from db import (
     get_map_data,
     check_income,
     get_politicians,
-    get_politician_status
+    get_politician_status, get_active_collective_actions, get_district_info
 )
 from bot.states import IDEOLOGY_CHOICE, NAME_ENTRY
 from utils.i18n import _, get_user_language
@@ -79,11 +79,12 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> O
     )
     return NAME_ENTRY
 
+
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle the /help command - display available commands."""
     telegram_id = str(update.effective_user.id)
     language = await get_user_language(telegram_id)
-    
+
     help_text = _(
         "Here are the available commands:\n\n"
         "*Basic Commands*\n"
@@ -93,35 +94,37 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         "/map - Show the current map of district control\n"
         "/time - Show current game cycle information\n"
         "/news - Show the latest news\n\n"
-        
+
         "*Action Commands*\n"
         "/action - Submit a main action\n"
         "/quick_action - Submit a quick action\n"
         "/cancel_action - Cancel your last action\n"
         "/actions_left - Check remaining actions\n"
         "/view_district [district] - View district information\n\n"
-        
+
         "*Resource Commands*\n"
         "/resources - View your current resources\n"
         "/convert_resource [type] [amount] - Convert resources\n"
         "/check_income - Check expected resource income\n\n"
-        
+
         "*Politicians Commands*\n"
         "/politicians - List available politicians\n"
         "/politician_status [name] - Information about a politician\n"
         "/international - Information about international politicians\n\n"
-        
+
         "*Collective Action Commands*\n"
         "/collective - Initiate a collective action\n"
-        "/join [action_id] - Join a collective action",
+        "/join [action_id] - Join a collective action\n"
+        "/active_actions - View all active collective actions",
         language
     )
-    
+
     await update.message.reply_text(
         help_text,
         parse_mode="Markdown",
         reply_markup=get_help_keyboard(language)
     )
+
 
 async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle the /status command - show player status."""
@@ -212,6 +215,60 @@ async def map_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         parse_mode="Markdown",
         reply_markup=get_map_keyboard(language)
     )
+
+
+async def active_collective_actions_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle the /active_actions command - list active collective actions."""
+    telegram_id = str(update.effective_user.id)
+    language = await get_user_language(telegram_id)
+
+    # Check if player exists
+    exists = await player_exists(telegram_id)
+
+    if not exists:
+        await update.message.reply_text(
+            _("You are not registered yet. Use /start to register.", language)
+        )
+        return
+
+    # Get active collective actions
+    active_actions = await get_active_collective_actions()
+
+    if not active_actions:
+        await update.message.reply_text(
+            _("There are no active collective actions at the moment.", language)
+        )
+        return
+
+    # Format and display active actions
+    actions_text = _("*Active Collective Actions*\n\n", language)
+
+    for action in active_actions:
+        action_id = action.get("collective_action_id", "unknown")
+        action_type = action.get("action_type", "unknown")
+        district = action.get("district_id", {}).get("name", "unknown")
+        initiator = action.get("initiator_player_id", {}).get("name", "unknown")
+
+        actions_text += _(
+            "*Action ID:* {id}\n"
+            "*Type:* {type}\n"
+            "*District:* {district}\n"
+            "*Initiated by:* {initiator}\n"
+            "*Join Command:* `/join {id}`\n\n",
+            language
+        ).format(
+            id=action_id,
+            type=_(action_type, language),
+            district=district,
+            initiator=initiator
+        )
+
+    # Send message with formatted text
+    await update.message.reply_text(
+        actions_text,
+        parse_mode="Markdown"
+    )
+
 
 async def time_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle the /time command - show current cycle information."""
@@ -779,6 +836,7 @@ async def admin_generate_effects_command(update: Update, context: ContextTypes.D
             _("An error occurred while generating effects: {error}", language).format(error=str(e))
         )
 
+
 def register_commands(application) -> None:
     """Register all command handlers."""
     application.add_handler(CommandHandler("help", help_command))
@@ -797,8 +855,10 @@ def register_commands(application) -> None:
     application.add_handler(CommandHandler("politicians", politicians_command))
     application.add_handler(CommandHandler("politician_status", politician_status_command))
     application.add_handler(CommandHandler("international", international_command))
-    # Note: collective and join commands are handled by conversation handlers in states.py
-    
-    # Admin commands 
+
+    # Add the active collective actions command
+    application.add_handler(CommandHandler("active_actions", active_collective_actions_command))
+
+    # Admin commands
     application.add_handler(CommandHandler("admin_process", admin_process_actions_command))
     application.add_handler(CommandHandler("admin_generate", admin_generate_effects_command))

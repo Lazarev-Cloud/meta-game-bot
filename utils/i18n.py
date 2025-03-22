@@ -124,6 +124,7 @@ async def get_available_languages() -> Dict[str, str]:
         "ru_RU": "Русский"
     }
 
+
 def setup_i18n() -> None:
     """Initialize the internationalization system."""
     # Initialize with default English translations
@@ -139,7 +140,8 @@ def setup_i18n() -> None:
         "Back": "Back",
         "Cancel": "Cancel",
         "Confirm": "Confirm",
-        
+        "Join Action": "Join Action",
+
         # Menu items
         "Status": "Status",
         "Map": "Map",
@@ -147,7 +149,7 @@ def setup_i18n() -> None:
         "Action": "Action",
         "Quick Action": "Quick Action",
         "Help": "Help",
-        
+
         # Actions
         "influence": "Influence",
         "attack": "Attack",
@@ -161,13 +163,18 @@ def setup_i18n() -> None:
         "international_negotiations": "International Negotiations",
         "kompromat_search": "Kompromat Search",
         "lobbying": "Lobbying",
-        
+
         # Status-related
         "Action Submitted": "Action Submitted",
-        
+
+        # Collective actions
+        "Active Collective Actions": "Active Collective Actions",
+        "Join collective action": "Join collective action",
+        "There are no active collective actions at the moment.": "There are no active collective actions at the moment.",
+
         # Other strings will be loaded from database or files
     }
-    
+
     # Initialize Russian translations with some basic terms
     _translations["ru_RU"] = {
         # Common terms
@@ -181,7 +188,8 @@ def setup_i18n() -> None:
         "Back": "Назад",
         "Cancel": "Отмена",
         "Confirm": "Подтвердить",
-        
+        "Join Action": "Присоединиться к действию",
+
         # Menu items
         "Status": "Статус",
         "Map": "Карта",
@@ -189,7 +197,7 @@ def setup_i18n() -> None:
         "Action": "Действие",
         "Quick Action": "Быстрое действие",
         "Help": "Помощь",
-        
+
         # Actions
         "influence": "Влияние",
         "attack": "Атака",
@@ -203,9 +211,14 @@ def setup_i18n() -> None:
         "international_negotiations": "Международные переговоры",
         "kompromat_search": "Поиск компромата",
         "lobbying": "Лоббирование",
-        
+
         # Status-related
         "Action Submitted": "Заявка отправлена",
-        
+
+        # Collective actions
+        "Active Collective Actions": "Активные коллективные действия",
+        "Join collective action": "Присоединиться к коллективному действию",
+        "There are no active collective actions at the moment.": "В настоящее время нет активных коллективных действий.",
+
         # Other strings will be loaded from database or files
     }

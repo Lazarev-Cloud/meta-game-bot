@@ -27,7 +27,7 @@ from bot.keyboards import (
     get_yes_no_keyboard,
     get_language_keyboard,
     get_start_keyboard,
-    get_back_keyboard
+    get_back_keyboard, get_collective_action_keyboard
 )
 from db import (
     register_player, 

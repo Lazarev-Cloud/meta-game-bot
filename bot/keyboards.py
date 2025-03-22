@@ -24,10 +24,15 @@ def get_start_keyboard(language: str) -> InlineKeyboardMarkup:
             InlineKeyboardButton(_("News", language), callback_data="news")
         ],
         [
-            InlineKeyboardButton(_("Action", language), callback_data="action"),
+            InlineKeyboardButton(_("Main Action", language), callback_data="action"),
             InlineKeyboardButton(_("Quick Action", language), callback_data="quick_action")
         ],
         [
+            InlineKeyboardButton(_("Resources", language), callback_data="resources"),
+            InlineKeyboardButton(_("Politicians", language), callback_data="politicians:all")
+        ],
+        [
+            InlineKeyboardButton(_("Collective Actions", language), callback_data="view_collective_actions"),
             InlineKeyboardButton(_("Help", language), callback_data="help")
         ]
     ]
@@ -91,18 +96,40 @@ def get_status_keyboard(language: str) -> InlineKeyboardMarkup:
     ]
     return InlineKeyboardMarkup(keyboard)
 
+
 def get_map_keyboard(language: str) -> InlineKeyboardMarkup:
     """Get keyboard for map view."""
+    from utils.config import get_config
+
+    # Get map URL from config
+    map_url = get_config("bot", "web_map_url")
+
     keyboard = [
         [
             InlineKeyboardButton(_("View District Details", language), callback_data="select_district"),
-            InlineKeyboardButton(_("View Web Map", language), url="https://your-map-url.com")
+            InlineKeyboardButton(_("View Web Map", language), url=map_url)
         ],
         [
             InlineKeyboardButton(_("Back to Menu", language), callback_data="back_to_menu")
         ]
     ]
     return InlineKeyboardMarkup(keyboard)
+
+def get_collective_action_info_keyboard(action_id: str, language: str) -> InlineKeyboardMarkup:
+    """Create a keyboard for joining a collective action."""
+    keyboard = [
+        [
+            InlineKeyboardButton(
+                _("Join Action", language),
+                callback_data=f"join_collective_action:{action_id}"
+            )
+        ],
+        [
+            InlineKeyboardButton(_("Back", language), callback_data="back_to_menu")
+        ]
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
 
 def get_action_keyboard(language: str) -> InlineKeyboardMarkup:
     """Get keyboard for main action selection."""
