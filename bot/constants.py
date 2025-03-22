@@ -5,9 +5,6 @@
 Constants and shared state for the Meta Game bot.
 """
 
-import time
-from typing import Dict, Any
-
 # Define conversation states
 (
     # Registration states

@@ -7,6 +7,7 @@ A political strategy game set in Novi-Sad, Yugoslavia in 1999.
 """
 
 import os
+import asyncio
 import traceback
 
 from dotenv import load_dotenv
@@ -103,7 +104,7 @@ async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     return True
 
 
-def main():
+async def main():
     """Initialize and start the bot."""
     # Load bot token
     token = os.getenv("TELEGRAM_BOT_TOKEN")
@@ -145,8 +146,9 @@ def main():
 
     # Start the bot
     logger.info("Starting Meta Game bot...")
-    application.run_polling(allowed_updates=Update.ALL_TYPES)
+    await application.run_polling(allowed_updates=Update.ALL_TYPES)
 
 
 if __name__ == "__main__":
-    main()
+    # Properly run the main coroutine with asyncio
+    asyncio.run(main())

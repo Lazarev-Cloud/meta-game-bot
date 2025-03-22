@@ -17,7 +17,6 @@ from telegram.ext import (
     filters
 )
 
-from bot.callbacks import join_collective_action_callback
 # Import constants instead of defining states here (breaking circular import)
 from bot.constants import (
     NAME_ENTRY,
@@ -43,10 +42,6 @@ from bot.constants import (
     JOIN_ACTION_AMOUNT,
     JOIN_ACTION_PHYSICAL,
     JOIN_ACTION_CONFIRM,
-    get_user_context,
-
-    clear_user_context,
-
 )
 from bot.context import get_user_context, clear_user_context
 from bot.keyboards import (
@@ -72,7 +67,6 @@ from utils.i18n import _, get_user_language, set_user_language
 
 # Initialize logger
 logger = logging.getLogger(__name__)
-
 
 # Registration conversation handlers
 
@@ -1300,8 +1294,7 @@ registration_handler = ConversationHandler(
             CallbackQueryHandler(ideology_choice, pattern=r"^ideology:")
         ]
     },
-    fallbacks=[CommandHandler("cancel", cancel_handler)],
-    per_message=True  # Fix warning
+    fallbacks=[CommandHandler("cancel", cancel_handler)]
 )
 
 action_handler = ConversationHandler(
@@ -1331,8 +1324,7 @@ action_handler = ConversationHandler(
     fallbacks=[
         CallbackQueryHandler(lambda u, c: ConversationHandler.END, pattern=r"^cancel_selection$"),
         CommandHandler("cancel", cancel_handler)
-    ],
-    per_message=True  # Fix warning
+    ]
 )
 
 resource_conversion_handler = ConversationHandler(
@@ -1356,8 +1348,7 @@ resource_conversion_handler = ConversationHandler(
     fallbacks=[
         CallbackQueryHandler(lambda u, c: ConversationHandler.END, pattern=r"^cancel_selection$"),
         CommandHandler("cancel", cancel_handler)
-    ],
-    per_message=True  # Fix warning
+    ]
 )
 
 collective_action_handler = ConversationHandler(
@@ -1390,8 +1381,7 @@ collective_action_handler = ConversationHandler(
     fallbacks=[
         CallbackQueryHandler(lambda u, c: ConversationHandler.END, pattern=r"^cancel_selection$"),
         CommandHandler("cancel", cancel_handler)
-    ],
-    per_message=True  # Fix warning
+    ]
 )
 
 join_action_handler = ConversationHandler(
@@ -1416,8 +1406,7 @@ join_action_handler = ConversationHandler(
     fallbacks=[
         CallbackQueryHandler(lambda u, c: ConversationHandler.END, pattern=r"^cancel_selection$"),
         CommandHandler("cancel", cancel_handler)
-    ],
-    per_message=True  # Fix warning
+    ]
 )
 
 # List of all conversation handlers

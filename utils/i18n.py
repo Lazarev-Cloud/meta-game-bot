@@ -30,21 +30,28 @@ async def load_translations_from_db() -> None:
     """Load translations from the database."""
     try:
         client = get_supabase()
-        response = client.table("translations").select("*").execute()
 
-        if not response.data:
-            logger.warning("No translations found in database")
-            return
+        # Check if the translations table exists
+        try:
+            response = client.table("translations").select("*").execute()
 
-        for translation in response.data:
-            key = translation.get("translation_key", "")
-            if key:
-                _translations["en_US"][key] = translation.get("en_US", key)
-                _translations["ru_RU"][key] = translation.get("ru_RU", key)
+            if not response.data:
+                logger.warning("No translations found in database")
+                return
 
-        logger.info(f"Loaded {len(response.data)} translations from database")
+            for translation in response.data:
+                key = translation.get("translation_key", "")
+                if key:
+                    _translations["en_US"][key] = translation.get("en_US", key)
+                    _translations["ru_RU"][key] = translation.get("ru_RU", key)
+
+            logger.info(f"Loaded {len(response.data)} translations from database")
+        except Exception as table_error:
+            logger.warning(f"Translations table may not exist: {table_error}")
+            # Continue with default translations
     except Exception as e:
         logger.error(f"Error loading translations from database: {str(e)}")
+        # Continue with default translations
 
 
 async def load_translations_from_file() -> None:
@@ -52,6 +59,7 @@ async def load_translations_from_file() -> None:
     try:
         # Path to translations directory
         translations_dir = os.path.join(os.path.dirname(__file__), "../translations")
+        os.makedirs(translations_dir, exist_ok=True)
 
         # Load English translations
         en_path = os.path.join(translations_dir, "en_US.json")
@@ -90,13 +98,16 @@ async def get_user_language(telegram_id: str) -> str:
     try:
         # Get from database
         client = get_supabase()
-        response = client.table("players").select("language").eq("telegram_id", telegram_id).execute()
+        try:
+            response = client.table("players").select("language").eq("telegram_id", telegram_id).execute()
 
-        if response.data and response.data[0].get("language"):
-            language = response.data[0]["language"]
-            # Cache the result
-            _user_languages[telegram_id] = language
-            return language
+            if response.data and response.data[0].get("language"):
+                language = response.data[0]["language"]
+                # Cache the result
+                _user_languages[telegram_id] = language
+                return language
+        except Exception as table_error:
+            logger.warning(f"Couldn't retrieve language preference: {table_error}")
     except Exception as e:
         logger.error(f"Error getting user language: {str(e)}")
 
@@ -122,6 +133,8 @@ async def set_user_language(telegram_id: str, language: str) -> bool:
         return True
     except Exception as e:
         logger.error(f"Error setting user language: {str(e)}")
+        # Still update the cache even if DB update fails
+        _user_languages[telegram_id] = language
         return False
 
 
@@ -307,3 +320,4 @@ def setup_i18n() -> None:
         asyncio.run(load_translations_from_db())
     except Exception as e:
         logger.error(f"Error loading translations: {e}")
+        # Continue with default translations

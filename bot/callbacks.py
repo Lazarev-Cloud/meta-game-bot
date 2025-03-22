@@ -11,7 +11,6 @@ from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import ContextTypes, CallbackQueryHandler, ConversationHandler
 
 from bot.constants import ACTION_SELECT_RESOURCE, JOIN_ACTION_RESOURCE
-from bot.constants import user_context
 from bot.context import get_user_context
 from bot.keyboards import (
     get_start_keyboard,
@@ -545,6 +544,7 @@ async def exchange_resources_callback(update: Update, context: ContextTypes.DEFA
     return await resource_conversion_start(update, context)
 
 
+# Define the join_collective_action_callback function
 async def join_collective_action_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle joining collective actions from a button click."""
     query = update.callback_query
@@ -564,10 +564,6 @@ async def join_collective_action_callback(update: Update, context: ContextTypes.
     action_id = action_data[1]
 
     # Initialize user context for joining action
-    if telegram_id not in user_context:
-        user_context[telegram_id] = {}
-
-    # Store action ID in context
     user_data = get_user_context(telegram_id)
     user_data["join_action_id"] = action_id
 
@@ -581,7 +577,6 @@ async def join_collective_action_callback(update: Update, context: ContextTypes.
     )
 
     return JOIN_ACTION_RESOURCE
-
 
 async def check_income_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle income check callback."""
