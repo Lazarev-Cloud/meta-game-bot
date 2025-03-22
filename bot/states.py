@@ -1,0 +1,793 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+"""
+Conversation states and handlers for the Belgrade Game bot.
+"""
+
+import logging
+from typing import Dict, Any, Optional
+from telegram import Update, InlineKeyboardMarkup
+from telegram.ext import (
+    ContextTypes,
+    ConversationHandler,
+    CommandHandler,
+    MessageHandler,
+    CallbackQueryHandler,
+    filters
+)
+
+from bot.keyboards import (
+    get_ideology_keyboard,
+    get_districts_keyboard,
+    get_resource_type_keyboard,
+    get_resource_amount_keyboard,
+    get_physical_presence_keyboard,
+    get_confirmation_keyboard,
+    get_yes_no_keyboard
+)
+from db import (
+    register_player, 
+    player_exists,
+    submit_action,
+    get_district_by_name,
+    get_district_info,
+    exchange_resources,
+    get_politician_by_name,
+    initiate_collective_action,
+    join_collective_action
+)
+from utils.i18n import _, get_user_language, set_user_language
+
+# Initialize logger
+logger = logging.getLogger(__name__)
+
+# Define states
+(
+    # Registration states
+    NAME_ENTRY,
+    IDEOLOGY_CHOICE,
+    
+    # Action selection states
+    ACTION_SELECT_DISTRICT,
+    ACTION_SELECT_TARGET,
+    ACTION_SELECT_RESOURCE,
+    ACTION_SELECT_AMOUNT,
+    ACTION_PHYSICAL_PRESENCE,
+    ACTION_CONFIRM,
+    
+    # Resource conversion states
+    CONVERT_FROM_RESOURCE,
+    CONVERT_TO_RESOURCE,
+    CONVERT_AMOUNT,
+    CONVERT_CONFIRM,
+    
+    # Collective action states
+    COLLECTIVE_ACTION_TYPE,
+    COLLECTIVE_ACTION_DISTRICT,
+    COLLECTIVE_ACTION_TARGET,
+    COLLECTIVE_ACTION_RESOURCE,
+    COLLECTIVE_ACTION_AMOUNT,
+    COLLECTIVE_ACTION_PHYSICAL,
+    COLLECTIVE_ACTION_CONFIRM,
+    
+    # Join collective action states
+    JOIN_ACTION_RESOURCE,
+    JOIN_ACTION_AMOUNT,
+    JOIN_ACTION_PHYSICAL,
+    JOIN_ACTION_CONFIRM
+) = range(23)
+
+# Global context storage for multi-step actions
+user_context = {}
+
+# Registration conversation handlers
+
+async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Start the conversation to register a new player."""
+    user = update.effective_user
+    telegram_id = str(user.id)
+    
+    # Check if player already exists
+    exists = await player_exists(telegram_id)
+    
+    if exists:
+        # Redirect to welcome handler for existing players
+        from bot.commands import start_command as welcome_command
+        return await welcome_command(update, context)
+    
+    # Language selection first
+    await update.message.reply_text(
+        "Welcome to Novi-Sad, a city at the crossroads of Yugoslavia's future! "
+        "Please select your preferred language:\n\n"
+        "Добро пожаловать в Нови-Сад, город на перекрестке будущего Югославии! "
+        "Пожалуйста, выберите предпочитаемый язык:",
+        reply_markup=get_language_keyboard()
+    )
+    
+    return NAME_ENTRY
+
+async def language_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle language selection."""
+    query = update.callback_query
+    await query.answer()
+    
+    language = query.data.split(":", 1)[1]
+    telegram_id = str(update.effective_user.id)
+    
+    # Store language preference 
+    # (will be properly saved after registration)
+    await set_user_language(telegram_id, language)
+    
+    # Continue with name entry
+    await query.edit_message_text(
+        _("Great! Now, tell me your character's name:", language)
+    )
+    
+    return NAME_ENTRY
+
+async def name_entry(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle name entry."""
+    user_input = update.message.text
+    telegram_id = str(update.effective_user.id)
+    language = await get_user_language(telegram_id)
+    
+    # Store the name in context
+    context.user_data["player_name"] = user_input
+    
+    # Prompt for ideology selection
+    await update.message.reply_text(
+        _("Welcome, {name}! In this game, your ideological leaning will affect your interactions with politicians and districts.\n\n"
+          "Please choose your character's ideological position:", language).format(name=user_input),
+        reply_markup=get_ideology_keyboard(language)
+    )
+    
+    return IDEOLOGY_CHOICE
+
+async def ideology_choice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle ideology choice."""
+    query = update.callback_query
+    await query.answer()
+    
+    # Extract ideology value
+    ideology_value = int(query.data.split(":", 1)[1])
+    telegram_id = str(update.effective_user.id)
+    language = await get_user_language(telegram_id)
+    
+    # Register the new player
+    player_name = context.user_data.get("player_name", update.effective_user.first_name)
+    
+    try:
+        await register_player(telegram_id, player_name, ideology_value)
+        
+        # Save the language preference permanently
+        await set_user_language(telegram_id, language)
+        
+        # Welcome message
+        ideology_text = _("Strong Reformist", language) if ideology_value == -5 else \
+                       _("Moderate Reformist", language) if ideology_value == -3 else \
+                       _("Slight Reformist", language) if ideology_value == -1 else \
+                       _("Neutral", language) if ideology_value == 0 else \
+                       _("Slight Conservative", language) if ideology_value == 1 else \
+                       _("Moderate Conservative", language) if ideology_value == 3 else \
+                       _("Strong Conservative", language)
+        
+        await query.edit_message_text(
+            _("Registration complete! Welcome to Novi-Sad, {name}.\n\n"
+              "You have chosen an ideology of {ideology_value} ({ideology_text}).\n\n"
+              "You have been granted initial resources to begin your journey. "
+              "Use /help to learn about available commands, or /status to see your current situation.", language).format(
+                  name=player_name,
+                  ideology_value=ideology_value,
+                  ideology_text=ideology_text
+              )
+        )
+        
+        # End the conversation
+        return ConversationHandler.END
+        
+    except Exception as e:
+        logger.error(f"Error registering player: {str(e)}")
+        await query.edit_message_text(
+            _("There was an error registering your account. Please try again later or contact support.", language)
+        )
+        return ConversationHandler.END
+
+# Action conversation handlers
+
+async def action_select_district(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle district selection for an action."""
+    query = update.callback_query
+    if query:
+        await query.answer()
+        telegram_id = str(update.effective_user.id)
+        language = await get_user_language(telegram_id)
+        
+        # Extract action type
+        action_data = query.data.split(":", 1)
+        if len(action_data) > 1:
+            action_type = action_data[1]
+            is_quick = action_data[0] == "quick_action"
+            
+            # Store action info in user context
+            if telegram_id not in user_context:
+                user_context[telegram_id] = {}
+            
+            user_context[telegram_id]["action_type"] = action_type
+            user_context[telegram_id]["is_quick_action"] = is_quick
+            
+            # Prompt for district selection
+            await query.edit_message_text(
+                _("Please select a district for your {action_type} action:", language).format(
+                    action_type=_(action_type, language)
+                ),
+                reply_markup=await get_districts_keyboard(language)
+            )
+            
+            return ACTION_SELECT_DISTRICT
+    
+    # If we get here, there was a problem
+    return ConversationHandler.END
+
+async def district_selected(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle selected district for an action."""
+    query = update.callback_query
+    await query.answer()
+    
+    telegram_id = str(update.effective_user.id)
+    language = await get_user_language(telegram_id)
+    
+    # Extract district name
+    district_data = query.data.split(":", 1)
+    if len(district_data) > 1:
+        district_name = district_data[1]
+        
+        # Store district in user context
+        user_context[telegram_id]["district_name"] = district_name
+        
+        # Check if action needs a target
+        action_type = user_context[telegram_id].get("action_type")
+        
+        if action_type in ["attack", "politician_reputation_attack", "politician_displacement"]:
+            # Needs a target
+            await query.edit_message_text(
+                _("Please enter the name of your target for this action:", language)
+            )
+            return ACTION_SELECT_TARGET
+        else:
+            # No target needed, go to resource selection
+            await query.edit_message_text(
+                _("Please select a resource type to use for this action:", language),
+                reply_markup=get_resource_type_keyboard(language)
+            )
+            return ACTION_SELECT_RESOURCE
+    
+    # If we get here, there was a problem
+    await query.edit_message_text(
+        _("There was an error processing your selection. Please try again.", language)
+    )
+    return ConversationHandler.END
+
+async def target_entry(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle target entry for an action."""
+    user_input = update.message.text
+    telegram_id = str(update.effective_user.id)
+    language = await get_user_language(telegram_id)
+    
+    # Store target in user context
+    action_type = user_context[telegram_id].get("action_type")
+    
+    if action_type in ["politician_reputation_attack", "politician_displacement"]:
+        # Target is a politician
+        user_context[telegram_id]["target_politician_name"] = user_input
+    else:
+        # Target is a player
+        user_context[telegram_id]["target_player_name"] = user_input
+    
+    # Prompt for resource selection
+    await update.message.reply_text(
+        _("Please select a resource type to use for this action:", language),
+        reply_markup=get_resource_type_keyboard(language)
+    )
+    
+    return ACTION_SELECT_RESOURCE
+
+async def resource_selected(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle resource selection for an action."""
+    query = update.callback_query
+    await query.answer()
+    
+    telegram_id = str(update.effective_user.id)
+    language = await get_user_language(telegram_id)
+    
+    # Extract resource type
+    resource_data = query.data.split(":", 1)
+    if len(resource_data) > 1:
+        resource_type = resource_data[1]
+        
+        # Store resource type in user context
+        user_context[telegram_id]["resource_type"] = resource_type
+        
+        # Prompt for resource amount
+        await query.edit_message_text(
+            _("How much {resource_type} do you want to use for this action?", language).format(
+                resource_type=_(resource_type, language)
+            ),
+            reply_markup=get_resource_amount_keyboard(language)
+        )
+        
+        return ACTION_SELECT_AMOUNT
+    
+    # If we get here, there was a problem
+    await query.edit_message_text(
+        _("There was an error processing your selection. Please try again.", language)
+    )
+    return ConversationHandler.END
+
+async def amount_selected(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle amount selection for an action."""
+    query = update.callback_query
+    await query.answer()
+    
+    telegram_id = str(update.effective_user.id)
+    language = await get_user_language(telegram_id)
+    
+    # Extract amount
+    amount_data = query.data.split(":", 1)
+    if len(amount_data) > 1:
+        resource_amount = int(amount_data[1])
+        
+        # Store amount in user context
+        user_context[telegram_id]["resource_amount"] = resource_amount
+        
+        # Prompt for physical presence
+        await query.edit_message_text(
+            _("Will you be physically present for this action? Being present gives +20 control points.", language),
+            reply_markup=get_physical_presence_keyboard(language)
+        )
+        
+        return ACTION_PHYSICAL_PRESENCE
+    
+    # If we get here, there was a problem
+    await query.edit_message_text(
+        _("There was an error processing your selection. Please try again.", language)
+    )
+    return ConversationHandler.END
+
+async def physical_presence_selected(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle physical presence selection for an action."""
+    query = update.callback_query
+    await query.answer()
+    
+    telegram_id = str(update.effective_user.id)
+    language = await get_user_language(telegram_id)
+    
+    # Extract physical presence choice
+    presence_data = query.data.split(":", 1)
+    if len(presence_data) > 1:
+        physical_presence = presence_data[1] == "yes"
+        
+        # Store physical presence in user context
+        user_context[telegram_id]["physical_presence"] = physical_presence
+        
+        # Collect all action details for confirmation
+        action_data = user_context[telegram_id]
+        action_type = action_data.get("action_type", "unknown")
+        is_quick = action_data.get("is_quick_action", False)
+        district_name = action_data.get("district_name", "unknown")
+        resource_type = action_data.get("resource_type", "unknown")
+        resource_amount = action_data.get("resource_amount", 0)
+        physical = action_data.get("physical_presence", False)
+        
+        target_text = ""
+        if "target_player_name" in action_data:
+            target_text = _("\nTarget Player: {target}", language).format(target=action_data["target_player_name"])
+        elif "target_politician_name" in action_data:
+            target_text = _("\nTarget Politician: {target}", language).format(target=action_data["target_politician_name"])
+        
+        # Create confirmation message
+        confirmation_text = _(
+            "Please confirm your action:\n\n"
+            "Action Type: {action_type}\n"
+            "District: {district}\n"
+            "Resource: {amount} {resource_type}{target_text}\n"
+            "Physical Presence: {physical}",
+            language
+        ).format(
+            action_type=_(action_type, language),
+            district=district_name,
+            amount=resource_amount,
+            resource_type=_(resource_type, language),
+            target_text=target_text,
+            physical=_("Yes", language) if physical else _("No", language)
+        )
+        
+        await query.edit_message_text(
+            confirmation_text,
+            reply_markup=get_confirmation_keyboard(language)
+        )
+        
+        return ACTION_CONFIRM
+    
+    # If we get here, there was a problem
+    await query.edit_message_text(
+        _("There was an error processing your selection. Please try again.", language)
+    )
+    return ConversationHandler.END
+
+async def action_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle action confirmation."""
+    query = update.callback_query
+    await query.answer()
+    
+    telegram_id = str(update.effective_user.id)
+    language = await get_user_language(telegram_id)
+    
+    # Check if confirmed
+    if query.data == "confirm":
+        # Submit the action
+        action_data = user_context[telegram_id]
+        
+        try:
+            result = await submit_action(
+                telegram_id=telegram_id,
+                action_type=action_data.get("action_type"),
+                is_quick_action=action_data.get("is_quick_action", False),
+                district_name=action_data.get("district_name"),
+                target_player_name=action_data.get("target_player_name"),
+                target_politician_name=action_data.get("target_politician_name"),
+                resource_type=action_data.get("resource_type"),
+                resource_amount=action_data.get("resource_amount"),
+                physical_presence=action_data.get("physical_presence", False),
+                language=language
+            )
+            
+            if result and result.get("success"):
+                # Success message
+                success_message = result.get("message", _("Action submitted successfully!", language))
+                title = result.get("title", _("Action Submitted", language))
+                
+                await query.edit_message_text(
+                    f"*{title}*\n\n{success_message}",
+                    parse_mode="Markdown"
+                )
+            else:
+                # Error message
+                await query.edit_message_text(
+                    _("There was an error submitting your action. Please try again.", language)
+                )
+        except Exception as e:
+            logger.error(f"Error submitting action: {str(e)}")
+            await query.edit_message_text(
+                _("There was an error processing your action: {error}", language).format(error=str(e))
+            )
+    else:
+        # Canceled
+        await query.edit_message_text(
+            _("Action canceled.", language)
+        )
+    
+    # Clean up context
+    if telegram_id in user_context:
+        del user_context[telegram_id]
+    
+    return ConversationHandler.END
+
+# Resource conversion handlers
+
+async def resource_conversion_start(update: Update, context: ContextTypes.DEFAULT_TYPE, 
+                                    from_resource: str = None, amount: int = None) -> int:
+    """Start resource conversion process."""
+    message = None
+    query = None
+    
+    if update.callback_query:
+        query = update.callback_query
+        await query.answer()
+    else:
+        message = update.message
+    
+    telegram_id = str(update.effective_user.id)
+    language = await get_user_language(telegram_id)
+    
+    # Initialize user context
+    if telegram_id not in user_context:
+        user_context[telegram_id] = {}
+    
+    # If from_resource is provided (direct command usage)
+    if from_resource:
+        user_context[telegram_id]["from_resource"] = from_resource
+        
+        if amount:
+            user_context[telegram_id]["convert_amount"] = amount
+            
+            # Skip to selecting destination resource
+            if message:
+                await message.reply_text(
+                    _("What type of resource do you want to convert to?", language),
+                    reply_markup=get_resource_type_keyboard(language, exclude_type=from_resource)
+                )
+            elif query:
+                await query.edit_message_text(
+                    _("What type of resource do you want to convert to?", language),
+                    reply_markup=get_resource_type_keyboard(language, exclude_type=from_resource)
+                )
+            
+            return CONVERT_TO_RESOURCE
+        else:
+            # Need to get amount
+            if message:
+                await message.reply_text(
+                    _("How much {resource} do you want to convert?", language).format(
+                        resource=_(from_resource, language)
+                    ),
+                    reply_markup=get_resource_amount_keyboard(language)
+                )
+            elif query:
+                await query.edit_message_text(
+                    _("How much {resource} do you want to convert?", language).format(
+                        resource=_(from_resource, language)
+                    ),
+                    reply_markup=get_resource_amount_keyboard(language)
+                )
+            
+            return CONVERT_AMOUNT
+    else:
+        # Need to select source resource first
+        if message:
+            await message.reply_text(
+                _("What type of resource do you want to convert from?", language),
+                reply_markup=get_resource_type_keyboard(language)
+            )
+        elif query:
+            await query.edit_message_text(
+                _("What type of resource do you want to convert from?", language),
+                reply_markup=get_resource_type_keyboard(language)
+            )
+        
+        return CONVERT_FROM_RESOURCE
+
+async def convert_from_selected(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle source resource selection for conversion."""
+    query = update.callback_query
+    await query.answer()
+    
+    telegram_id = str(update.effective_user.id)
+    language = await get_user_language(telegram_id)
+    
+    # Extract resource type
+    resource_data = query.data.split(":", 1)
+    if len(resource_data) > 1:
+        from_resource = resource_data[1]
+        
+        # Store in user context
+        user_context[telegram_id]["from_resource"] = from_resource
+        
+        # Prompt for amount
+        await query.edit_message_text(
+            _("How much {resource} do you want to convert? Remember that the exchange rate is 2:1.", language).format(
+                resource=_(from_resource, language)
+            ),
+            reply_markup=get_resource_amount_keyboard(language)
+        )
+        
+        return CONVERT_AMOUNT
+    
+    # If we get here, there was a problem
+    await query.edit_message_text(
+        _("There was an error processing your selection. Please try again.", language)
+    )
+    return ConversationHandler.END
+
+async def convert_amount_selected(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle amount selection for conversion."""
+    query = update.callback_query
+    await query.answer()
+    
+    telegram_id = str(update.effective_user.id)
+    language = await get_user_language(telegram_id)
+    
+    # Extract amount
+    amount_data = query.data.split(":", 1)
+    if len(amount_data) > 1:
+        convert_amount = int(amount_data[1])
+        
+        # Store in user context
+        user_context[telegram_id]["convert_amount"] = convert_amount
+        from_resource = user_context[telegram_id].get("from_resource")
+        
+        # Prompt for destination resource
+        await query.edit_message_text(
+            _("What type of resource do you want to convert to?", language),
+            reply_markup=get_resource_type_keyboard(language, exclude_type=from_resource)
+        )
+        
+        return CONVERT_TO_RESOURCE
+    
+    # If we get here, there was a problem
+    await query.edit_message_text(
+        _("There was an error processing your selection. Please try again.", language)
+    )
+    return ConversationHandler.END
+
+async def convert_to_selected(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle destination resource selection for conversion."""
+    query = update.callback_query
+    await query.answer()
+    
+    telegram_id = str(update.effective_user.id)
+    language = await get_user_language(telegram_id)
+    
+    # Extract resource type
+    resource_data = query.data.split(":", 1)
+    if len(resource_data) > 1:
+        to_resource = resource_data[1]
+        
+        # Store in user context
+        user_context[telegram_id]["to_resource"] = to_resource
+        
+        # Get conversion details
+        from_resource = user_context[telegram_id].get("from_resource")
+        convert_amount = user_context[telegram_id].get("convert_amount")
+        
+        # Confirm conversion
+        confirmation_text = _(
+            "Please confirm resource conversion:\n\n"
+            "From: {from_amount} {from_resource}\n"
+            "To: {to_amount} {to_resource}\n\n"
+            "Exchange rate: 2:1",
+            language
+        ).format(
+            from_amount=convert_amount * 2,
+            from_resource=_(from_resource, language),
+            to_amount=convert_amount,
+            to_resource=_(to_resource, language)
+        )
+        
+        await query.edit_message_text(
+            confirmation_text,
+            reply_markup=get_confirmation_keyboard(language)
+        )
+        
+        return CONVERT_CONFIRM
+    
+    # If we get here, there was a problem
+    await query.edit_message_text(
+        _("There was an error processing your selection. Please try again.", language)
+    )
+    return ConversationHandler.END
+
+async def convert_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle conversion confirmation."""
+    query = update.callback_query
+    await query.answer()
+    
+    telegram_id = str(update.effective_user.id)
+    language = await get_user_language(telegram_id)
+    
+    # Check if confirmed
+    if query.data == "confirm":
+        # Execute conversion
+        conversion_data = user_context[telegram_id]
+        
+        try:
+            result = await exchange_resources(
+                telegram_id=telegram_id,
+                from_resource=conversion_data.get("from_resource"),
+                to_resource=conversion_data.get("to_resource"),
+                amount=conversion_data.get("convert_amount"),
+                language=language
+            )
+            
+            if result and result.get("success"):
+                # Success message
+                from_resource = result.get("from_resource", {})
+                to_resource = result.get("to_resource", {})
+                
+                success_text = _(
+                    "Resource exchange successful!\n\n"
+                    "Converted {from_amount} {from_name} to {to_amount} {to_name}.",
+                    language
+                ).format(
+                    from_amount=from_resource.get("amount"),
+                    from_name=from_resource.get("name"),
+                    to_amount=to_resource.get("amount"),
+                    to_name=to_resource.get("name")
+                )
+                
+                await query.edit_message_text(success_text)
+            else:
+                # Error message
+                await query.edit_message_text(
+                    _("Resource exchange failed. You may not have enough resources.", language)
+                )
+        except Exception as e:
+            logger.error(f"Error exchanging resources: {str(e)}")
+            await query.edit_message_text(
+                _("There was an error processing your conversion: {error}", language).format(error=str(e))
+            )
+    else:
+        # Canceled
+        await query.edit_message_text(
+            _("Resource conversion canceled.", language)
+        )
+    
+    # Clean up context
+    if telegram_id in user_context:
+        del user_context[telegram_id]
+    
+    return ConversationHandler.END
+
+# Initialize conversation handlers
+registration_handler = ConversationHandler(
+    entry_points=[CommandHandler("start", start_command)],
+    states={
+        NAME_ENTRY: [
+            CallbackQueryHandler(language_callback, pattern=r"^language:"),
+            MessageHandler(filters.TEXT & ~filters.COMMAND, name_entry)
+        ],
+        IDEOLOGY_CHOICE: [
+            CallbackQueryHandler(ideology_choice, pattern=r"^ideology:")
+        ]
+    },
+    fallbacks=[CommandHandler("cancel", lambda u, c: ConversationHandler.END)]
+)
+
+action_handler = ConversationHandler(
+    entry_points=[
+        CallbackQueryHandler(action_select_district, pattern=r"^(action|quick_action):")
+    ],
+    states={
+        ACTION_SELECT_DISTRICT: [
+            CallbackQueryHandler(district_selected, pattern=r"^district:")
+        ],
+        ACTION_SELECT_TARGET: [
+            MessageHandler(filters.TEXT & ~filters.COMMAND, target_entry)
+        ],
+        ACTION_SELECT_RESOURCE: [
+            CallbackQueryHandler(resource_selected, pattern=r"^resource:")
+        ],
+        ACTION_SELECT_AMOUNT: [
+            CallbackQueryHandler(amount_selected, pattern=r"^amount:")
+        ],
+        ACTION_PHYSICAL_PRESENCE: [
+            CallbackQueryHandler(physical_presence_selected, pattern=r"^physical:")
+        ],
+        ACTION_CONFIRM: [
+            CallbackQueryHandler(action_confirm, pattern=r"^(confirm|cancel_selection)$")
+        ]
+    },
+    fallbacks=[
+        CallbackQueryHandler(lambda u, c: ConversationHandler.END, pattern=r"^cancel_selection$")
+    ]
+)
+
+resource_conversion_handler = ConversationHandler(
+    entry_points=[
+        CallbackQueryHandler(resource_conversion_start, pattern=r"^exchange_resources$")
+    ],
+    states={
+        CONVERT_FROM_RESOURCE: [
+            CallbackQueryHandler(convert_from_selected, pattern=r"^resource:")
+        ],
+        CONVERT_AMOUNT: [
+            CallbackQueryHandler(convert_amount_selected, pattern=r"^amount:")
+        ],
+        CONVERT_TO_RESOURCE: [
+            CallbackQueryHandler(convert_to_selected, pattern=r"^resource:")
+        ],
+        CONVERT_CONFIRM: [
+            CallbackQueryHandler(convert_confirm, pattern=r"^(confirm|cancel_selection)$")
+        ]
+    },
+    fallbacks=[
+        CallbackQueryHandler(lambda u, c: ConversationHandler.END, pattern=r"^cancel_selection$")
+    ]
+)
+
+# List of all conversation handlers
+conversation_handlers = [
+    registration_handler,
+    action_handler,
+    resource_conversion_handler
+]
