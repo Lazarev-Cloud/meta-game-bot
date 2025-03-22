@@ -5,9 +5,9 @@
 Configuration management for the Meta Game bot.
 """
 
-import os
 import json
 import logging
+import os
 from typing import Dict, Any, Optional
 
 # Initialize logger
@@ -43,24 +43,25 @@ DEFAULT_CONFIG = {
 # Global configuration object
 _config = None
 
+
 def load_config() -> Dict[str, Any]:
     """Load configuration from file or use defaults."""
     global _config
-    
+
     if _config is not None:
         return _config
-    
+
     config_path = os.path.join(
         os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
         "config.json"
     )
-    
+
     # Load from file if exists
     if os.path.exists(config_path):
         try:
             with open(config_path, "r", encoding="utf-8") as f:
                 file_config = json.load(f)
-            
+
             # Merge with defaults (keeping file values where they exist)
             _config = merge_configs(DEFAULT_CONFIG, file_config)
             logger.info(f"Configuration loaded from {config_path}")
@@ -71,7 +72,7 @@ def load_config() -> Dict[str, Any]:
         # Use defaults
         _config = DEFAULT_CONFIG
         logger.info(f"No configuration file found at {config_path}, using defaults")
-        
+
         # Save defaults for reference
         try:
             with open(config_path, "w", encoding="utf-8") as f:
@@ -79,47 +80,49 @@ def load_config() -> Dict[str, Any]:
             logger.info(f"Default configuration saved to {config_path}")
         except Exception as e:
             logger.warning(f"Could not save default configuration to {config_path}: {str(e)}")
-    
+
     return _config
+
 
 def get_config(section: Optional[str] = None, key: Optional[str] = None) -> Any:
     """Get configuration value by section and key."""
     config = load_config()
-    
+
     if section is None:
         return config
-    
+
     if section not in config:
         logger.warning(f"Configuration section '{section}' not found")
         return None
-    
+
     if key is None:
         return config[section]
-    
+
     if key not in config[section]:
         logger.warning(f"Configuration key '{key}' not found in section '{section}'")
         return None
-    
+
     return config[section][key]
+
 
 def set_config(section: str, key: str, value: Any) -> bool:
     """Set configuration value and save to file."""
     global _config
-    
+
     config = load_config()
-    
+
     if section not in config:
         config[section] = {}
-    
+
     config[section][key] = value
     _config = config
-    
+
     # Save to file
     config_path = os.path.join(
         os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
         "config.json"
     )
-    
+
     try:
         with open(config_path, "w", encoding="utf-8") as f:
             json.dump(config, f, indent=4)
@@ -129,14 +132,15 @@ def set_config(section: str, key: str, value: Any) -> bool:
         logger.error(f"Error saving configuration to {config_path}: {str(e)}")
         return False
 
+
 def merge_configs(default: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any]:
     """Recursively merge two configuration dictionaries."""
     result = default.copy()
-    
+
     for key, value in override.items():
         if key in result and isinstance(result[key], dict) and isinstance(value, dict):
             result[key] = merge_configs(result[key], value)
         else:
             result[key] = value
-    
+
     return result

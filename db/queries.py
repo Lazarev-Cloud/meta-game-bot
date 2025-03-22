@@ -7,23 +7,26 @@ Database query helpers for common operations.
 
 import logging
 from typing import Dict, Any, List, Optional, Tuple
-from db.supabase_client import get_supabase, execute_function
+
+from db.supabase_client import get_supabase
 
 # Initialize logger
 logger = logging.getLogger(__name__)
+
 
 async def player_exists(telegram_id: str) -> bool:
     """Check if a player exists by Telegram ID."""
     try:
         client = get_supabase()
         response = client.rpc(
-            "player_exists", 
+            "player_exists",
             {"p_telegram_id": telegram_id}
         ).execute()
         return response.data
     except Exception as e:
         logger.error(f"Error checking if player exists: {str(e)}")
         return False
+
 
 async def get_districts() -> List[Dict[str, Any]]:
     """Get all districts."""
@@ -34,6 +37,7 @@ async def get_districts() -> List[Dict[str, Any]]:
     except Exception as e:
         logger.error(f"Error getting districts: {str(e)}")
         return []
+
 
 async def get_resources(player_id: str) -> Optional[Dict[str, Any]]:
     """Get resources for a player by ID."""
@@ -46,6 +50,7 @@ async def get_resources(player_id: str) -> Optional[Dict[str, Any]]:
     except Exception as e:
         logger.error(f"Error getting resources: {str(e)}")
         return None
+
 
 async def get_controlled_districts(player_id: str) -> List[Dict[str, Any]]:
     """Get districts controlled by a player."""
@@ -60,6 +65,7 @@ async def get_controlled_districts(player_id: str) -> List[Dict[str, Any]]:
         logger.error(f"Error getting controlled districts: {str(e)}")
         return []
 
+
 async def get_district_by_name(district_name: str) -> Optional[Dict[str, Any]]:
     """Get district information by name."""
     try:
@@ -72,6 +78,7 @@ async def get_district_by_name(district_name: str) -> Optional[Dict[str, Any]]:
     except Exception as e:
         logger.error(f"Error getting district by name: {str(e)}")
         return None
+
 
 async def get_politician_by_name(politician_name: str) -> Optional[Dict[str, Any]]:
     """Get politician information by name."""
@@ -86,6 +93,7 @@ async def get_politician_by_name(politician_name: str) -> Optional[Dict[str, Any
         logger.error(f"Error getting politician by name: {str(e)}")
         return None
 
+
 async def is_submission_open() -> bool:
     """Check if submissions are open for the current cycle."""
     try:
@@ -95,6 +103,7 @@ async def is_submission_open() -> bool:
     except Exception as e:
         logger.error(f"Error checking if submissions are open: {str(e)}")
         return False
+
 
 async def get_remaining_actions(player_id: str) -> Tuple[int, int]:
     """Get remaining actions for a player."""
@@ -110,6 +119,7 @@ async def get_remaining_actions(player_id: str) -> Tuple[int, int]:
         logger.error(f"Error getting remaining actions: {str(e)}")
         return 0, 0
 
+
 async def get_player_info(telegram_id: str) -> Optional[Dict[str, Any]]:
     """Get full player information from the database."""
     try:
@@ -122,6 +132,7 @@ async def get_player_info(telegram_id: str) -> Optional[Dict[str, Any]]:
         logger.error(f"Error getting player info: {str(e)}")
         return None
 
+
 async def get_active_collective_actions() -> List[Dict[str, Any]]:
     """Get all active collective actions."""
     try:
@@ -131,6 +142,7 @@ async def get_active_collective_actions() -> List[Dict[str, Any]]:
     except Exception as e:
         logger.error(f"Error getting active collective actions: {str(e)}")
         return []
+
 
 async def get_collective_action(action_id: str) -> Optional[Dict[str, Any]]:
     """Get a specific collective action by ID."""
@@ -144,15 +156,18 @@ async def get_collective_action(action_id: str) -> Optional[Dict[str, Any]]:
         logger.error(f"Error getting collective action: {str(e)}")
         return None
 
+
 async def get_collective_action_participants(action_id: str) -> List[Dict[str, Any]]:
     """Get participants of a collective action."""
     try:
         client = get_supabase()
-        response = client.table("collective_action_participants").select("*").eq("collective_action_id", action_id).execute()
+        response = client.table("collective_action_participants").select("*").eq("collective_action_id",
+                                                                                 action_id).execute()
         return response.data
     except Exception as e:
         logger.error(f"Error getting collective action participants: {str(e)}")
         return []
+
 
 async def get_player_politician_relations(player_id: str) -> List[Dict[str, Any]]:
     """Get all politician relations for a player."""
@@ -164,6 +179,7 @@ async def get_player_politician_relations(player_id: str) -> List[Dict[str, Any]
         logger.error(f"Error getting player politician relations: {str(e)}")
         return []
 
+
 async def get_international_effects() -> List[Dict[str, Any]]:
     """Get all active international effects."""
     try:
@@ -174,6 +190,7 @@ async def get_international_effects() -> List[Dict[str, Any]]:
         logger.error(f"Error getting international effects: {str(e)}")
         return []
 
+
 async def set_player_language(telegram_id: str, language: str) -> bool:
     """Set a player's preferred language."""
     try:
@@ -183,6 +200,7 @@ async def set_player_language(telegram_id: str, language: str) -> bool:
     except Exception as e:
         logger.error(f"Error setting player language: {str(e)}")
         return False
+
 
 async def get_player_language(telegram_id: str) -> str:
     """Get a player's preferred language, defaulting to English."""

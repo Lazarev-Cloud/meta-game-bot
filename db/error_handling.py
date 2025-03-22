@@ -5,10 +5,10 @@
 Error handling utilities for database operations.
 """
 
-import logging
 import asyncio
+import logging
 from functools import wraps
-from typing import Callable, Any, Optional, TypeVar
+from typing import Callable, Optional, TypeVar
 
 logger = logging.getLogger(__name__)
 

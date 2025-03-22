@@ -8,7 +8,8 @@ authentication, logging, and rate limiting.
 
 import logging
 import time
-from typing import Dict, Set, List, Any, Optional, Callable
+from typing import Dict, Set, List, Any
+
 from telegram import Update
 from telegram.ext import ContextTypes, Application, MessageHandler, CallbackQueryHandler, filters
 

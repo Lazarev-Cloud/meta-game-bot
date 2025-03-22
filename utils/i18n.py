@@ -5,10 +5,10 @@
 Internationalization (i18n) utilities for the Meta Game bot.
 """
 import asyncio
-import logging
 import json
+import logging
 import os
-from typing import Dict, Any, Optional
+from typing import Dict
 
 from db.supabase_client import get_supabase
 from utils.i18n_additions import update_translations

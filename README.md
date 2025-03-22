@@ -1,6 +1,7 @@
 # Novi-Sad Political Strategy Game
 
-A Telegram bot for a political strategy game set in Novi-Sad, Yugoslavia in 1999. Players compete for control over districts, manage resources, interact with politicians, and respond to international events.
+A Telegram bot for a political strategy game set in Novi-Sad, Yugoslavia in 1999. Players compete for control over
+districts, manage resources, interact with politicians, and respond to international events.
 
 ## Installation
 
@@ -27,8 +28,8 @@ A Telegram bot for a political strategy game set in Novi-Sad, Yugoslavia in 1999
 
 3. **Activate the virtual environment**
 
-   - Windows: `.venv\Scripts\activate`
-   - macOS/Linux: `source .venv/bin/activate`
+    - Windows: `.venv\Scripts\activate`
+    - macOS/Linux: `source .venv/bin/activate`
 
 4. **Install dependencies**
 
@@ -70,9 +71,9 @@ A Telegram bot for a political strategy game set in Novi-Sad, Yugoslavia in 1999
 
 - Players compete for control over 8 districts in Novi-Sad
 - Control points (CP) determine control level:
-  - 0-59 CP: No control
-  - 60+ CP: District controlled
-  - 80+ CP: Strong control (bonus resources)
+    - 0-59 CP: No control
+    - 60+ CP: District controlled
+    - 80+ CP: Strong control (bonus resources)
 - Each district provides different resources based on your control level
 
 ### Resources
@@ -85,25 +86,25 @@ A Telegram bot for a political strategy game set in Novi-Sad, Yugoslavia in 1999
 ### Action System
 
 - **Main Actions (ОЗ)**: 1 per cycle, higher impact
-  - Influence: Increase control in a district (+10 CP)
-  - Attack: Reduce enemy control and gain control
-  - Defense: Protect against attacks
-  - Politician Influence: Improve relations with politicians
-  - Politician Reputation Attack: Reduce a politician's influence
-  - Politician Displacement: Significantly reduce a politician's influence
+    - Influence: Increase control in a district (+10 CP)
+    - Attack: Reduce enemy control and gain control
+    - Defense: Protect against attacks
+    - Politician Influence: Improve relations with politicians
+    - Politician Reputation Attack: Reduce a politician's influence
+    - Politician Displacement: Significantly reduce a politician's influence
 - **Quick Actions (БЗ)**: 2 per cycle, smaller impact
-  - Reconnaissance: Gather information
-  - Information Spread: Publish news/propaganda
-  - Support: Smaller control increase (+5 CP)
-  - Kompromat Search: Find compromising information
+    - Reconnaissance: Gather information
+    - Information Spread: Publish news/propaganda
+    - Support: Smaller control increase (+5 CP)
+    - Kompromat Search: Find compromising information
 
 ### Politicians
 
 - Local and international politicians with ideological positions (-5 to +5)
 - Relationship levels affect game outcomes:
-  - 0-30: Hostile - May work against you
-  - 30-70: Neutral - Limited interaction
-  - 70-100: Friendly - Provides resources and support
+    - 0-30: Hostile - May work against you
+    - 30-70: Neutral - Limited interaction
+    - 70-100: Friendly - Provides resources and support
 - International politicians can impose effects on the game
 
 ### Collective Actions

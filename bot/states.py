@@ -6,8 +6,8 @@ Conversation states and handlers for the Meta Game bot.
 """
 
 import logging
-from typing import Dict, Any, Optional
-from telegram import Update, InlineKeyboardMarkup
+
+from telegram import Update
 from telegram.ext import (
     ContextTypes,
     ConversationHandler,
@@ -44,11 +44,11 @@ from bot.constants import (
     JOIN_ACTION_PHYSICAL,
     JOIN_ACTION_CONFIRM,
     get_user_context,
-    set_user_context,
-    clear_user_context,
-    cleanup_expired_contexts
-)
 
+    clear_user_context,
+
+)
+from bot.context import get_user_context, clear_user_context
 from bot.keyboards import (
     get_ideology_keyboard,
     get_districts_keyboard,
@@ -56,26 +56,18 @@ from bot.keyboards import (
     get_resource_amount_keyboard,
     get_physical_presence_keyboard,
     get_confirmation_keyboard,
-    get_yes_no_keyboard,
     get_language_keyboard,
-    get_start_keyboard,
-    get_back_keyboard,
     get_collective_action_keyboard
 )
-
 from db import (
     register_player,
     player_exists,
     submit_action,
-    get_district_by_name,
-    get_district_info,
     exchange_resources,
-    get_politician_by_name,
     initiate_collective_action,
     join_collective_action
 )
-
-from db.error_handling import db_retry, handle_db_error, DatabaseError
+from db.error_handling import db_retry, DatabaseError
 from utils.i18n import _, get_user_language, set_user_language
 
 # Initialize logger
@@ -1294,7 +1286,6 @@ async def cancel_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     )
 
     return ConversationHandler.END
-
 
 
 # Initialize conversation handlers

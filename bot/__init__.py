@@ -5,9 +5,8 @@
 Bot module for the Meta Game bot.
 """
 
-from bot.commands import register_commands
 from bot.callbacks import register_callbacks
-from bot.middleware import setup_middleware
+from bot.commands import register_commands
 from bot.keyboards import (
     get_start_keyboard,
     get_help_keyboard,
@@ -28,6 +27,7 @@ from bot.keyboards import (
     get_language_keyboard,
     get_collective_action_keyboard
 )
+from bot.middleware import setup_middleware
 from bot.states import (
     NAME_ENTRY,
     IDEOLOGY_CHOICE,

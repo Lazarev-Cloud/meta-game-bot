@@ -8,10 +8,9 @@ This script initializes all necessary tables in the Supabase database.
 It reads the SQL files in the db directory and executes them in the correct order.
 """
 
-import os
-import glob
-import logging
 import asyncio
+import os
+
 from dotenv import load_dotenv
 
 from db.supabase_client import get_supabase, init_supabase

@@ -7,8 +7,8 @@ A political strategy game set in Novi-Sad, Yugoslavia in 1999.
 """
 
 import os
-import logging
 import traceback
+
 from dotenv import load_dotenv
 from telegram import Update
 from telegram.ext import (

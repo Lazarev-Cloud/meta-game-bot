@@ -5,7 +5,7 @@
 Utility module for the Meta Game bot.
 """
 
-from utils.i18n import _, get_user_language, set_user_language
+from utils.config import load_config, get_config, set_config
 from utils.formatting import (
     format_player_status,
     format_district_info,
@@ -16,7 +16,7 @@ from utils.formatting import (
     format_politicians_list,
     format_politician_info
 )
-from utils.config import load_config, get_config, set_config
+from utils.i18n import _, get_user_language, set_user_language
 from utils.logger import setup_logger, get_logger
 
 __all__ = [

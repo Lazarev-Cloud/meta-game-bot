@@ -5,6 +5,24 @@
 Database module for the Meta Game.
 """
 
+from db.queries import (
+    player_exists,
+    get_districts,
+    get_resources,
+    get_controlled_districts,
+    get_district_by_name,
+    get_politician_by_name,
+    is_submission_open,
+    get_remaining_actions,
+    get_player_info,
+    get_active_collective_actions,
+    get_collective_action,
+    get_collective_action_participants,
+    get_player_politician_relations,
+    get_international_effects,
+    set_player_language,
+    get_player_language
+)
 from db.supabase_client import (
     init_supabase,
     get_supabase,
@@ -25,25 +43,6 @@ from db.supabase_client import (
     join_collective_action,
     admin_process_actions,
     admin_generate_international_effects
-)
-
-from db.queries import (
-    player_exists,
-    get_districts,
-    get_resources,
-    get_controlled_districts,
-    get_district_by_name,
-    get_politician_by_name,
-    is_submission_open,
-    get_remaining_actions,
-    get_player_info,
-    get_active_collective_actions,
-    get_collective_action,
-    get_collective_action_participants,
-    get_player_politician_relations,
-    get_international_effects,
-    set_player_language,
-    get_player_language
 )
 
 __all__ = [
