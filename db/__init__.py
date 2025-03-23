@@ -9,7 +9,7 @@ functionality from supabase_client.py and queries.py to eliminate duplication.
 """
 
 # Re-export all public functions from our new db_client module
-from db_client import (
+from db.db_client import (
     # Core database functionality
     init_supabase,
     get_supabase,
