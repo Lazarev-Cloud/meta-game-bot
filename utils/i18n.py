@@ -177,12 +177,13 @@ async def get_user_language(telegram_id: str) -> str:
     try:
         # Use enhanced db_client
         try:
-            from db.db_client import get_player_language
-            language = await get_player_language(telegram_id)
+            from db.db_client import get_player_language as db_get_player_language
+            language = await db_get_player_language(telegram_id)
         except (ImportError, Exception):
             # Fallback to direct database query
             from db.supabase_client import get_supabase
             client = get_supabase()
+            # FIX: Correct schema reference
             response = client.from_("players").schema("game").select("language").eq("telegram_id", telegram_id).execute()
             language = response.data[0]["language"] if hasattr(response, 'data') and response.data and response.data[0].get("language") else "en_US"
 

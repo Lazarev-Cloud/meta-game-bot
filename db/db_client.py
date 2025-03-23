@@ -126,7 +126,8 @@ async def get_player_language(telegram_id: str) -> str:
 
     async def fetch_language():
         client = get_supabase()
-        response = client.from_("game.players").select("language").eq("telegram_id", telegram_id).execute()
+        # FIX: Correct schema reference
+        response = client.from_("players").schema("game").select("language").eq("telegram_id", telegram_id).execute()
         if hasattr(response, 'data') and response.data and response.data[0].get("language"):
             return response.data[0]["language"]
         return "en_US"
@@ -140,13 +141,14 @@ async def set_player_language(telegram_id: str, language: str) -> bool:
 
     async def update_language():
         client = get_supabase()
-        player_response = client.from_("game.players").select("player_id").eq("telegram_id", telegram_id).execute()
+        # FIX: Correct schema reference
+        player_response = client.from_("players").schema("game").select("player_id").eq("telegram_id", telegram_id).execute()
         if hasattr(player_response, 'data') and player_response.data:
-            client.from_("game.players").update({"language": language}).eq("telegram_id", telegram_id).execute()
+            # FIX: Correct schema reference
+            client.from_("players").schema("game").update({"language": language}).eq("telegram_id", telegram_id).execute()
         return True
 
     return await db_operation("set_player_language", update_language, default_return=False)
-
 
 # ---------------------------
 # Game cycle and actions

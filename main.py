@@ -151,87 +151,47 @@ async def init_database():
         if not schema_exists:
             logger.info("Database schema 'game' doesn't exist. Running initialization...")
 
-            # Run the database initialization script
             try:
-                # Import and run db_init.py
-                import importlib.util
-                import sys
+                # Execute basic SQL for schema and critical tables
+                from db.supabase_client import execute_sql
 
-                # Get the path to db_init.py
-                script_dir = os.path.dirname(os.path.abspath(__file__))
-                db_init_path = os.path.join(script_dir, "db_init.py")
+                # Create the game schema
+                await execute_sql("CREATE SCHEMA IF NOT EXISTS game;")
 
-                if not os.path.exists(db_init_path):
-                    logger.warning(f"Database initialization script not found at {db_init_path}")
-                    logger.warning("Attempting minimal schema and tables creation...")
+                # Create essential tables with proper schema reference
+                await execute_sql("""
+                CREATE TABLE IF NOT EXISTS game.players (
+                    player_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+                    telegram_id TEXT UNIQUE NOT NULL,
+                    name TEXT NOT NULL,
+                    ideology_score INTEGER NOT NULL DEFAULT 0,
+                    remaining_actions INTEGER NOT NULL DEFAULT 1,
+                    remaining_quick_actions INTEGER NOT NULL DEFAULT 2,
+                    is_admin BOOLEAN DEFAULT FALSE,
+                    is_active BOOLEAN DEFAULT TRUE,
+                    language TEXT DEFAULT 'en_US',
+                    registered_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+                    last_active_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+                );""")
 
-                    # Execute basic SQL for schema and critical tables
-                    from db.supabase_client import execute_sql
+                await execute_sql("""
+                CREATE TABLE IF NOT EXISTS game.resources (
+                    resource_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+                    player_id UUID NOT NULL,
+                    influence_amount INTEGER NOT NULL DEFAULT 0,
+                    money_amount INTEGER NOT NULL DEFAULT 0,
+                    information_amount INTEGER NOT NULL DEFAULT 0,
+                    force_amount INTEGER NOT NULL DEFAULT 0,
+                    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+                );""")
 
-                    # Create the game schema
-                    await execute_sql("CREATE SCHEMA IF NOT EXISTS game;")
-
-                    # Create essential tables
-                    await execute_sql("""
-                    CREATE TABLE IF NOT EXISTS game.players (
-                        player_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-                        telegram_id TEXT UNIQUE NOT NULL,
-                        name TEXT NOT NULL,
-                        ideology_score INTEGER NOT NULL DEFAULT 0,
-                        remaining_actions INTEGER NOT NULL DEFAULT 1,
-                        remaining_quick_actions INTEGER NOT NULL DEFAULT 2,
-                        is_admin BOOLEAN DEFAULT FALSE,
-                        is_active BOOLEAN DEFAULT TRUE,
-                        language TEXT DEFAULT 'en_US',
-                        registered_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-                        last_active_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-                    );""")
-
-                    await execute_sql("""
-                    CREATE TABLE IF NOT EXISTS game.resources (
-                        resource_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-                        player_id UUID NOT NULL,
-                        influence_amount INTEGER NOT NULL DEFAULT 0,
-                        money_amount INTEGER NOT NULL DEFAULT 0,
-                        information_amount INTEGER NOT NULL DEFAULT 0,
-                        force_amount INTEGER NOT NULL DEFAULT 0,
-                        updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-                    );""")
-
-                    logger.info("Created minimal database schema and tables")
-
-                else:
-                    # Manual initialization as fallback
-                    logger.warning(f"Database initialization script not found at {db_init_path}")
-                    logger.warning("Attempting manual schema creation...")
-
-                    # Execute basic SQL for schema creation
-                    from db.supabase_client import execute_sql
-
-                    # Create the game schema
-                    await execute_sql("CREATE SCHEMA IF NOT EXISTS game;")
-                    logger.info("Created basic game schema")
+                logger.info("Created minimal database schema and tables")
             except Exception as init_error:
                 logger.error(f"Error during database initialization: {init_error}")
-                logger.error("The application may not function correctly without proper database setup")
         else:
             logger.info("Database schema 'game' already exists")
-
-        # Test basic database connectivity
-        try:
-            from db.supabase_client import get_districts
-            districts = await get_districts()
-            if districts:
-                logger.info(f"Database connection test successful - found {len(districts)} districts")
-            else:
-                logger.warning("Database connection test successful but no districts found - data may be incomplete")
-        except Exception as test_error:
-            logger.error(f"Database connection test failed: {test_error}")
-
     except Exception as e:
         logger.error(f"Error initializing database: {e}")
-        logger.error("The application will continue but may encounter database errors")
-
 
 async def main():
     """Initialize and start the bot."""

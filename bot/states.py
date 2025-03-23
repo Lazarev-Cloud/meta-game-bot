@@ -161,10 +161,10 @@ async def ideology_choice(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         # Call the registration function with proper error handling
         result = await register_player(telegram_id, player_name, ideology_value)
 
-        if not result or not result.get('success', False):
-            error_message = result.get('message', 'Unknown error during registration')
+        # Better error handling
+        if not result:
             await query.edit_message_text(
-                _("Error during registration: {error}", language).format(error=error_message)
+                _("Error during registration: Database connection issue", language)
             )
             return ConversationHandler.END
 
