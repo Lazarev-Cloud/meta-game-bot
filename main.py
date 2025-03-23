@@ -115,6 +115,52 @@ async def init_translations():
         logger.error(f"Error initializing translations: {e}")
 
 
+async def init_database():
+    """Initialize the database if it hasn't been set up yet."""
+    try:
+        from db.supabase_client import get_supabase
+        client = get_supabase()
+
+        # Check if game schema exists
+        try:
+            response = client.rpc(
+                "exec_sql",
+                {"sql": "SELECT 1 FROM information_schema.schemata WHERE schema_name = 'game';"}
+            )
+
+            # If schema doesn't exist, run DB initialization
+            if not response.data or not response.data[0]:
+                logger.info("Database schema 'game' doesn't exist. Running initialization...")
+
+                # Import the initialization function from db_init
+                import asyncio
+                import importlib.util
+                import os
+                import sys
+
+                # Get the path to db_init.py
+                script_dir = os.path.dirname(os.path.abspath(__file__))
+                db_init_path = os.path.join(script_dir, "db_init.py")
+
+                if os.path.exists(db_init_path):
+                    # Load the module
+                    spec = importlib.util.spec_from_file_location("db_init", db_init_path)
+                    db_init = importlib.util.module_from_spec(spec)
+                    spec.loader.exec_module(db_init)
+
+                    # Run the initialization
+                    await db_init.init_database()
+                    logger.info("Database initialization completed")
+                else:
+                    logger.error(f"Database initialization script not found at {db_init_path}")
+            else:
+                logger.info("Database schema 'game' already exists")
+        except Exception as e:
+            logger.error(f"Error checking database schema: {e}")
+    except Exception as e:
+        logger.error(f"Error initializing database: {e}")
+
+
 async def main():
     """Initialize and start the bot."""
     # Load bot token
@@ -132,6 +178,9 @@ async def main():
 
     # Initialize Supabase client
     init_supabase()
+
+    # Initialize database if needed
+    await init_database()
 
     # Set up internationalization (init default translations)
     setup_i18n()
@@ -160,15 +209,57 @@ async def main():
 
     # Start the bot
     logger.info("Starting Meta Game bot...")
-    # Change this line to start and close the application properly
+
+    # Set up graceful shutdown
+    import signal
+
+    # Define shutdown handler
+    async def shutdown(signal_number, frame):
+        """Shut down the bot gracefully on receiving a signal."""
+        logger.info(f"Received signal {signal_number}, shutting down...")
+        await application.stop()
+        await application.shutdown()
+        import sys
+        sys.exit(0)
+
+    # Register signal handlers
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        signal.signal(sig, lambda s, f: asyncio.create_task(shutdown(s, f)))
+
+    # Start the bot
     await application.initialize()
     await application.start()
     await application.updater.start_polling(allowed_updates=Update.ALL_TYPES)
 
-    # Run until stopped
+    # Set up periodic tasks
+    from bot.context import cleanup_expired_contexts
+
+    async def cleanup_task():
+        """Periodically clean up expired user contexts."""
+        while True:
+            try:
+                cleaned = cleanup_expired_contexts()
+                if cleaned > 0:
+                    logger.info(f"Cleaned up {cleaned} expired user contexts")
+            except Exception as e:
+                logger.error(f"Error in cleanup task: {e}")
+            await asyncio.sleep(300)  # Run every 5 minutes
+
+    # Start cleanup task
+    asyncio.create_task(cleanup_task())
+
+    # Run the bot until stopped
+    try:
+        await asyncio.Future()  # Run forever
+    except asyncio.CancelledError:
+        # Bot is being shut down
+        pass
+
+    # This part will only be reached if asyncio.Future() is somehow resolved
     await application.updater.stop()
     await application.stop()
     await application.shutdown()
+
 
 if __name__ == "__main__":
     # Properly run the main coroutine with asyncio

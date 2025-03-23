@@ -30,21 +30,28 @@ async def load_translations_from_db() -> None:
         from db.supabase_client import get_supabase
         client = get_supabase()
 
-        # Check if the translations table exists
+        # Check if the translations table exists in the game schema
         try:
-            response = client.table("translations").select("*").execute()
+            # Use explicit schema reference and RPC call to access game schema
+            response = client.rpc(
+                "exec_sql",
+                {"sql": "SELECT * FROM game.translations;"}
+            )
 
-            if not response.data:
+            # Process the returned data
+            translations_data = response.data
+
+            if not translations_data:
                 logger.warning("No translations found in database")
                 return
 
-            for translation in response.data:
+            for translation in translations_data:
                 key = translation.get("translation_key", "")
                 if key:
                     _translations["en_US"][key] = translation.get("en_US", key)
                     _translations["ru_RU"][key] = translation.get("ru_RU", key)
 
-            logger.info(f"Loaded {len(response.data)} translations from database")
+            logger.info(f"Loaded {len(translations_data)} translations from database")
         except Exception as table_error:
             logger.warning(f"Translations table may not exist: {table_error}")
             # Continue with default translations

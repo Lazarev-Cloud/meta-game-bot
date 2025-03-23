@@ -1390,10 +1390,9 @@ collective_action_handler = ConversationHandler(
     per_message=True  # Add this parameter
 )
 
-join_action_handler = ConversationHandler(
+join_command_handler = ConversationHandler(
     entry_points=[
-        CommandHandler("join", join_collective_action_start),
-        CallbackQueryHandler(join_collective_action_callback, pattern=r"^join_collective_action:")
+        CommandHandler("join", join_collective_action_start)
     ],
     states={
         JOIN_ACTION_RESOURCE: [
@@ -1412,9 +1411,34 @@ join_action_handler = ConversationHandler(
     fallbacks=[
         CallbackQueryHandler(lambda u, c: ConversationHandler.END, pattern=r"^cancel_selection$"),
         CommandHandler("cancel", cancel_handler)
-    ],
-    per_message=True  # Add this parameter
+    ]
 )
+
+# 2. Callback-based handler (with per_message=True)
+join_callback_handler = ConversationHandler(
+    entry_points=[
+        CallbackQueryHandler(join_collective_action_callback, pattern=r"^join_collective_action:")
+    ],
+    states={
+        JOIN_ACTION_RESOURCE: [
+            CallbackQueryHandler(join_action_resource_selected, pattern=r"^resource:")
+        ],
+        JOIN_ACTION_AMOUNT: [
+            CallbackQueryHandler(join_action_amount_selected, pattern=r"^amount:")
+        ],
+        JOIN_ACTION_PHYSICAL: [
+            CallbackQueryHandler(join_action_physical_selected, pattern=r"^physical:")
+        ],
+        JOIN_ACTION_CONFIRM: [
+            CallbackQueryHandler(join_action_confirm, pattern=r"^(confirm|cancel_selection)$")
+        ]
+    },
+    fallbacks=[
+        CallbackQueryHandler(lambda u, c: ConversationHandler.END, pattern=r"^cancel_selection$")
+    ],
+    per_message=True
+)
+
 
 # List of all conversation handlers
 conversation_handlers = [
@@ -1422,5 +1446,6 @@ conversation_handlers = [
     action_handler,
     resource_conversion_handler,
     collective_action_handler,
-    join_action_handler
+    join_command_handler,
+    join_callback_handler
 ]
