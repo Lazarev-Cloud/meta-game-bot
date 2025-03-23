@@ -25,32 +25,53 @@ logger = logging.getLogger(__name__)
 T = TypeVar('T')
 
 
-# Create a wrapper function to handle common database operation patterns
+# Standardized database operation wrapper
 async def db_operation(operation_name: str,
                        func: Callable,
                        *args,
                        default_return=None,
                        log_error: bool = True,
+                       max_retries: int = 3,
                        **kwargs) -> Any:
     """
-    Execute a database operation with standardized error handling.
+    Execute a database operation with standardized error handling and retries.
 
     Args:
         operation_name: Name of operation for logging
         func: Function to execute
         default_return: Value to return on error
         log_error: Whether to log errors
+        max_retries: Maximum number of retry attempts
         *args, **kwargs: Arguments to pass to the function
 
     Returns:
         Result of the function or default_return on error
     """
-    try:
-        return await func(*args, **kwargs)
-    except Exception as e:
-        if log_error:
-            logger.error(f"Error in {operation_name}: {str(e)}")
-        return default_return
+    retries = 0
+    last_exception = None
+    retry_delay = 1.5  # Base delay in seconds
+
+    while retries < max_retries:
+        try:
+            return await func(*args, **kwargs)
+        except Exception as e:
+            last_exception = e
+            retries += 1
+
+            if log_error:
+                logger.warning(
+                    f"Database operation '{operation_name}' failed (attempt {retries}/{max_retries}): {str(e)}"
+                )
+
+            if retries < max_retries:
+                # Wait before retrying with exponential backoff
+                await asyncio.sleep(retry_delay * retries)
+            elif log_error:
+                # Log final failure
+                logger.error(f"Database operation '{operation_name}' failed after {max_retries} attempts: {str(e)}")
+
+    # Return default value on complete failure
+    return default_return
 
 
 # ---------------------------
