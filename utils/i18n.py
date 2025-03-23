@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
+
 """
 Internationalization (i18n) utilities for the Meta Game bot.
 """
@@ -35,7 +36,7 @@ async def load_translations_from_db() -> None:
             # Use explicit schema reference and RPC call to access game schema
             response = client.rpc(
                 "exec_sql",
-                {"sql": "SELECT * FROM game.translations;"}
+                {"sql": "SELECT translation_key, en_US, ru_RU FROM game.translations;"}
             )
 
             # Process the returned data
@@ -53,7 +54,7 @@ async def load_translations_from_db() -> None:
 
             logger.info(f"Loaded {len(translations_data)} translations from database")
         except Exception as table_error:
-            logger.warning(f"Translations table may not exist: {table_error}")
+            logger.warning(f"Error accessing translations in game schema: {table_error}")
             # Continue with default translations
     except Exception as e:
         logger.error(f"Error loading translations from database: {str(e)}")
@@ -71,16 +72,26 @@ async def load_translations_from_file() -> None:
         en_path = os.path.join(translations_dir, "en_US.json")
         if os.path.exists(en_path):
             with open(en_path, "r", encoding="utf-8") as f:
-                _translations["en_US"] = json.load(f)
+                _translations["en_US"].update(json.load(f))
+                logger.info(f"Loaded English translations from file: {len(_translations['en_US'])} keys")
+        else:
+            # Create an empty translations file for future use
+            with open(en_path, "w", encoding="utf-8") as f:
+                json.dump({}, f, indent=4)
+                logger.info("Created empty English translations file")
 
         # Load Russian translations
         ru_path = os.path.join(translations_dir, "ru_RU.json")
         if os.path.exists(ru_path):
             with open(ru_path, "r", encoding="utf-8") as f:
-                _translations["ru_RU"] = json.load(f)
+                _translations["ru_RU"].update(json.load(f))
+                logger.info(f"Loaded Russian translations from file: {len(_translations['ru_RU'])} keys")
+        else:
+            # Create an empty translations file for future use
+            with open(ru_path, "w", encoding="utf-8") as f:
+                json.dump({}, f, indent=4)
+                logger.info("Created empty Russian translations file")
 
-        logger.info(
-            f"Loaded translations from files: EN: {len(_translations['en_US'])}, RU: {len(_translations['ru_RU'])}")
     except Exception as e:
         logger.error(f"Error loading translations from files: {str(e)}")
 
@@ -130,14 +141,22 @@ async def set_user_language(telegram_id: str, language: str) -> bool:
 
     try:
         # Update database
-        from db.supabase_client import get_supabase
-        client = get_supabase()
-        client.table("players").update({"language": language}).eq("telegram_id", telegram_id).execute()
+        from db.supabase_client import get_player_by_telegram_id, get_supabase
+
+        # First check if the player exists
+        player = await get_player_by_telegram_id(telegram_id)
+
+        if player:
+            # Player exists, update their language
+            client = get_supabase()
+            client.table("players").update({"language": language}).eq("telegram_id", telegram_id).execute()
+            logger.info(f"Updated language for existing player {telegram_id} to {language}")
+        else:
+            # Player does not exist yet, only update the cache
+            logger.info(f"Player {telegram_id} not registered yet, caching language preference")
 
         # Update cache
         _user_languages[telegram_id] = language
-
-        logger.info(f"Set language for user {telegram_id} to {language}")
         return True
     except Exception as e:
         logger.error(f"Error setting user language: {str(e)}")

@@ -49,15 +49,15 @@ async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         telegram_id = str(update.effective_user.id)
         try:
             language = await get_user_language(telegram_id)
-        except:
-            pass
+        except Exception as e:
+            logger.error(f"Error getting user language: {e}")
 
     # Log the error
     logger.error(f"Exception while handling an update: {context.error}")
 
     # Get detailed error info for logging
     error_details = ''.join(traceback.format_exception(None, context.error, context.error.__traceback__))
-    logger.error(f"Detailed error: {error_details}")
+    logger.error(f"Detailed error trace: {error_details}")
 
     # Different error types need different responses
     if isinstance(context.error, Exception):
@@ -66,6 +66,8 @@ async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     else:
         error_type = "Unknown Error"
         error_message = "An unexpected error occurred"
+
+    logger.error(f"Error type: {error_type}, Message: {error_message}")
 
     # Create user-friendly message based on error type
     user_message = _("An error occurred while processing your request.", language)
@@ -81,7 +83,9 @@ async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
     # Send the error message to the user
     try:
-        if update.callback_query:
+        keyboard = get_back_keyboard(language)
+
+        if update and update.callback_query:
             await update.callback_query.answer(
                 user_message[:200]  # Callback answers have a character limit
             )
@@ -89,13 +93,14 @@ async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             try:
                 await update.callback_query.edit_message_text(
                     user_message,
-                    reply_markup=get_back_keyboard(language)
+                    reply_markup=keyboard
                 )
-            except:
-                pass
-        elif update.message:
+            except Exception as e:
+                logger.error(f"Failed to edit message in error handler: {e}")
+        elif update and update.message:
             await update.message.reply_text(
-                user_message
+                user_message,
+                reply_markup=keyboard
             )
     except Exception as e:
         logger.error(f"Failed to send error message to user: {e}")
@@ -219,10 +224,9 @@ async def main():
         logger.info(f"Received signal {signal_number}, shutting down...")
         await application.stop()
         await application.shutdown()
-        import sys
-        sys.exit(0)
+        # Don't call sys.exit() directly from signal handler
 
-    # Register signal handlers
+    # Register signal handlers - use create_task to avoid blocking
     for sig in (signal.SIGINT, signal.SIGTERM):
         signal.signal(sig, lambda s, f: asyncio.create_task(shutdown(s, f)))
 
@@ -230,6 +234,7 @@ async def main():
     await application.initialize()
     await application.start()
     await application.updater.start_polling(allowed_updates=Update.ALL_TYPES)
+    logger.info("Bot is running!")
 
     # Set up periodic tasks
     from bot.context import cleanup_expired_contexts
@@ -245,20 +250,28 @@ async def main():
                 logger.error(f"Error in cleanup task: {e}")
             await asyncio.sleep(300)  # Run every 5 minutes
 
-    # Start cleanup task
-    asyncio.create_task(cleanup_task())
+    # Start cleanup task as a background task
+    cleanup_job = asyncio.create_task(cleanup_task())
 
     # Run the bot until stopped
     try:
-        await asyncio.Future()  # Run forever
+        # Use asyncio.Event() to keep the task running indefinitely
+        stop_event = asyncio.Event()
+        await stop_event.wait()
     except asyncio.CancelledError:
         # Bot is being shut down
-        pass
+        logger.info("Main task cancelled, shutting down...")
+    finally:
+        # Clean up
+        if 'cleanup_job' in locals() and not cleanup_job.done():
+            cleanup_job.cancel()
 
-    # This part will only be reached if asyncio.Future() is somehow resolved
-    await application.updater.stop()
-    await application.stop()
-    await application.shutdown()
+        # Ensure the bot is properly shut down
+        await application.updater.stop()
+        await application.stop()
+        await application.shutdown()
+
+    logger.info("Bot stopped")
 
 
 if __name__ == "__main__":

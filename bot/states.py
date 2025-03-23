@@ -1409,12 +1409,12 @@ join_command_handler = ConversationHandler(
         ]
     },
     fallbacks=[
-        CallbackQueryHandler(lambda u, c: ConversationHandler.END, pattern=r"^cancel_selection$"),
         CommandHandler("cancel", cancel_handler)
-    ]
+    ],
+    # Remove per_message=True since we're using CommandHandler in entry points
 )
 
-# 2. Callback-based handler (with per_message=True)
+
 join_callback_handler = ConversationHandler(
     entry_points=[
         CallbackQueryHandler(join_collective_action_callback, pattern=r"^join_collective_action:")
