@@ -160,9 +160,19 @@ async def main():
 
     # Start the bot
     logger.info("Starting Meta Game bot...")
-    await application.run_polling(allowed_updates=Update.ALL_TYPES)
+    # Change this line to start and close the application properly
+    await application.initialize()
+    await application.start()
+    await application.updater.start_polling(allowed_updates=Update.ALL_TYPES)
 
+    # Run until stopped
+    await application.updater.stop()
+    await application.stop()
+    await application.shutdown()
 
 if __name__ == "__main__":
     # Properly run the main coroutine with asyncio
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except (KeyboardInterrupt, SystemExit):
+        logger.info("Bot stopped!")

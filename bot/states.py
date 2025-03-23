@@ -1297,7 +1297,7 @@ registration_handler = ConversationHandler(
         ]
     },
     fallbacks=[CommandHandler("cancel", cancel_handler)],
-    per_message=True  # Add this parameter
+    # Remove the per_message=True parameter
 )
 
 action_handler = ConversationHandler(
