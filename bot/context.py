@@ -14,10 +14,15 @@ user_context: Dict[str, Dict[str, Any]] = {}
 
 # Timeout for user context (30 minutes)
 USER_CONTEXT_TIMEOUT = 1800  # seconds
+MAX_CONTEXTS = 1000
 
 
 def get_user_context(telegram_id: str) -> Dict[str, Any]:
     """Get user context data, initializing if needed."""
+    # Check if we need to clean up first
+    if len(user_context) >= MAX_CONTEXTS:
+        cleanup_expired_contexts()
+
     if telegram_id not in user_context:
         user_context[telegram_id] = {'data': {}, 'timestamp': time.time()}
     else:

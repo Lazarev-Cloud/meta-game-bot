@@ -407,9 +407,6 @@ def setup_i18n():
     """Initialize the internationalization system."""
     logger.info("Initializing internationalization system")
 
-    # Initialize with default translations
-    setup_i18n()
-
 
 def get_settings_keyboard(language: str) -> InlineKeyboardMarkup:
     """Get keyboard for settings menu."""
@@ -510,4 +507,14 @@ def get_extended_start_keyboard(language: str) -> InlineKeyboardMarkup:
             InlineKeyboardButton(_("Help", language), callback_data="help")
         ]
     ]
+    return InlineKeyboardMarkup(keyboard)
+
+
+def create_simple_keyboard(buttons, language):
+    """Create a simple keyboard with back button."""
+    keyboard = []
+    for row in buttons:
+        keyboard.append(row)
+    # Add back button
+    keyboard.append([InlineKeyboardButton(_("Back", language), callback_data="back_to_menu")])
     return InlineKeyboardMarkup(keyboard)

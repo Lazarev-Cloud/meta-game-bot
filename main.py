@@ -161,16 +161,45 @@ async def init_database():
                 script_dir = os.path.dirname(os.path.abspath(__file__))
                 db_init_path = os.path.join(script_dir, "db_init.py")
 
-                if os.path.exists(db_init_path):
-                    # Load the module
-                    spec = importlib.util.spec_from_file_location("db_init", db_init_path)
-                    db_init = importlib.util.module_from_spec(spec)
-                    sys.modules["db_init"] = db_init
-                    spec.loader.exec_module(db_init)
+                if not os.path.exists(db_init_path):
+                    logger.warning(f"Database initialization script not found at {db_init_path}")
+                    logger.warning("Attempting minimal schema and tables creation...")
 
-                    # Run the initialization
-                    await db_init.init_database()
-                    logger.info("Database initialization completed")
+                    # Execute basic SQL for schema and critical tables
+                    from db.supabase_client import execute_sql
+
+                    # Create the game schema
+                    await execute_sql("CREATE SCHEMA IF NOT EXISTS game;")
+
+                    # Create essential tables
+                    await execute_sql("""
+                    CREATE TABLE IF NOT EXISTS game.players (
+                        player_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+                        telegram_id TEXT UNIQUE NOT NULL,
+                        name TEXT NOT NULL,
+                        ideology_score INTEGER NOT NULL DEFAULT 0,
+                        remaining_actions INTEGER NOT NULL DEFAULT 1,
+                        remaining_quick_actions INTEGER NOT NULL DEFAULT 2,
+                        is_admin BOOLEAN DEFAULT FALSE,
+                        is_active BOOLEAN DEFAULT TRUE,
+                        language TEXT DEFAULT 'en_US',
+                        registered_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+                        last_active_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+                    );""")
+
+                    await execute_sql("""
+                    CREATE TABLE IF NOT EXISTS game.resources (
+                        resource_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+                        player_id UUID NOT NULL,
+                        influence_amount INTEGER NOT NULL DEFAULT 0,
+                        money_amount INTEGER NOT NULL DEFAULT 0,
+                        information_amount INTEGER NOT NULL DEFAULT 0,
+                        force_amount INTEGER NOT NULL DEFAULT 0,
+                        updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+                    );""")
+
+                    logger.info("Created minimal database schema and tables")
+
                 else:
                     # Manual initialization as fallback
                     logger.warning(f"Database initialization script not found at {db_init_path}")

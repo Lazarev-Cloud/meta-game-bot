@@ -11,6 +11,8 @@ supabase_client.py and queries.py.
 
 import logging
 from typing import Dict, Any, Optional, List, Union
+from db.error_handling import db_retry
+
 
 # Internal imports from our database modules
 from db.supabase_client import (
@@ -59,16 +61,9 @@ async def player_exists(telegram_id: str) -> bool:
         return False
 
 
+@db_retry
 async def get_player(telegram_id: str) -> Optional[Dict[str, Any]]:
-    """
-    Get comprehensive player information including resources, actions, etc.
-
-    Args:
-        telegram_id: The Telegram ID of the player
-
-    Returns:
-        Dictionary with player data or None if player not found
-    """
+    """Get comprehensive player information including resources, actions, etc."""
     try:
         result = await execute_function("api_get_player_status", {"p_telegram_id": telegram_id})
         return result
@@ -83,34 +78,16 @@ async def get_player(telegram_id: str) -> Optional[Dict[str, Any]]:
             if not hasattr(response, 'data') or not response.data:
                 return None
 
+            # Format and return minimal player data
             player = response.data[0]
-
-            # Get resources separately
-            resources_response = client.from_("game.resources").select("*").eq("player_id",
-                                                                               player["player_id"]).execute()
-            resources = {}
-
-            if hasattr(resources_response, 'data') and resources_response.data:
-                resources_data = resources_response.data[0]
-                resources = {
-                    "influence": resources_data.get("influence_amount", 0),
-                    "money": resources_data.get("money_amount", 0),
-                    "information": resources_data.get("information_amount", 0),
-                    "force": resources_data.get("force_amount", 0)
-                }
-
-            # Format response
             return {
                 "player_name": player.get("name", "Unknown"),
-                "player_id": player.get("player_id"),
                 "ideology_score": player.get("ideology_score", 0),
-                "resources": resources,
+                "resources": {},
                 "actions_remaining": player.get("remaining_actions", 0),
-                "quick_actions_remaining": player.get("remaining_quick_actions", 0),
-                "controlled_districts": []
+                "quick_actions_remaining": player.get("remaining_quick_actions", 0)
             }
-        except Exception as inner_e:
-            logger.error(f"Fallback error getting player data: {str(inner_e)}")
+        except Exception:
             return None
 
 

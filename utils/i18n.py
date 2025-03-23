@@ -22,6 +22,21 @@ _translations: Dict[str, Dict[str, str]] = {
 _user_languages: Dict[str, str] = {}
 
 
+async def load_translations() -> None:
+    """Load translations from both files and database in proper sequence."""
+    try:
+        # First load from files as fallback
+        await load_translations_from_file()
+
+        # Then try to load from database, which may override file translations
+        await load_translations_from_db()
+
+        logger.info(
+            f"Loaded translations successfully: {len(_translations['en_US'])} English, {len(_translations['ru_RU'])} Russian keys")
+    except Exception as e:
+        logger.error(f"Error loading translations: {str(e)}")
+        logger.info("Continuing with default translations only")
+
 async def load_translations_from_db() -> None:
     """Load translations from the database with improved error handling."""
     try:
@@ -132,6 +147,7 @@ def _(key: str, language: str = "en_US") -> str:
     return _translations[language].get(key, key)
 
 
+# Standardized database access
 async def get_user_language(telegram_id: str) -> str:
     """Get the user's preferred language with improved error handling."""
     # Check cache first
@@ -139,39 +155,18 @@ async def get_user_language(telegram_id: str) -> str:
         return _user_languages[telegram_id]
 
     try:
-        # Try to use the enhanced db_client
-        try:
-            from db_client import get_player_language
-            language = await get_player_language(telegram_id)
-            if language:
-                # Cache the result
-                _user_languages[telegram_id] = language
-                return language
-        except ImportError:
-            logger.debug("Enhanced db_client not available for language lookup, using fallback")
-        except Exception as e:
-            logger.debug(f"Error using get_player_language from db_client: {e}")
-
-        # Try using direct database query
-        try:
-            from db.supabase_client import get_supabase
-            client = get_supabase()
-
-            response = client.from_("game.players").select("language").eq("telegram_id", telegram_id).execute()
-
-            if hasattr(response, 'data') and response.data and response.data[0].get("language"):
-                language = response.data[0]["language"]
-                # Cache the result
-                _user_languages[telegram_id] = language
-                return language
-        except Exception as table_error:
-            logger.debug(f"Couldn't retrieve language preference: {table_error}")
+        # Use enhanced db_client instead of direct Supabase calls
+        from db_client import get_player_language
+        language = await get_player_language(telegram_id)
+        if language:
+            # Cache the result
+            _user_languages[telegram_id] = language
+            return language
     except Exception as e:
         logger.error(f"Error getting user language: {str(e)}")
 
     # Default to English
     return "en_US"
-
 
 async def set_user_language(telegram_id: str, language: str) -> bool:
     """Set user's preferred language with improved error handling."""
