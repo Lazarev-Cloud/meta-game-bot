@@ -10,17 +10,14 @@ supabase_client.py and queries.py.
 """
 
 import logging
-from typing import Dict, Any, Optional, List, Union
+from typing import Dict, Any, Optional, List
+
 from db.error_handling import db_retry
-
-
 # Internal imports from our database modules
 from db.supabase_client import (
-    init_supabase,
     get_supabase,
     execute_function,
-    execute_sql,
-    check_schema_exists
+    execute_sql
 )
 
 # Initialize logger

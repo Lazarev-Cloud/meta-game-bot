@@ -47,7 +47,6 @@ from utils.formatting import (
     format_politicians_list,
     format_politician_info,
     format_time,
-    format_cycle_info,
     format_news
 )
 from utils.i18n import _, get_user_language, set_user_language

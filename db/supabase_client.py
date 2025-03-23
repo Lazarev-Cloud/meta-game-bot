@@ -11,7 +11,7 @@ have been moved to db_client.py.
 
 import logging
 import os
-from typing import Dict, Any, Optional, List, Union
+from typing import Dict, Any
 
 from supabase import create_client, Client
 

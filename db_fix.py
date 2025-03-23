@@ -8,9 +8,7 @@ This script creates the necessary schema and functions with proper permissions.
 
 import asyncio
 import logging
-import os
 import sys
-from typing import List, Optional
 
 from dotenv import load_dotenv
 

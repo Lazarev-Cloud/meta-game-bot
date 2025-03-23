@@ -7,8 +7,7 @@ Conversation states and handlers for the Meta Game bot.
 
 import logging
 
-
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Update
 from telegram.ext import (
     ContextTypes,
     ConversationHandler,
@@ -69,6 +68,7 @@ from utils.i18n import _, get_user_language, set_user_language
 
 # Initialize logger
 logger = logging.getLogger(__name__)
+
 
 # Registration conversation handlers
 
@@ -1422,7 +1422,6 @@ join_command_handler = ConversationHandler(
     per_message=True  # Add this parameter to fix the warning
 )
 
-
 join_callback_handler = ConversationHandler(
     entry_points=[
         CallbackQueryHandler(join_collective_action_callback, pattern=r"^join_collective_action:")
@@ -1446,7 +1445,6 @@ join_callback_handler = ConversationHandler(
     ],
     per_message=True
 )
-
 
 # List of all conversation handlers
 conversation_handlers = [

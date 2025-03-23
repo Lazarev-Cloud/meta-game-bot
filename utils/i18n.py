@@ -4,10 +4,10 @@
 """
 Internationalization (i18n) utilities for the Meta Game bot with improved database handling.
 """
-import logging
 import json
+import logging
 import os
-from typing import Dict, Optional
+from typing import Dict
 
 # Initialize logger
 logger = logging.getLogger(__name__)
@@ -36,6 +36,7 @@ async def load_translations() -> None:
     except Exception as e:
         logger.error(f"Error loading translations: {str(e)}")
         logger.info("Continuing with default translations only")
+
 
 async def load_translations_from_db() -> None:
     """Load translations from the database with improved error handling."""
@@ -89,6 +90,7 @@ async def load_translations_from_db() -> None:
     except Exception as e:
         logger.error(f"Error loading translations from database: {str(e)}")
         # Continue with default translations
+
 
 async def load_translations_from_file() -> None:
     """Load translations from JSON files as fallback or initial setup."""
@@ -167,6 +169,7 @@ async def get_user_language(telegram_id: str) -> str:
 
     # Default to English
     return "en_US"
+
 
 async def set_user_language(telegram_id: str, language: str) -> bool:
     """Set user's preferred language with improved error handling."""

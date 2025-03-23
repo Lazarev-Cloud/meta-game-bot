@@ -1,8 +1,16 @@
-Error - Could not find the file by path /tests/test_start_command.py for qodo_structured_read_filesimport unittest
-from unittest.mock import AsyncMock, patch
+Error - Could
+not find
+the
+file
+by
+path / tests / test_start_command.py
+for qodo_structured_read_filesimport unittest
+    from unittest.mock import AsyncMock, patch
 from telegram import User, Message, Update
 from telegram.ext import CallbackContext
+
 from bot.states import start_command
+
 
 class TestStartCommand(unittest.TestCase):
     def setUp(self):
@@ -10,7 +18,7 @@ class TestStartCommand(unittest.TestCase):
         self.message = Message(message_id=1, date=None, chat=None, text='/start', from_user=self.user)
         self.update = Update(update_id=1, message=self.message)
         self.context = CallbackContext(bot=None, application=None, user_data={}, chat_data={})
-    
+
     @patch('bot.states._', return_value="Sorry, the service is currently unreachable. Please try again later.")
     @patch('bot.states.player_exists', new_callable=AsyncMock)
     @patch('bot.states.get_language_keyboard', return_value=['KeyboardMarkup'])
@@ -18,7 +26,7 @@ class TestStartCommand(unittest.TestCase):
         mock_player_exists.return_value = False
 
         await start_command(self.update, self.context)
-        
+
         # Ensure the player check is called with the correct arguments
         mock_player_exists.assert_called_once_with(str(self.user.id))
 
@@ -38,16 +46,17 @@ class TestStartCommand(unittest.TestCase):
         mock_player_exists.return_value = True
 
         await start_command(self.update, self.context)
-        
+
         mock_player_exists.assert_called_once_with(str(self.user.id))
         mock_start_command.assert_called_once_with(self.update, self.context)
+
     @patch('bot.states._', return_value="Sorry, we're experiencing technical difficulties. Please try again later.")
     @patch('bot.states.player_exists', new_callable=AsyncMock)
     async def test_start_player_check_error(self, mock_player_exists, mock_translate):
         mock_player_exists.side_effect = Exception("Database connection error")
-        
+
         await start_command(self.update, self.context)
-        
+
         self.assertEqual(self.update.message.reply_text.call_count, 1)
         self.update.message.reply_text.assert_called_with(
             "Sorry, we're experiencing technical difficulties. Please try again later."
@@ -62,6 +71,7 @@ class TestStartCommand(unittest.TestCase):
         self.update.message.reply_text.assert_called_with(
             "Sorry, the service is currently unreachable. Please try again later."
         )
+
 
 if __name__ == '__main__':
     unittest.main()

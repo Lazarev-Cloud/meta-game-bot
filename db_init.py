@@ -12,8 +12,7 @@ with improved error handling and recovery.
 import asyncio
 import os
 import sys
-import time
-from typing import List, Optional
+from typing import List
 
 from dotenv import load_dotenv
 
