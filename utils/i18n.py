@@ -7,6 +7,7 @@ Internationalization (i18n) utilities for the Meta Game bot with improved cachin
 import json
 import logging
 import os
+import time  # Add explicit import for time module
 from typing import Dict, Optional, Any, Callable, Awaitable
 from functools import lru_cache
 
@@ -93,7 +94,7 @@ async def _load_translations_via_table() -> None:
         client = get_supabase()
 
         # Use the correct schema reference
-        response = client.from_("game.translations").select("translation_key,en_US,ru_RU").execute()
+        response = client.from_("translations").schema("game").select("translation_key,en_US,ru_RU").execute()
 
         if hasattr(response, 'data') and response.data:
             translations_data = response.data
@@ -164,7 +165,7 @@ def _(key: str, language: str = "en_US") -> str:
 async def get_user_language(telegram_id: str) -> str:
     """Get the user's preferred language with caching and improved error handling."""
     # Check cache first
-    current_time = int(os.time() if hasattr(os, 'time') else time.time())
+    current_time = int(time.time())
 
     if telegram_id in _user_languages:
         cache_entry = _user_languages[telegram_id]
@@ -174,17 +175,16 @@ async def get_user_language(telegram_id: str) -> str:
 
     # Cache missed or expired, fetch from database
     try:
-        # Use enhanced db_client instead of direct Supabase calls
+        # Use enhanced db_client
         try:
-            from db_client import get_player_language
+            from db.db_client import get_player_language
             language = await get_player_language(telegram_id)
         except (ImportError, Exception):
             # Fallback to direct database query
             from db.supabase_client import get_supabase
             client = get_supabase()
-            response = client.from_("game.players").select("language").eq("telegram_id", telegram_id).execute()
-            language = response.data[0]["language"] if hasattr(response, 'data') and response.data and response.data[
-                0].get("language") else "en_US"
+            response = client.from_("players").schema("game").select("language").eq("telegram_id", telegram_id).execute()
+            language = response.data[0]["language"] if hasattr(response, 'data') and response.data and response.data[0].get("language") else "en_US"
 
         # Cache the result with timestamp
         _user_languages[telegram_id] = {
@@ -196,7 +196,6 @@ async def get_user_language(telegram_id: str) -> str:
         logger.error(f"Error getting user language: {str(e)}")
         return "en_US"
 
-
 async def set_user_language(telegram_id: str, language: str) -> bool:
     """Set user's preferred language with improved error handling and caching."""
     if language not in _translations:
@@ -207,7 +206,7 @@ async def set_user_language(telegram_id: str, language: str) -> bool:
         # Try using the enhanced db_client
         updated = False
         try:
-            from db_client import set_player_language
+            from db.db_client import set_player_language
             updated = await set_player_language(telegram_id, language)
         except (ImportError, Exception) as e:
             logger.debug(f"Error using set_player_language: {e}")
@@ -219,14 +218,14 @@ async def set_user_language(telegram_id: str, language: str) -> bool:
             if player:
                 # Player exists, update their language
                 client = get_supabase()
-                client.from_("game.players").update({"language": language}).eq("telegram_id", telegram_id).execute()
+                client.from_("players").schema("game").update({"language": language}).eq("telegram_id", telegram_id).execute()
                 updated = True
                 logger.info(f"Updated language for existing player {telegram_id} to {language}")
             else:
                 logger.info(f"Player {telegram_id} not registered yet, caching language preference")
 
         # Update cache regardless of database update result
-        current_time = int(os.time() if hasattr(os, 'time') else time.time())
+        current_time = int(time.time())
         _user_languages[telegram_id] = {
             'language': language,
             'timestamp': current_time
@@ -238,10 +237,9 @@ async def set_user_language(telegram_id: str, language: str) -> bool:
         # Still update the cache even if there was an error
         _user_languages[telegram_id] = {
             'language': language,
-            'timestamp': int(os.time() if hasattr(os, 'time') else time.time())
+            'timestamp': int(time.time() if not hasattr(os, 'time') else os.time())
         }
         return False
-
 
 def get_available_languages() -> Dict[str, str]:
     """Get list of available languages."""

@@ -58,9 +58,7 @@ async def db_operation(operation_name: str,
 # ---------------------------
 
 async def player_exists(telegram_id: str) -> bool:
-    """
-    Check if a player exists by Telegram ID.
-    """
+    """Check if a player exists by Telegram ID."""
     try:
         client = get_supabase()
 
@@ -72,8 +70,8 @@ async def player_exists(telegram_id: str) -> bool:
         except Exception:
             pass
 
-        # Fallback to direct query
-        response = client.from_("game.players").select("player_id").eq("telegram_id", telegram_id).execute()
+        # Fallback to direct query with proper schema handling
+        response = client.from_("players").schema("game").select("player_id").eq("telegram_id", telegram_id).execute()
         return hasattr(response, 'data') and len(response.data) > 0
     except Exception as e:
         logger.error(f"Error checking if player exists: {str(e)}")
@@ -93,10 +91,9 @@ async def get_player(telegram_id: str) -> Optional[Dict[str, Any]]:
 
 async def get_player_by_telegram_id(telegram_id: str) -> Optional[Dict[str, Any]]:
     """Get basic player record by Telegram ID."""
-
     async def fetch_player():
         client = get_supabase()
-        response = client.from_("game.players").select("*").eq("telegram_id", telegram_id).execute()
+        response = client.from_("players").schema("game").select("*").eq("telegram_id", telegram_id).execute()
         if hasattr(response, 'data') and response.data:
             return response.data[0]
         return None
@@ -231,10 +228,9 @@ async def cancel_latest_action(telegram_id: str, language: str = "en_US") -> Dic
 
 async def get_districts() -> List[Dict[str, Any]]:
     """Get all districts."""
-
     async def fetch_districts():
         client = get_supabase()
-        response = client.from_("game.districts").select("*").execute()
+        response = client.from_("districts").schema("game").select("*").execute()
         if hasattr(response, 'data'):
             return response.data
         return []
@@ -431,23 +427,20 @@ async def join_collective_action(
 
 async def get_active_collective_actions() -> List[Dict[str, Any]]:
     """Get all active collective actions."""
-
     async def fetch_actions():
         client = get_supabase()
-        response = client.from_("game.collective_actions").select("*").eq("status", "active").execute()
+        response = client.from_("collective_actions").schema("game").select("*").eq("status", "active").execute()
         if hasattr(response, 'data'):
             return response.data
         return []
 
     return await db_operation("get_active_collective_actions", fetch_actions, default_return=[])
 
-
 async def get_collective_action(action_id: str) -> Optional[Dict[str, Any]]:
     """Get details of a specific collective action."""
-
     async def fetch_action():
         client = get_supabase()
-        response = client.from_("game.collective_actions").select("*").eq("collective_action_id", action_id).execute()
+        response = client.from_("collective_actions").schema("game").select("*").eq("collective_action_id", action_id).execute()
         if hasattr(response, 'data') and response.data:
             return response.data[0]
         return None
