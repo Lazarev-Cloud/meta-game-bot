@@ -23,7 +23,9 @@ from bot.keyboards import (
     get_politicians_keyboard,
     get_politician_interaction_keyboard,
     get_resource_type_keyboard,
-    get_back_keyboard, get_resources_keyboard, get_language_keyboard
+    get_back_keyboard,
+    get_resources_keyboard,
+    get_language_keyboard
 )
 from db import (
     get_player,
@@ -32,19 +34,69 @@ from db import (
     check_income,
     get_politicians,
     get_politician_status,
-    submit_action, get_latest_news, get_active_collective_actions, get_cycle_info
+    submit_action,
+    get_latest_news,
+    get_active_collective_actions,
+    get_cycle_info,
+    player_exists
 )
 from utils.formatting import (
     format_player_status,
     format_district_info,
     format_income_info,
     format_politicians_list,
-    format_politician_info, format_time
+    format_politician_info,
+    format_time,
+    format_cycle_info,
+    format_news
 )
 from utils.i18n import _, get_user_language, set_user_language
 
 # Initialize logger
 logger = logging.getLogger(__name__)
+
+
+async def _require_registration_callback(update: Update, language: str) -> bool:
+    """Check if player is registered for a callback query. Returns True if registered."""
+    query = update.callback_query
+    telegram_id = str(update.effective_user.id)
+
+    try:
+        exists = await player_exists(telegram_id)
+    except Exception as e:
+        logger.error(f"Error checking if player exists: {e}")
+        await query.answer(
+            _("Sorry, we're experiencing technical difficulties. Please try again later.", language)
+        )
+        await query.edit_message_text(
+            _("Sorry, we're experiencing technical difficulties. Please try again later.", language)
+        )
+        return False
+
+    if not exists:
+        await query.answer(
+            _("You need to register first.", language)
+        )
+        await query.edit_message_text(
+            _("You are not registered yet. Use /start to register.", language)
+        )
+        return False
+
+    return True
+
+
+async def _handle_db_error_callback(update: Update, language: str, error: Exception, operation: str) -> None:
+    """Handle database errors in callbacks consistently."""
+    query = update.callback_query
+    logger.error(f"Error in {operation}: {str(error)}")
+
+    message = _("Database connection error. Please try again later.", language)
+
+    await query.answer(message[:200])  # Callback answers have character limit
+    try:
+        await query.edit_message_text(message)
+    except Exception:
+        pass  # Message might be unchanged
 
 
 async def general_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -86,23 +138,29 @@ async def status_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     telegram_id = str(update.effective_user.id)
     language = await get_user_language(telegram_id)
 
-    # Get player status
-    player_status = await get_player(telegram_id)
-
-    if not player_status:
-        await query.edit_message_text(
-            _("Error retrieving your status. Please try again later.", language)
-        )
+    if not await _require_registration_callback(update, language):
         return
 
-    # Format and send status message
-    status_text = await format_player_status(player_status, language)
+    try:
+        # Get player status
+        player_status = await get_player(telegram_id)
 
-    await query.edit_message_text(
-        status_text,
-        parse_mode="Markdown",
-        reply_markup=get_status_keyboard(language)
-    )
+        if not player_status:
+            await query.edit_message_text(
+                _("Error retrieving your status. Please try again later.", language)
+            )
+            return
+
+        # Format and send status message
+        status_text = await format_player_status(player_status, language)
+
+        await query.edit_message_text(
+            status_text,
+            parse_mode="Markdown",
+            reply_markup=get_status_keyboard(language)
+        )
+    except Exception as e:
+        await _handle_db_error_callback(update, language, e, "status_callback")
 
 
 async def map_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -113,49 +171,55 @@ async def map_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     telegram_id = str(update.effective_user.id)
     language = await get_user_language(telegram_id)
 
-    # Get map data
-    map_data = await get_map_data(language)
-
-    if not map_data:
-        await query.edit_message_text(
-            _("Error retrieving map data. Please try again later.", language)
-        )
+    if not await _require_registration_callback(update, language):
         return
 
-    # Format and build map message
-    districts = map_data.get("districts", [])
-    game_date = map_data.get("game_date", "Unknown")
-    cycle = map_data.get("cycle", "Unknown")
+    try:
+        # Get map data
+        map_data = await get_map_data(language)
 
-    map_text = _(
-        "*Current Map of Novi-Sad*\n"
-        "Date: {date}, {cycle} cycle\n\n"
-        "District Control:\n",
-        language
-    ).format(date=game_date, cycle=cycle)
+        if not map_data:
+            await query.edit_message_text(
+                _("Error retrieving map data. Please try again later.", language)
+            )
+            return
 
-    for district in districts:
-        name = district.get("name", "Unknown")
-        controlling_player = district.get("controlling_player", _("None", language))
-        control_level = district.get("control_level", "neutral")
+        # Format and build map message
+        districts = map_data.get("districts", [])
+        game_date = map_data.get("game_date", "Unknown")
+        cycle = map_data.get("cycle", "Unknown")
 
-        control_symbol = "🔴" if control_level == "strong" else "🟠" if control_level == "controlled" else "🟡" if control_level == "contested" else "⚪"
+        map_text = _(
+            "*Current Map of Novi-Sad*\n"
+            "Date: {date}, {cycle} cycle\n\n"
+            "District Control:\n",
+            language
+        ).format(date=game_date, cycle=cycle)
 
-        map_text += f"{control_symbol} *{name}*: "
-        if controlling_player != _("None", language):
-            map_text += _("Controlled by {player}", language).format(player=controlling_player)
-        else:
-            map_text += _("No clear control", language)
-        map_text += "\n"
+        for district in districts:
+            name = district.get("name", "Unknown")
+            controlling_player = district.get("controlling_player", _("None", language))
+            control_level = district.get("control_level", "neutral")
 
-    # Add map link if available
-    map_text += "\n" + _("For a visual map, use the button below:", language)
+            control_symbol = "🔴" if control_level == "strong" else "🟠" if control_level == "controlled" else "🟡" if control_level == "contested" else "⚪"
 
-    await query.edit_message_text(
-        map_text,
-        parse_mode="Markdown",
-        reply_markup=get_map_keyboard(language)
-    )
+            map_text += f"{control_symbol} *{name}*: "
+            if controlling_player != _("None", language):
+                map_text += _("Controlled by {player}", language).format(player=controlling_player)
+            else:
+                map_text += _("No clear control", language)
+            map_text += "\n"
+
+        # Add map link if available
+        map_text += "\n" + _("For a visual map, use the button below:", language)
+
+        await query.edit_message_text(
+            map_text,
+            parse_mode="Markdown",
+            reply_markup=get_map_keyboard(language)
+        )
+    except Exception as e:
+        await _handle_db_error_callback(update, language, e, "map_callback")
 
 
 async def news_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -166,111 +230,72 @@ async def news_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     telegram_id = str(update.effective_user.id)
     language = await get_user_language(telegram_id)
 
-    # Get page number from context or initialize
-    page = context.user_data.get("news_page", 0)
-
-    # Extract page action if there is one
-    if query.data.startswith("news_page:"):
-        action = query.data.split(":", 1)[1]
-        if action == "next":
-            page += 1
-        elif action == "prev" and page > 0:
-            page -= 1
-        context.user_data["news_page"] = page
-
-    # Get news with pagination (5 per page)
-    news_count = 5
-    news_offset = page * news_count
-
-    news_data = await get_latest_news(telegram_id, count=news_count + 1,
-                                      language=language)  # +1 to check if there's more
-
-    if not news_data:
-        await query.edit_message_text(
-            _("Error retrieving news. Please try again later.", language)
-        )
+    if not await _require_registration_callback(update, language):
         return
 
-    # Format and build news message
-    news_text = _("*Latest News*\n\n", language)
+    try:
+        # Get page number from context or initialize
+        page = context.user_data.get("news_page", 0)
 
-    # Add public news
-    public_news = news_data.get("public", [])
-    if public_news:
-        news_text += _("📰 *Public News*\n", language)
+        # Extract page action if there is one
+        if query.data.startswith("news_page:"):
+            action = query.data.split(":", 1)[1]
+            if action == "next":
+                page += 1
+            elif action == "prev" and page > 0:
+                page -= 1
+            context.user_data["news_page"] = page
 
-        for i, news in enumerate(public_news[:news_count]):  # Show news_count items per page
-            title = news.get("title", "")
-            content = news.get("content", "")
-            cycle_type = news.get("cycle_type", "")
-            cycle_date = news.get("cycle_date", "")
+        # Get news with pagination (5 per page)
+        news_count = 5
+        news_offset = page * news_count
 
-            news_text += f"*{title}*\n"
-            news_text += f"{content}\n"
-            news_text += _("({cycle_type} cycle, {date})\n\n", language).format(
-                cycle_type=cycle_type,
-                date=cycle_date
+        news_data = await get_latest_news(telegram_id, count=news_count + 1,
+                                          language=language)  # +1 to check if there's more
+
+        if not news_data:
+            await query.edit_message_text(
+                _("Error retrieving news. Please try again later.", language)
             )
-    else:
-        news_text += _("📰 *Public News*\n", language)
-        news_text += _("No recent public news.\n\n", language)
+            return
 
-    # Add faction news
-    faction_news = news_data.get("faction", [])
-    if faction_news:
-        news_text += _("🔒 *Faction Intel*\n", language)
+        # Format and build news message
+        news_text = await format_news(news_data, language)
 
-        for i, news in enumerate(faction_news[:news_count]):  # Show news_count items per page
-            title = news.get("title", "")
-            content = news.get("content", "")
-            cycle_type = news.get("cycle_type", "")
-            cycle_date = news.get("cycle_date", "")
-            district = news.get("district", "")
+        # Create pagination buttons
+        buttons = []
 
-            news_text += f"*{title}*\n"
-            news_text += f"{content}\n"
+        # Add navigation row
+        navigation_row = []
 
-            location_info = ""
-            if district:
-                location_info = f" - {district}"
+        # Previous page button if not on first page
+        if page > 0:
+            navigation_row.append(InlineKeyboardButton("◀️ " + _("Previous", language), callback_data="news_page:prev"))
 
-            news_text += _("({cycle_type} cycle, {date}{location})\n\n", language).format(
-                cycle_type=cycle_type,
-                date=cycle_date,
-                location=location_info
-            )
-    else:
-        news_text += _("🔒 *Faction Intel*\n", language)
-        news_text += _("No recent intelligence reports.\n\n", language)
+        # Next page button if there are more news
+        public_news = news_data.get("public", [])
+        faction_news = news_data.get("faction", [])
+        has_more = (len(public_news) > news_count or len(faction_news) > news_count)
 
-    # Create pagination buttons
-    buttons = []
+        if has_more:
+            navigation_row.append(InlineKeyboardButton(_("Next", language) + " ▶️", callback_data="news_page:next"))
 
-    # Add navigation row
-    navigation_row = []
+        if navigation_row:
+            buttons.append(navigation_row)
 
-    # Previous page button if not on first page
-    if page > 0:
-        navigation_row.append(InlineKeyboardButton("◀️ " + _("Previous", language), callback_data="news_page:prev"))
+        # Add back to menu button
+        buttons.append([InlineKeyboardButton(_("Back to Menu", language), callback_data="back_to_menu")])
 
-    # Next page button if there are more news
-    if len(public_news) > news_count or len(faction_news) > news_count:
-        navigation_row.append(InlineKeyboardButton(_("Next", language) + " ▶️", callback_data="news_page:next"))
+        # Create keyboard
+        keyboard = InlineKeyboardMarkup(buttons)
 
-    if navigation_row:
-        buttons.append(navigation_row)
-
-    # Add back to menu button
-    buttons.append([InlineKeyboardButton(_("Back to Menu", language), callback_data="back_to_menu")])
-
-    # Create keyboard
-    keyboard = InlineKeyboardMarkup(buttons)
-
-    await query.edit_message_text(
-        news_text,
-        parse_mode="Markdown",
-        reply_markup=keyboard
-    )
+        await query.edit_message_text(
+            news_text,
+            parse_mode="Markdown",
+            reply_markup=keyboard
+        )
+    except Exception as e:
+        await _handle_db_error_callback(update, language, e, "news_callback")
 
 
 async def district_info_callback(update: Update, context: ContextTypes.DEFAULT_TYPE, district_name: str = None) -> None:
@@ -287,37 +312,49 @@ async def district_info_callback(update: Update, context: ContextTypes.DEFAULT_T
     telegram_id = str(update.effective_user.id)
     language = await get_user_language(telegram_id)
 
-    # Get district info
-    district_data = await get_district_info(telegram_id, district_name, language)
-
-    if not district_data:
-        message = _("Error retrieving district information for {district}. Please try again later.", language).format(
-            district=district_name
-        )
-        if query:
-            await query.edit_message_text(message)
-        else:
-            await update.message.reply_text(message)
+    if query and not await _require_registration_callback(update, language):
         return
 
-    # Format district info
-    district_text = await format_district_info(district_data, language)
+    try:
+        # Get district info
+        district_data = await get_district_info(telegram_id, district_name, language)
 
-    # Create back button keyboard
-    keyboard = get_back_keyboard(language, "select_district")
+        if not district_data:
+            message = _("Error retrieving district information for {district}. Please try again later.",
+                        language).format(
+                district=district_name
+            )
+            if query:
+                await query.edit_message_text(message)
+            else:
+                await update.message.reply_text(message)
+            return
 
-    if query:
-        await query.edit_message_text(
-            district_text,
-            parse_mode="Markdown",
-            reply_markup=keyboard
-        )
-    else:
-        await update.message.reply_text(
-            district_text,
-            parse_mode="Markdown",
-            reply_markup=keyboard
-        )
+        # Format district info
+        district_text = await format_district_info(district_data, language)
+
+        # Create back button keyboard
+        keyboard = get_back_keyboard(language, "select_district")
+
+        if query:
+            await query.edit_message_text(
+                district_text,
+                parse_mode="Markdown",
+                reply_markup=keyboard
+            )
+        else:
+            await update.message.reply_text(
+                district_text,
+                parse_mode="Markdown",
+                reply_markup=keyboard
+            )
+    except Exception as e:
+        if query:
+            await _handle_db_error_callback(update, language, e, "district_info_callback")
+        else:
+            await update.message.reply_text(
+                _("Error retrieving district information: {error}", language).format(error=str(e))
+            )
 
 
 async def select_district_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -328,11 +365,17 @@ async def select_district_callback(update: Update, context: ContextTypes.DEFAULT
     telegram_id = str(update.effective_user.id)
     language = await get_user_language(telegram_id)
 
-    # Show district selection keyboard
-    await query.edit_message_text(
-        _("Please select a district to view:", language),
-        reply_markup=await get_districts_keyboard(language)
-    )
+    if not await _require_registration_callback(update, language):
+        return
+
+    try:
+        # Show district selection keyboard
+        await query.edit_message_text(
+            _("Please select a district to view:", language),
+            reply_markup=await get_districts_keyboard(language)
+        )
+    except Exception as e:
+        await _handle_db_error_callback(update, language, e, "select_district_callback")
 
 
 async def resources_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -343,42 +386,48 @@ async def resources_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
     telegram_id = str(update.effective_user.id)
     language = await get_user_language(telegram_id)
 
-    # Get player information
-    player_data = await get_player(telegram_id)
-
-    if not player_data:
-        await query.edit_message_text(
-            _("Error retrieving your information. Please try again later.", language)
-        )
+    if not await _require_registration_callback(update, language):
         return
 
-    # Get and format resources
-    resources = player_data.get("resources", {})
-    influence = resources.get("influence", 0)
-    money = resources.get("money", 0)
-    information = resources.get("information", 0)
-    force = resources.get("force", 0)
+    try:
+        # Get player information
+        player_data = await get_player(telegram_id)
 
-    resources_text = _(
-        "*Your Resources*\n\n"
-        "🔵 *Influence:* {influence} - Used for political maneuvers\n"
-        "💰 *Money:* {money} - Used for economic actions\n"
-        "🔍 *Information:* {information} - Used for intelligence and research\n"
-        "👊 *Force:* {force} - Used for military and security actions\n\n"
-        "_Use the buttons below to exchange resources (2:1 ratio)_",
-        language
-    ).format(
-        influence=influence,
-        money=money,
-        information=information,
-        force=force
-    )
+        if not player_data:
+            await query.edit_message_text(
+                _("Error retrieving your information. Please try again later.", language)
+            )
+            return
 
-    await query.edit_message_text(
-        resources_text,
-        parse_mode="Markdown",
-        reply_markup=get_resources_keyboard(language)
-    )
+        # Get and format resources
+        resources = player_data.get("resources", {})
+        influence = resources.get("influence", 0)
+        money = resources.get("money", 0)
+        information = resources.get("information", 0)
+        force = resources.get("force", 0)
+
+        resources_text = _(
+            "*Your Resources*\n\n"
+            "🔵 *Influence:* {influence} - Used for political maneuvers\n"
+            "💰 *Money:* {money} - Used for economic actions\n"
+            "🔍 *Information:* {information} - Used for intelligence and research\n"
+            "👊 *Force:* {force} - Used for military and security actions\n\n"
+            "_Use the buttons below to exchange resources (2:1 ratio)_",
+            language
+        ).format(
+            influence=influence,
+            money=money,
+            information=information,
+            force=force
+        )
+
+        await query.edit_message_text(
+            resources_text,
+            parse_mode="Markdown",
+            reply_markup=get_resources_keyboard(language)
+        )
+    except Exception as e:
+        await _handle_db_error_callback(update, language, e, "resources_callback")
 
 
 async def actions_left_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -389,36 +438,42 @@ async def actions_left_callback(update: Update, context: ContextTypes.DEFAULT_TY
     telegram_id = str(update.effective_user.id)
     language = await get_user_language(telegram_id)
 
-    # Get player information
-    player_data = await get_player(telegram_id)
-
-    if not player_data:
-        await query.edit_message_text(
-            _("Error retrieving your information. Please try again later.", language)
-        )
+    if not await _require_registration_callback(update, language):
         return
 
-    # Get remaining actions
-    actions_remaining = player_data.get("actions_remaining", 0)
-    quick_actions_remaining = player_data.get("quick_actions_remaining", 0)
+    try:
+        # Get player information
+        player_data = await get_player(telegram_id)
 
-    # Get cycle info for time remaining
-    cycle_info = await get_cycle_info(language)
-    time_to_deadline = cycle_info.get("time_to_deadline", "unknown")
+        if not player_data:
+            await query.edit_message_text(
+                _("Error retrieving your information. Please try again later.", language)
+            )
+            return
 
-    # Format and send actions remaining message
-    await query.edit_message_text(
-        _("*Actions Remaining*\n\n"
-          "Main Actions: {main_actions}\n"
-          "Quick Actions: {quick_actions}\n\n"
-          "Time remaining in this cycle: {time_remaining}", language).format(
-            main_actions=actions_remaining,
-            quick_actions=quick_actions_remaining,
-            time_remaining=await format_time(time_to_deadline, language)
-        ),
-        parse_mode="Markdown",
-        reply_markup=get_back_keyboard(language)
-    )
+        # Get remaining actions
+        actions_remaining = player_data.get("actions_remaining", 0)
+        quick_actions_remaining = player_data.get("quick_actions_remaining", 0)
+
+        # Get cycle info for time remaining
+        cycle_info = await get_cycle_info(language)
+        time_to_deadline = cycle_info.get("time_to_deadline", "unknown")
+
+        # Format and send actions remaining message
+        await query.edit_message_text(
+            _("*Actions Remaining*\n\n"
+              "Main Actions: {main_actions}\n"
+              "Quick Actions: {quick_actions}\n\n"
+              "Time remaining in this cycle: {time_remaining}", language).format(
+                main_actions=actions_remaining,
+                quick_actions=quick_actions_remaining,
+                time_remaining=await format_time(time_to_deadline, language)
+            ),
+            parse_mode="Markdown",
+            reply_markup=get_back_keyboard(language)
+        )
+    except Exception as e:
+        await _handle_db_error_callback(update, language, e, "actions_left_callback")
 
 
 async def controlled_districts_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -429,60 +484,66 @@ async def controlled_districts_callback(update: Update, context: ContextTypes.DE
     telegram_id = str(update.effective_user.id)
     language = await get_user_language(telegram_id)
 
-    # Get player status
-    player_status = await get_player(telegram_id)
-
-    if not player_status:
-        await query.edit_message_text(
-            _("Error retrieving your status. Please try again later.", language)
-        )
+    if not await _require_registration_callback(update, language):
         return
 
-    # Get controlled districts
-    controlled_districts = player_status.get("controlled_districts", [])
+    try:
+        # Get player status
+        player_status = await get_player(telegram_id)
 
-    if not controlled_districts:
+        if not player_status:
+            await query.edit_message_text(
+                _("Error retrieving your status. Please try again later.", language)
+            )
+            return
+
+        # Get controlled districts
+        controlled_districts = player_status.get("controlled_districts", [])
+
+        if not controlled_districts:
+            await query.edit_message_text(
+                _("You don't control any districts yet.\n\nDistricts are considered controlled when you have 60 or more control points.",
+                  language),
+                reply_markup=get_back_keyboard(language)
+            )
+            return
+
+        # Format controlled districts message
+        districts_text = _("*Your Controlled Districts*\n\n", language)
+
+        for district in controlled_districts:
+            name = district.get("district_name", "Unknown")
+            control_points = district.get("control_points", 0)
+            influence = district.get("resource_influence", 0)
+            money = district.get("resource_money", 0)
+            information = district.get("resource_information", 0)
+            force = district.get("resource_force", 0)
+
+            control_level = "🔴 " if control_points >= 80 else "🟠 "
+
+            districts_text += f"{control_level}*{name}*: {control_points} CP\n"
+            districts_text += _("Resources per cycle: ", language)
+
+            resources = []
+            if influence > 0:
+                resources.append(f"{influence} {_('Influence', language)}")
+            if money > 0:
+                resources.append(f"{money} {_('Money', language)}")
+            if information > 0:
+                resources.append(f"{information} {_('Information', language)}")
+            if force > 0:
+                resources.append(f"{force} {_('Force', language)}")
+
+            districts_text += ", ".join(resources)
+            districts_text += "\n\n"
+
         await query.edit_message_text(
-            _("You don't control any districts yet.\n\nDistricts are considered controlled when you have 60 or more control points.",
-              language),
+            districts_text,
+            parse_mode="Markdown",
             reply_markup=get_back_keyboard(language)
         )
-        return
-
-    # Format controlled districts message
-    districts_text = _("*Your Controlled Districts*\n\n", language)
-
-    for district in controlled_districts:
-        name = district.get("district_name", "Unknown")
-        control_points = district.get("control_points", 0)
-        influence = district.get("resource_influence", 0)
-        money = district.get("resource_money", 0)
-        information = district.get("resource_information", 0)
-        force = district.get("resource_force", 0)
-
-        control_level = "🔴 " if control_points >= 80 else "🟠 "
-
-        districts_text += f"{control_level}*{name}*: {control_points} CP\n"
-        districts_text += _("Resources per cycle: ", language)
-
-        resources = []
-        if influence > 0:
-            resources.append(f"{influence} {_('Influence', language)}")
-        if money > 0:
-            resources.append(f"{money} {_('Money', language)}")
-        if information > 0:
-            resources.append(f"{information} {_('Information', language)}")
-        if force > 0:
-            resources.append(f"{force} {_('Force', language)}")
-
-        districts_text += ", ".join(resources)
-        districts_text += "\n\n"
-
-    await query.edit_message_text(
-        districts_text,
-        parse_mode="Markdown",
-        reply_markup=get_back_keyboard(language)
-    )
+    except Exception as e:
+        await _handle_db_error_callback(update, language, e, "controlled_districts_callback")
 
 
 async def politician_action_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -493,93 +554,100 @@ async def politician_action_handler(update: Update, context: ContextTypes.DEFAUL
     telegram_id = str(update.effective_user.id)
     language = await get_user_language(telegram_id)
 
-    # Extract action details
-    action_data = query.data.split(":", 2)
-    if len(action_data) < 3:
-        await query.edit_message_text(
-            _("Invalid action format. Please try again.", language)
-        )
+    if not await _require_registration_callback(update, language):
         return
 
-    action_type = action_data[1]
-    politician_name = action_data[2]
-
-    # Initialize user context for action
-    if telegram_id not in user_context:
-        user_context[telegram_id] = {}
-
-    # Get politician info to verify
-    politician_data = await get_politician_status(telegram_id, politician_name, language)
-
-    if not politician_data:
-        await query.edit_message_text(
-            _("Politician not found. Please try again.", language)
-        )
-        return
-
-    # Map button action type to actual action type
-    action_map = {
-        "influence": "politician_influence",
-        "attack": "politician_reputation_attack",
-        "displace": "politician_displacement",
-        "request": "politician_request_resources"
-    }
-
-    actual_action_type = action_map.get(action_type)
-
-    if not actual_action_type:
-        await query.edit_message_text(
-            _("Invalid action type. Please try again.", language)
-        )
-        return
-
-    # Store action info in user context
-    user_context[telegram_id]["action_type"] = actual_action_type
-    user_context[telegram_id]["is_quick_action"] = False
-    user_context[telegram_id]["target_politician_name"] = politician_name
-
-    # For request resources, handle differently
-    if actual_action_type == "politician_request_resources":
-        # This is a special case that doesn't use the normal action flow
-        try:
-            result = await submit_action(
-                telegram_id=telegram_id,
-                action_type=actual_action_type,
-                is_quick_action=False,
-                target_politician_name=politician_name,
-                resource_type="influence",  # Default resource type
-                resource_amount=1,  # Default resource amount
-                language=language
-            )
-
-            if result and result.get("success"):
-                # Success message
-                await query.edit_message_text(
-                    _("Resource request submitted to {politician_name}. You will receive resources soon if they approve your request.",
-                      language).format(
-                        politician_name=politician_name
-                    )
-                )
-            else:
-                await query.edit_message_text(
-                    _("Failed to submit resource request. Please try again.", language)
-                )
-        except Exception as e:
-            logger.error(f"Error requesting resources: {str(e)}")
+    try:
+        # Extract action details
+        action_data = query.data.split(":", 2)
+        if len(action_data) < 3:
             await query.edit_message_text(
-                _("An error occurred: {error}", language).format(error=str(e))
+                _("Invalid action format. Please try again.", language)
             )
-        return
+            return
 
-    # For other actions, proceed with normal action flow
-    # Ask for resource type
-    await query.edit_message_text(
-        _("What resource would you like to use for this action?", language),
-        reply_markup=get_resource_type_keyboard(language)
-    )
+        action_type = action_data[1]
+        politician_name = action_data[2]
 
-    # This will continue the action flow in states.py from ACTION_SELECT_RESOURCE state
-    return ACTION_SELECT_RESOURCE
+        # Initialize user context for action
+        if telegram_id not in user_context:
+            user_context[telegram_id] = {}
+
+        # Get politician info to verify
+        politician_data = await get_politician_status(telegram_id, politician_name, language)
+
+        if not politician_data:
+            await query.edit_message_text(
+                _("Politician not found. Please try again.", language)
+            )
+            return
+
+        # Map button action type to actual action type
+        action_map = {
+            "influence": "politician_influence",
+            "attack": "politician_reputation_attack",
+            "displace": "politician_displacement",
+            "request": "politician_request_resources"
+        }
+
+        actual_action_type = action_map.get(action_type)
+
+        if not actual_action_type:
+            await query.edit_message_text(
+                _("Invalid action type. Please try again.", language)
+            )
+            return
+
+        # Store action info in user context
+        user_data = get_user_context(telegram_id)
+        user_data["action_type"] = actual_action_type
+        user_data["is_quick_action"] = False
+        user_data["target_politician_name"] = politician_name
+
+        # For request resources, handle differently
+        if actual_action_type == "politician_request_resources":
+            # This is a special case that doesn't use the normal action flow
+            try:
+                result = await submit_action(
+                    telegram_id=telegram_id,
+                    action_type=actual_action_type,
+                    is_quick_action=False,
+                    target_politician_name=politician_name,
+                    resource_type="influence",  # Default resource type
+                    resource_amount=1,  # Default resource amount
+                    language=language
+                )
+
+                if result and result.get("success"):
+                    # Success message
+                    await query.edit_message_text(
+                        _("Resource request submitted to {politician_name}. You will receive resources soon if they approve your request.",
+                          language).format(
+                            politician_name=politician_name
+                        )
+                    )
+                else:
+                    await query.edit_message_text(
+                        _("Failed to submit resource request. Please try again.", language)
+                    )
+            except Exception as e:
+                logger.error(f"Error requesting resources: {str(e)}")
+                await query.edit_message_text(
+                    _("An error occurred: {error}", language).format(error=str(e))
+                )
+            return
+
+        # For other actions, proceed with normal action flow
+        # Ask for resource type
+        await query.edit_message_text(
+            _("What resource would you like to use for this action?", language),
+            reply_markup=get_resource_type_keyboard(language)
+        )
+
+        # This will continue the action flow in states.py from ACTION_SELECT_RESOURCE state
+        return ACTION_SELECT_RESOURCE
+    except Exception as e:
+        await _handle_db_error_callback(update, language, e, "politician_action_handler")
 
 
 async def exchange_resources_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -592,7 +660,6 @@ async def exchange_resources_callback(update: Update, context: ContextTypes.DEFA
     return await resource_conversion_start(update, context)
 
 
-# Define the join_collective_action_callback function
 async def join_collective_action_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle joining collective actions from a button click."""
     query = update.callback_query
@@ -601,30 +668,38 @@ async def join_collective_action_callback(update: Update, context: ContextTypes.
     telegram_id = str(update.effective_user.id)
     language = await get_user_language(telegram_id)
 
-    # Extract action ID
-    action_data = query.data.split(":", 1)
-    if len(action_data) < 2:
-        await query.edit_message_text(
-            _("Invalid action format. Please try again.", language)
-        )
+    if not await _require_registration_callback(update, language):
         return ConversationHandler.END
 
-    action_id = action_data[1]
+    try:
+        # Extract action ID
+        action_data = query.data.split(":", 1)
+        if len(action_data) < 2:
+            await query.edit_message_text(
+                _("Invalid action format. Please try again.", language)
+            )
+            return ConversationHandler.END
 
-    # Initialize user context for joining action
-    user_data = get_user_context(telegram_id)
-    user_data["join_action_id"] = action_id
+        action_id = action_data[1]
 
-    # Prompt for resource selection
-    await query.edit_message_text(
-        _("You are joining collective action {action_id}.\n\nWhat resource would you like to contribute?",
-          language).format(
-            action_id=action_id
-        ),
-        reply_markup=get_resource_type_keyboard(language)
-    )
+        # Initialize user context for joining action
+        user_data = get_user_context(telegram_id)
+        user_data["join_action_id"] = action_id
 
-    return JOIN_ACTION_RESOURCE
+        # Prompt for resource selection
+        await query.edit_message_text(
+            _("You are joining collective action {action_id}.\n\nWhat resource would you like to contribute?",
+              language).format(
+                action_id=action_id
+            ),
+            reply_markup=get_resource_type_keyboard(language)
+        )
+
+        return JOIN_ACTION_RESOURCE
+    except Exception as e:
+        await _handle_db_error_callback(update, language, e, "join_collective_action_callback")
+        return ConversationHandler.END
+
 
 async def check_income_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle income check callback."""
@@ -634,41 +709,54 @@ async def check_income_callback(update: Update, context: ContextTypes.DEFAULT_TY
     if update.callback_query:
         query = update.callback_query
         await query.answer()
+
+        telegram_id = str(update.effective_user.id)
+        language = await get_user_language(telegram_id)
+
+        if not await _require_registration_callback(update, language):
+            return
     else:
         message = update.message
+        telegram_id = str(update.effective_user.id)
+        language = await get_user_language(telegram_id)
 
-    telegram_id = str(update.effective_user.id)
-    language = await get_user_language(telegram_id)
+    try:
+        # Get income data
+        income_data = await check_income(telegram_id, language)
 
-    # Get income data
-    income_data = await check_income(telegram_id, language)
+        if not income_data:
+            error_text = _("Error retrieving income information. Please try again later.", language)
+            if query:
+                await query.edit_message_text(error_text)
+            else:
+                await message.reply_text(error_text)
+            return
 
-    if not income_data:
-        error_text = _("Error retrieving income information. Please try again later.", language)
+        # Format income info
+        income_text = await format_income_info(income_data, language)
+
+        # Create back button keyboard
+        keyboard = get_back_keyboard(language)
+
         if query:
-            await query.edit_message_text(error_text)
+            await query.edit_message_text(
+                income_text,
+                parse_mode="Markdown",
+                reply_markup=keyboard
+            )
         else:
-            await message.reply_text(error_text)
-        return
-
-    # Format income info
-    income_text = await format_income_info(income_data, language)
-
-    # Create back button keyboard
-    keyboard = get_back_keyboard(language)
-
-    if query:
-        await query.edit_message_text(
-            income_text,
-            parse_mode="Markdown",
-            reply_markup=keyboard
-        )
-    else:
-        await message.reply_text(
-            income_text,
-            parse_mode="Markdown",
-            reply_markup=keyboard
-        )
+            await message.reply_text(
+                income_text,
+                parse_mode="Markdown",
+                reply_markup=keyboard
+            )
+    except Exception as e:
+        if query:
+            await _handle_db_error_callback(update, language, e, "check_income_callback")
+        else:
+            await message.reply_text(
+                _("Error retrieving income information: {error}", language).format(error=str(e))
+            )
 
 
 async def help_section_callback(update: Update, context: ContextTypes.DEFAULT_TYPE, section: str) -> None:
@@ -677,126 +765,128 @@ async def help_section_callback(update: Update, context: ContextTypes.DEFAULT_TY
     telegram_id = str(update.effective_user.id)
     language = await get_user_language(telegram_id)
 
-    help_text = ""
+    try:
+        help_text = ""
 
-    if section == "actions":
-        help_text = _(
-            "*Actions Guide*\n\n"
-            "Each game cycle, you can submit:\n"
-            "• 1 Main Action (ОЗ)\n"
-            "• 2 Quick Actions (БЗ)\n\n"
+        if section == "actions":
+            help_text = _(
+                "*Actions Guide*\n\n"
+                "Each game cycle, you can submit:\n"
+                "• 1 Main Action (ОЗ)\n"
+                "• 2 Quick Actions (БЗ)\n\n"
 
-            "*Main Actions*\n"
-            "• *Influence* - Increase your control in a district (+10 CP)\n"
-            "• *Attack* - Reduce enemy control and gain control points\n"
-            "• *Defense* - Defend against attacks\n"
-            "• *Politician Influence* - Improve relations with a politician\n"
-            "• *Politician Attack* - Damage a politician's reputation\n"
-            "• *Politician Displacement* - Reduce a politician's influence\n\n"
+                "*Main Actions*\n"
+                "• *Influence* - Increase your control in a district (+10 CP)\n"
+                "• *Attack* - Reduce enemy control and gain control points\n"
+                "• *Defense* - Defend against attacks\n"
+                "• *Politician Influence* - Improve relations with a politician\n"
+                "• *Politician Attack* - Damage a politician's reputation\n"
+                "• *Politician Displacement* - Reduce a politician's influence\n\n"
 
-            "*Quick Actions*\n"
-            "• *Reconnaissance* - Get information about a district\n"
-            "• *Information Spread* - Publish news or propaganda\n"
-            "• *Support* - Small control boost in a district (+5 CP)\n"
-            "• *Kompromat Search* - Find compromising information\n\n"
+                "*Quick Actions*\n"
+                "• *Reconnaissance* - Get information about a district\n"
+                "• *Information Spread* - Publish news or propaganda\n"
+                "• *Support* - Small control boost in a district (+5 CP)\n"
+                "• *Kompromat Search* - Find compromising information\n\n"
 
-            "*Physical Presence*\n"
-            "Being physically present during an action gives +20 control points.",
-            language
+                "*Physical Presence*\n"
+                "Being physically present during an action gives +20 control points.",
+                language
+            )
+        elif section == "resources":
+            help_text = _(
+                "*Resources Guide*\n\n"
+                "There are 4 types of resources:\n\n"
+
+                "• *Influence* - Political capital and soft power\n"
+                "  - Used for political actions and diplomacy\n"
+                "  - Can be converted to additional actions\n\n"
+
+                "• *Money* - Financial resources\n"
+                "  - Used for economic actions and bribes\n"
+                "  - Can be converted to other resources (2:1 ratio)\n\n"
+
+                "• *Information* - Intelligence and secrets\n"
+                "  - Used for reconnaissance and propaganda\n"
+                "  - Provides insights into districts and opponents\n\n"
+
+                "• *Force* - Military and security capabilities\n"
+                "  - Used for attacks and defense\n"
+                "  - Provides protection and offensive capabilities\n\n"
+
+                "*Resource Exchange*\n"
+                "You can convert resources at a 2:1 ratio. Example:\n"
+                "2 Money → 1 Influence",
+                language
+            )
+        elif section == "districts":
+            help_text = _(
+                "*Districts Guide*\n\n"
+                "Control Points (CP) determine district control:\n"
+                "• 0-59 CP - No control\n"
+                "• 60+ CP - District controlled\n"
+                "• 80+ CP - Strong control (bonus resources)\n\n"
+
+                "*Resource Income Breakdown*\n"
+                "• 75-100 CP = 120% resources\n"
+                "• 50-74 CP = 100% resources\n"
+                "• 35-49 CP = 80% resources\n"
+                "• 20-34 CP = 60% resources\n"
+                "• <20 CP = 40% resources\n\n"
+
+                "*District Decay*\n"
+                "If you don't perform actions in a district, your control will decay by 5 CP per cycle.",
+                language
+            )
+        elif section == "politicians":
+            help_text = _(
+                "*Politicians Guide*\n\n"
+                "Politicians have influence in specific districts and ideological leanings from -5 (reformist) to +5 (conservative).\n\n"
+
+                "*Politician Friendliness*\n"
+                "• 0-30: Hostile - May work against you\n"
+                "• 30-70: Neutral - Limited interaction\n"
+                "• 70-100: Friendly - Provides resources and support\n\n"
+
+                "*Ideological Compatibility*\n"
+                "When your ideology aligns with a politician:\n"
+                "• Small difference (0-2): +2 CP per cycle\n"
+                "• Large alignment (3+ difference): -5 CP per cycle\n\n"
+
+                "*International Politicians*\n"
+                "International figures can impose sanctions, provide support, or influence the game in various ways.",
+                language
+            )
+        elif section == "rules":
+            help_text = _(
+                "*Game Rules*\n\n"
+                "The game takes place in Novi-Sad, Yugoslavia, in September 1999.\n\n"
+
+                "*Game Cycles*\n"
+                "• Each day has two cycles: Morning and Evening\n"
+                "• Morning deadlines: 12:00, results at 13:00\n"
+                "• Evening deadlines: 18:00, results at 19:00\n\n"
+
+                "*Ideology*\n"
+                "Your ideology ranges from -5 (reformist) to +5 (conservative) and affects your interactions with politicians and districts.\n\n"
+
+                "*Winning Strategy*\n"
+                "Control districts to gain resources, build alliances with politicians, and expand your influence across the city.\n\n"
+
+                "*Cooperative Actions*\n"
+                "Players can join forces for collective attacks or defense using the command /collective.",
+                language
+            )
+        else:
+            help_text = _("Help section not found.", language)
+
+        await query.edit_message_text(
+            help_text,
+            parse_mode="Markdown",
+            reply_markup=get_back_keyboard(language, "help")
         )
-    elif section == "resources":
-        help_text = _(
-            "*Resources Guide*\n\n"
-            "There are 4 types of resources:\n\n"
-
-            "• *Influence* - Political capital and soft power\n"
-            "  - Used for political actions and diplomacy\n"
-            "  - Can be converted to additional actions\n\n"
-
-            "• *Money* - Financial resources\n"
-            "  - Used for economic actions and bribes\n"
-            "  - Can be converted to other resources (2:1 ratio)\n\n"
-
-            "• *Information* - Intelligence and secrets\n"
-            "  - Used for reconnaissance and propaganda\n"
-            "  - Provides insights into districts and opponents\n\n"
-
-            "• *Force* - Military and security capabilities\n"
-            "  - Used for attacks and defense\n"
-            "  - Provides protection and offensive capabilities\n\n"
-
-            "*Resource Exchange*\n"
-            "You can convert resources at a 2:1 ratio. Example:\n"
-            "2 Money → 1 Influence",
-            language
-        )
-    elif section == "districts":
-        help_text = _(
-            "*Districts Guide*\n\n"
-            "Control Points (CP) determine district control:\n"
-            "• 0-59 CP - No control\n"
-            "• 60+ CP - District controlled\n"
-            "• 80+ CP - Strong control (bonus resources)\n\n"
-
-            "*Resource Income Breakdown*\n"
-            "• 75-100 CP = 120% resources\n"
-            "• 50-74 CP = 100% resources\n"
-            "• 35-49 CP = 80% resources\n"
-            "• 20-34 CP = 60% resources\n"
-            "• <20 CP = 40% resources\n\n"
-
-            "*District Decay*\n"
-            "If you don't perform actions in a district, your control will decay by 5 CP per cycle.",
-            language
-        )
-    elif section == "politicians":
-        help_text = _(
-            "*Politicians Guide*\n\n"
-            "Politicians have influence in specific districts and ideological leanings from -5 (reformist) to +5 (conservative).\n\n"
-
-            "*Politician Friendliness*\n"
-            "• 0-30: Hostile - May work against you\n"
-            "• 30-70: Neutral - Limited interaction\n"
-            "• 70-100: Friendly - Provides resources and support\n\n"
-
-            "*Ideological Compatibility*\n"
-            "When your ideology aligns with a politician:\n"
-            "• Small difference (0-2): +2 CP per cycle\n"
-            "• Large alignment (3+): +5 CP per cycle\n"
-            "• Opposition (3+ difference): -5 CP per cycle\n\n"
-
-            "*International Politicians*\n"
-            "International figures can impose sanctions, provide support, or influence the game in various ways.",
-            language
-        )
-    elif section == "rules":
-        help_text = _(
-            "*Game Rules*\n\n"
-            "The game takes place in Novi-Sad, Yugoslavia, in September 1999.\n\n"
-
-            "*Game Cycles*\n"
-            "• Each day has two cycles: Morning and Evening\n"
-            "• Morning deadlines: 12:00, results at 13:00\n"
-            "• Evening deadlines: 18:00, results at 19:00\n\n"
-
-            "*Ideology*\n"
-            "Your ideology ranges from -5 (reformist) to +5 (conservative) and affects your interactions with politicians and districts.\n\n"
-
-            "*Winning Strategy*\n"
-            "Control districts to gain resources, build alliances with politicians, and expand your influence across the city.\n\n"
-
-            "*Cooperative Actions*\n"
-            "Players can join forces for collective attacks or defense using the command /action Join.",
-            language
-        )
-    else:
-        help_text = _("Help section not found.", language)
-
-    await query.edit_message_text(
-        help_text,
-        parse_mode="Markdown",
-        reply_markup=get_back_keyboard(language, "help")
-    )
+    except Exception as e:
+        await _handle_db_error_callback(update, language, e, "help_section_callback")
 
 
 async def news_page_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -807,23 +897,29 @@ async def news_page_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
     telegram_id = str(update.effective_user.id)
     language = await get_user_language(telegram_id)
 
-    # Extract page action (next/prev)
-    action = query.data.split(":", 1)[1]
+    if not await _require_registration_callback(update, language):
+        return
 
-    # Get current page or initialize
-    page = context.user_data.get("news_page", 0)
+    try:
+        # Extract page action (next/prev)
+        action = query.data.split(":", 1)[1]
 
-    # Update page based on action
-    if action == "next":
-        page += 1
-    elif action == "prev" and page > 0:
-        page -= 1
+        # Get current page or initialize
+        page = context.user_data.get("news_page", 0)
 
-    # Store updated page
-    context.user_data["news_page"] = page
+        # Update page based on action
+        if action == "next":
+            page += 1
+        elif action == "prev" and page > 0:
+            page -= 1
 
-    # Forward to main news handler with updated page
-    await news_callback(update, context)
+        # Store updated page
+        context.user_data["news_page"] = page
+
+        # Forward to main news handler with updated page
+        await news_callback(update, context)
+    except Exception as e:
+        await _handle_db_error_callback(update, language, e, "news_page_callback")
 
 
 async def language_setting_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -833,24 +929,32 @@ async def language_setting_callback(update: Update, context: ContextTypes.DEFAUL
 
     telegram_id = str(update.effective_user.id)
 
-    # Extract selected language
-    selected_language = query.data.split(":", 1)[1]
+    try:
+        # Extract selected language
+        selected_language = query.data.split(":", 1)[1]
 
-    # Update user's language preference
-    success = await set_user_language(telegram_id, selected_language)
-    language = await get_user_language(telegram_id)
+        # Update user's language preference
+        success = await set_user_language(telegram_id, selected_language)
+        language = await get_user_language(telegram_id)
 
-    if success:
+        if success:
+            await query.edit_message_text(
+                _("Language set to {language}. You can change it at any time from the settings menu.", language).format(
+                    language=_("English", language) if selected_language == "en_US" else _("Russian", language)
+                ),
+                reply_markup=get_back_keyboard(language)
+            )
+        else:
+            await query.edit_message_text(
+                _("Failed to set language. Please try again later.", language),
+                reply_markup=get_back_keyboard(language)
+            )
+    except Exception as e:
+        # Handle error with default language English since we don't know user's language
+        logger.error(f"Error setting language: {str(e)}")
         await query.edit_message_text(
-            _("Language set to {language}. You can change it at any time from the settings menu.", language).format(
-                language=_("English", language) if selected_language == "en_US" else _("Russian", language)
-            ),
-            reply_markup=get_back_keyboard(language)
-        )
-    else:
-        await query.edit_message_text(
-            _("Failed to set language. Please try again later.", language),
-            reply_markup=get_back_keyboard(language)
+            "Failed to set language. Please try again later.",
+            reply_markup=get_back_keyboard("en_US")
         )
 
 
@@ -862,26 +966,29 @@ async def settings_menu_callback(update: Update, context: ContextTypes.DEFAULT_T
     telegram_id = str(update.effective_user.id)
     language = await get_user_language(telegram_id)
 
-    # Create settings menu
-    settings_text = _("*Settings*\n\nHere you can change your preferences.", language)
+    try:
+        # Create settings menu
+        settings_text = _("*Settings*\n\nHere you can change your preferences.", language)
 
-    # Create settings keyboard
-    keyboard = [
-        [
-            InlineKeyboardButton(_("Language", language), callback_data="settings:language")
-        ],
-        [
-            InlineKeyboardButton(_("Back to Menu", language), callback_data="back_to_menu")
+        # Create settings keyboard
+        keyboard = [
+            [
+                InlineKeyboardButton(_("Language", language), callback_data="settings:language")
+            ],
+            [
+                InlineKeyboardButton(_("Back to Menu", language), callback_data="back_to_menu")
+            ]
         ]
-    ]
 
-    reply_markup = InlineKeyboardMarkup(keyboard)
+        reply_markup = InlineKeyboardMarkup(keyboard)
 
-    await query.edit_message_text(
-        settings_text,
-        parse_mode="Markdown",
-        reply_markup=reply_markup
-    )
+        await query.edit_message_text(
+            settings_text,
+            parse_mode="Markdown",
+            reply_markup=reply_markup
+        )
+    except Exception as e:
+        await _handle_db_error_callback(update, language, e, "settings_menu_callback")
 
 
 async def language_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -892,23 +999,13 @@ async def language_menu_callback(update: Update, context: ContextTypes.DEFAULT_T
     telegram_id = str(update.effective_user.id)
     language = await get_user_language(telegram_id)
 
-    await query.edit_message_text(
-        _("Select your preferred language:", language),
-        reply_markup=get_language_keyboard()
-    )
-
-
-# Register these additional callbacks in register_callbacks function:
-def register_additional_callbacks(application) -> None:
-    """Register additional callback handlers."""
-    # News pagination
-    application.add_handler(CallbackQueryHandler(news_page_callback, pattern=r"^news_page:"))
-
-    # Settings and language
-    application.add_handler(CallbackQueryHandler(settings_menu_callback, pattern=r"^settings$"))
-    application.add_handler(CallbackQueryHandler(language_menu_callback, pattern=r"^settings:language$"))
-    application.add_handler(CallbackQueryHandler(language_setting_callback, pattern=r"^language:"))
-
+    try:
+        await query.edit_message_text(
+            _("Select your preferred language:", language),
+            reply_markup=get_language_keyboard()
+        )
+    except Exception as e:
+        await _handle_db_error_callback(update, language, e, "language_menu_callback")
 
 
 async def politicians_type_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -919,36 +1016,42 @@ async def politicians_type_callback(update: Update, context: ContextTypes.DEFAUL
     telegram_id = str(update.effective_user.id)
     language = await get_user_language(telegram_id)
 
-    # Extract politician type
-    data_parts = query.data.split(":", 1)
-    if len(data_parts) < 2:
-        await query.edit_message_text(
-            _("Invalid selection. Please try again.", language)
-        )
+    if not await _require_registration_callback(update, language):
         return
 
-    politician_type = data_parts[1]  # "local", "international", or "all"
+    try:
+        # Extract politician type
+        data_parts = query.data.split(":", 1)
+        if len(data_parts) < 2:
+            await query.edit_message_text(
+                _("Invalid selection. Please try again.", language)
+            )
+            return
 
-    # Get politicians data
-    politicians_data = await get_politicians(telegram_id, politician_type, language)
+        politician_type = data_parts[1]  # "local", "international", or "all"
 
-    if not politicians_data:
+        # Get politicians data
+        politicians_data = await get_politicians(telegram_id, politician_type, language)
+
+        if not politicians_data:
+            await query.edit_message_text(
+                _("Error retrieving politicians data. Please try again later.", language)
+            )
+            return
+
+        # Format politicians list
+        politicians_text = await format_politicians_list(politicians_data, language)
+
+        # Create back button keyboard
+        keyboard = get_back_keyboard(language, "back_to_politicians")
+
         await query.edit_message_text(
-            _("Error retrieving politicians data. Please try again later.", language)
+            politicians_text,
+            parse_mode="Markdown",
+            reply_markup=keyboard
         )
-        return
-
-    # Format politicians list
-    politicians_text = await format_politicians_list(politicians_data, language)
-
-    # Create back button keyboard
-    keyboard = get_back_keyboard(language, "back_to_politicians")
-
-    await query.edit_message_text(
-        politicians_text,
-        parse_mode="Markdown",
-        reply_markup=keyboard
-    )
+    except Exception as e:
+        await _handle_db_error_callback(update, language, e, "politicians_type_callback")
 
 
 async def politician_info_callback(update: Update, context: ContextTypes.DEFAULT_TYPE,
@@ -966,37 +1069,48 @@ async def politician_info_callback(update: Update, context: ContextTypes.DEFAULT
     telegram_id = str(update.effective_user.id)
     language = await get_user_language(telegram_id)
 
-    # Get politician info
-    politician_data = await get_politician_status(telegram_id, politician_name, language)
-
-    if not politician_data:
-        message = _("Error retrieving information for {politician}. Please try again later.", language).format(
-            politician=politician_name
-        )
-        if query:
-            await query.edit_message_text(message)
-        else:
-            await update.message.reply_text(message)
+    if query and not await _require_registration_callback(update, language):
         return
 
-    # Format politician info
-    politician_text = await format_politician_info(politician_data, language)
+    try:
+        # Get politician info
+        politician_data = await get_politician_status(telegram_id, politician_name, language)
 
-    # Create interaction keyboard
-    keyboard = get_politician_interaction_keyboard(language, politician_data)
+        if not politician_data:
+            message = _("Error retrieving information for {politician}. Please try again later.", language).format(
+                politician=politician_name
+            )
+            if query:
+                await query.edit_message_text(message)
+            else:
+                await update.message.reply_text(message)
+            return
 
-    if query:
-        await query.edit_message_text(
-            politician_text,
-            parse_mode="Markdown",
-            reply_markup=keyboard
-        )
-    else:
-        await update.message.reply_text(
-            politician_text,
-            parse_mode="Markdown",
-            reply_markup=keyboard
-        )
+        # Format politician info
+        politician_text = await format_politician_info(politician_data, language)
+
+        # Create interaction keyboard
+        keyboard = get_politician_interaction_keyboard(language, politician_data)
+
+        if query:
+            await query.edit_message_text(
+                politician_text,
+                parse_mode="Markdown",
+                reply_markup=keyboard
+            )
+        else:
+            await update.message.reply_text(
+                politician_text,
+                parse_mode="Markdown",
+                reply_markup=keyboard
+            )
+    except Exception as e:
+        if query:
+            await _handle_db_error_callback(update, language, e, "politician_info_callback")
+        else:
+            await update.message.reply_text(
+                _("Error retrieving politician information: {error}", language).format(error=str(e))
+            )
 
 
 async def action_button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1007,11 +1121,39 @@ async def action_button_callback(update: Update, context: ContextTypes.DEFAULT_T
     telegram_id = str(update.effective_user.id)
     language = await get_user_language(telegram_id)
 
-    # Show action options
-    await query.edit_message_text(
-        _("What type of main action would you like to take?", language),
-        reply_markup=get_action_keyboard(language)
-    )
+    if not await _require_registration_callback(update, language):
+        return
+
+    try:
+        # Get player information
+        player_data = await get_player(telegram_id)
+
+        # Check if submissions are open
+        cycle_info = await get_cycle_info(language)
+        if not cycle_info.get("is_accepting_submissions", False):
+            await query.edit_message_text(
+                _("The submission deadline for this cycle has passed. "
+                  "Wait until the next cycle to submit actions.", language)
+            )
+            return
+
+        # Check if player has actions left
+        actions_remaining = player_data.get("actions_remaining", 0)
+
+        if actions_remaining <= 0:
+            await query.edit_message_text(
+                _("You have no main actions remaining for this cycle.", language),
+                reply_markup=get_back_keyboard(language)
+            )
+            return
+
+        # Show action options
+        await query.edit_message_text(
+            _("What type of main action would you like to take?", language),
+            reply_markup=get_action_keyboard(language)
+        )
+    except Exception as e:
+        await _handle_db_error_callback(update, language, e, "action_button_callback")
 
 
 async def quick_action_button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1022,11 +1164,39 @@ async def quick_action_button_callback(update: Update, context: ContextTypes.DEF
     telegram_id = str(update.effective_user.id)
     language = await get_user_language(telegram_id)
 
-    # Show quick action options
-    await query.edit_message_text(
-        _("What type of quick action would you like to take?", language),
-        reply_markup=get_quick_action_keyboard(language)
-    )
+    if not await _require_registration_callback(update, language):
+        return
+
+    try:
+        # Get player information
+        player_data = await get_player(telegram_id)
+
+        # Check if submissions are open
+        cycle_info = await get_cycle_info(language)
+        if not cycle_info.get("is_accepting_submissions", False):
+            await query.edit_message_text(
+                _("The submission deadline for this cycle has passed. "
+                  "Wait until the next cycle to submit actions.", language)
+            )
+            return
+
+        # Check if player has quick actions left
+        quick_actions_remaining = player_data.get("quick_actions_remaining", 0)
+
+        if quick_actions_remaining <= 0:
+            await query.edit_message_text(
+                _("You have no quick actions remaining for this cycle.", language),
+                reply_markup=get_back_keyboard(language)
+            )
+            return
+
+        # Show quick action options
+        await query.edit_message_text(
+            _("What type of quick action would you like to take?", language),
+            reply_markup=get_quick_action_keyboard(language)
+        )
+    except Exception as e:
+        await _handle_db_error_callback(update, language, e, "quick_action_button_callback")
 
 
 async def politicians_button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1037,11 +1207,17 @@ async def politicians_button_callback(update: Update, context: ContextTypes.DEFA
     telegram_id = str(update.effective_user.id)
     language = await get_user_language(telegram_id)
 
-    # Show politician options
-    await query.edit_message_text(
-        _("Which politicians would you like to see?", language),
-        reply_markup=get_politicians_keyboard(language)
-    )
+    if not await _require_registration_callback(update, language):
+        return
+
+    try:
+        # Show politician options
+        await query.edit_message_text(
+            _("Which politicians would you like to see?", language),
+            reply_markup=get_politicians_keyboard(language)
+        )
+    except Exception as e:
+        await _handle_db_error_callback(update, language, e, "politicians_button_callback")
 
 
 async def view_collective_actions_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1052,60 +1228,67 @@ async def view_collective_actions_callback(update: Update, context: ContextTypes
     telegram_id = str(update.effective_user.id)
     language = await get_user_language(telegram_id)
 
-    # Get active collective actions
-    active_actions = await get_active_collective_actions()
-
-    if not active_actions:
-        await query.edit_message_text(
-            _("There are no active collective actions at the moment.", language),
-            reply_markup=get_back_keyboard(language)
-        )
+    if not await _require_registration_callback(update, language):
         return
 
-    # Format and display active actions
-    actions_text = _("*Active Collective Actions*\n\n", language)
+    try:
+        # Get active collective actions
+        active_actions = await get_active_collective_actions()
 
-    for action in active_actions:
-        action_id = action.get("collective_action_id", "unknown")
-        action_type = action.get("action_type", "unknown")
-        district = action.get("district_id", {}).get("name", "unknown")
-        initiator = action.get("initiator_player_id", {}).get("name", "unknown")
+        if not active_actions:
+            await query.edit_message_text(
+                _("There are no active collective actions at the moment.", language),
+                reply_markup=get_back_keyboard(language)
+            )
+            return
 
-        actions_text += _(
-            "*Action ID:* {id}\n"
-            "*Type:* {type}\n"
-            "*District:* {district}\n"
-            "*Initiated by:* {initiator}\n\n",
-            language
-        ).format(
-            id=action_id,
-            type=_(action_type, language),
-            district=district,
-            initiator=initiator
+        # Format and display active actions
+        actions_text = _("*Active Collective Actions*\n\n", language)
+
+        for action in active_actions:
+            action_id = action.get("collective_action_id", "unknown")
+            action_type = action.get("action_type", "unknown")
+            district = action.get("district_id", {}).get("name", "unknown")
+            initiator = action.get("initiator_player_id", {}).get("name", "unknown")
+
+            actions_text += _(
+                "*Action ID:* {id}\n"
+                "*Type:* {type}\n"
+                "*District:* {district}\n"
+                "*Initiated by:* {initiator}\n"
+                "*Join Command:* `/join {id}`\n\n",
+                language
+            ).format(
+                id=action_id,
+                type=_(action_type, language),
+                district=district,
+                initiator=initiator
+            )
+
+        # Add button to join a collective action
+        buttons = []
+        for action in active_actions[:3]:  # Limit to first 3 for cleaner UI
+            action_id = action.get("collective_action_id", "unknown")
+            action_type = action.get("action_type", "unknown")
+            district = action.get("district_id", {}).get("name", "unknown")
+
+            button_text = f"{_(action_type, language)} in {district}"
+            buttons.append([InlineKeyboardButton(button_text, callback_data=f"join_collective_action:{action_id}")])
+
+        # Add back button
+        buttons.append([InlineKeyboardButton(_("Back", language), callback_data="back_to_menu")])
+
+        # Create keyboard with join buttons
+        keyboard = InlineKeyboardMarkup(buttons)
+
+        # Send message with formatted text and join buttons
+        await query.edit_message_text(
+            actions_text,
+            parse_mode="Markdown",
+            reply_markup=keyboard
         )
-
-    # Add button to join a collective action
-    buttons = []
-    for action in active_actions[:3]:  # Limit to first 3 for cleaner UI
-        action_id = action.get("collective_action_id", "unknown")
-        action_type = action.get("action_type", "unknown")
-        district = action.get("district_id", {}).get("name", "unknown")
-
-        button_text = f"{_(action_type, language)} in {district}"
-        buttons.append([InlineKeyboardButton(button_text, callback_data=f"join_collective_action:{action_id}")])
-
-    # Add back button
-    buttons.append([InlineKeyboardButton(_("Back", language), callback_data="back_to_menu")])
-
-    # Create keyboard with join buttons
-    keyboard = InlineKeyboardMarkup(buttons)
-
-    # Send message with formatted text and join buttons
-    await query.edit_message_text(
-        actions_text,
-        parse_mode="Markdown",
-        reply_markup=keyboard
-    )
+    except Exception as e:
+        await _handle_db_error_callback(update, language, e, "view_collective_actions_callback")
 
 
 async def back_to_politicians_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1116,11 +1299,17 @@ async def back_to_politicians_callback(update: Update, context: ContextTypes.DEF
     telegram_id = str(update.effective_user.id)
     language = await get_user_language(telegram_id)
 
-    # Show politician options
-    await query.edit_message_text(
-        _("Which politicians would you like to see?", language),
-        reply_markup=get_politicians_keyboard(language)
-    )
+    if not await _require_registration_callback(update, language):
+        return
+
+    try:
+        # Show politician options
+        await query.edit_message_text(
+            _("Which politicians would you like to see?", language),
+            reply_markup=get_politicians_keyboard(language)
+        )
+    except Exception as e:
+        await _handle_db_error_callback(update, language, e, "back_to_politicians_callback")
 
 
 async def international_politicians_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1131,29 +1320,45 @@ async def international_politicians_callback(update: Update, context: ContextTyp
     if update.callback_query:
         query = update.callback_query
         await query.answer()
+
+        telegram_id = str(update.effective_user.id)
+        language = await get_user_language(telegram_id)
+
+        if not await _require_registration_callback(update, language):
+            return
     else:
         message = update.message
+        telegram_id = str(update.effective_user.id)
+        language = await get_user_language(telegram_id)
 
-    # Forward to politicians_type_callback with type "international"
-    if query:
-        # Modify query.data to simulate politicians:international
-        query.data = "politicians:international"
-        await politicians_type_callback(update, context)
-    else:
-        # Create a fake update with callback_query
-        from telegram import CallbackQuery
-        fake_query = CallbackQuery(
-            id="0",
-            from_user=update.effective_user,
-            chat_instance="0",
-            message=message,
-            data="politicians:international"
-        )
-        fake_update = Update(0)
-        fake_update._effective_user = update.effective_user
-        fake_update._callback_query = fake_query
+    try:
+        # Forward to politicians_type_callback with type "international"
+        if query:
+            # Modify query.data to simulate politicians:international
+            query.data = "politicians:international"
+            await politicians_type_callback(update, context)
+        else:
+            # Create a fake update with callback_query
+            from telegram import CallbackQuery
+            fake_query = CallbackQuery(
+                id="0",
+                from_user=update.effective_user,
+                chat_instance="0",
+                message=message,
+                data="politicians:international"
+            )
+            fake_update = Update(0)
+            fake_update._effective_user = update.effective_user
+            fake_update._callback_query = fake_query
 
-        await politicians_type_callback(fake_update, context)
+            await politicians_type_callback(fake_update, context)
+    except Exception as e:
+        if query:
+            await _handle_db_error_callback(update, language, e, "international_politicians_callback")
+        else:
+            await message.reply_text(
+                _("Error retrieving international politicians: {error}", language).format(error=str(e))
+            )
 
 
 async def cancel_selection_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1164,9 +1369,25 @@ async def cancel_selection_callback(update: Update, context: ContextTypes.DEFAUL
     telegram_id = str(update.effective_user.id)
     language = await get_user_language(telegram_id)
 
-    await query.edit_message_text(
-        _("Action canceled.", language)
-    )
+    try:
+        await query.edit_message_text(
+            _("Action canceled.", language),
+            reply_markup=get_back_keyboard(language)
+        )
+    except Exception as e:
+        await _handle_db_error_callback(update, language, e, "cancel_selection_callback")
+
+
+# Register these additional callbacks in register_callbacks function:
+def register_additional_callbacks(application) -> None:
+    """Register additional callback handlers."""
+    # News pagination
+    application.add_handler(CallbackQueryHandler(news_page_callback, pattern=r"^news_page:"))
+
+    # Settings and language
+    application.add_handler(CallbackQueryHandler(settings_menu_callback, pattern=r"^settings$"))
+    application.add_handler(CallbackQueryHandler(language_menu_callback, pattern=r"^settings:language$"))
+    application.add_handler(CallbackQueryHandler(language_setting_callback, pattern=r"^language:"))
 
 
 def register_callbacks(application) -> None:
@@ -1206,11 +1427,8 @@ def register_callbacks(application) -> None:
     # Navigation callbacks
     application.add_handler(CallbackQueryHandler(general_callback, pattern=r"^(back_to_menu|help)$"))
 
+    # Additional callbacks
+    register_additional_callbacks(application)
+
     # Register catch-all handler for any remaining patterns
     application.add_handler(CallbackQueryHandler(general_callback))
-    # News pagination
-    application.add_handler(CallbackQueryHandler(news_page_callback, pattern=r"^news_page:"))
-    # Settings and language
-    application.add_handler(CallbackQueryHandler(settings_menu_callback, pattern=r"^settings$"))
-    application.add_handler(CallbackQueryHandler(language_menu_callback, pattern=r"^settings:language$"))
-    application.add_handler(CallbackQueryHandler(language_setting_callback, pattern=r"^language:"))
