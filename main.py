@@ -9,6 +9,7 @@ A political strategy game set in Novi-Sad, Yugoslavia in 1999.
 import os
 import asyncio
 import traceback
+import time
 
 from dotenv import load_dotenv
 from telegram import Update
@@ -17,21 +18,24 @@ from telegram.ext import (
     ContextTypes,
 )
 
-from bot import get_back_keyboard
-from bot.callbacks import register_callbacks
 # Import bot components
 from bot.commands import register_commands
+from bot.callbacks import register_callbacks
 from bot.middleware import setup_middleware
 from bot.states import conversation_handlers
-# Import database client
-from db.supabase_client import init_supabase
+from bot.keyboards import get_back_keyboard
+# Import enhanced database client
+from db.supabase_client import init_supabase, check_schema_exists
+# Import utility functions
 from utils.config import load_config
 from utils.i18n import setup_i18n, _, get_user_language, load_translations_from_file, load_translations_from_db
-# Import utility functions
 from utils.logger import setup_logger, configure_telegram_logger, configure_supabase_logger
 
 # Load environment variables
 load_dotenv()
+
+# Create log directory if it doesn't exist
+os.makedirs("logs", exist_ok=True)
 
 # Setup logging
 logger = setup_logger(name="meta_game", level="INFO", log_file="logs/meta_game.log")
@@ -80,6 +84,8 @@ async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         user_message = _("The requested item was not found.", language)
     elif "deadline" in error_message.lower():
         user_message = _("The submission deadline for this cycle has passed.", language)
+    elif "database" in error_message.lower() or "connection" in error_message.lower():
+        user_message = _("Database connection error. Please try again later.", language)
 
     # Send the error message to the user
     try:
@@ -112,35 +118,44 @@ async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 async def init_translations():
     """Initialize translations asynchronously."""
     try:
-        # Load translations in the correct order
-        await load_translations_from_file()
-        await load_translations_from_db()
-        logger.info("Translations initialized successfully")
+        # Try up to 3 times with exponential backoff
+        max_attempts = 3
+        for attempt in range(1, max_attempts + 1):
+            try:
+                # Load translations in the correct order
+                await load_translations_from_file()
+                await load_translations_from_db()
+                logger.info("Translations initialized successfully")
+                return
+            except Exception as e:
+                if attempt < max_attempts:
+                    wait_time = 2 ** attempt  # Exponential backoff
+                    logger.warning(
+                        f"Attempt {attempt}/{max_attempts} to load translations failed: {e}. Retrying in {wait_time} seconds...")
+                    await asyncio.sleep(wait_time)
+                else:
+                    raise
     except Exception as e:
-        logger.error(f"Error initializing translations: {e}")
+        logger.error(f"All attempts to initialize translations failed: {e}")
+        logger.info("Continuing with default translations only")
 
 
 async def init_database():
     """Initialize the database if it hasn't been set up yet."""
     try:
-        from db.supabase_client import get_supabase
-        client = get_supabase()
+        # Initialize Supabase client
+        client = init_supabase()
 
         # Check if game schema exists
-        try:
-            response = client.rpc(
-                "exec_sql",
-                {"sql": "SELECT 1 FROM information_schema.schemata WHERE schema_name = 'game';"}
-            )
+        schema_exists = await check_schema_exists()
 
-            # If schema doesn't exist, run DB initialization
-            if not response.data or not response.data[0]:
-                logger.info("Database schema 'game' doesn't exist. Running initialization...")
+        if not schema_exists:
+            logger.info("Database schema 'game' doesn't exist. Running initialization...")
 
-                # Import the initialization function from db_init
-                import asyncio
+            # Run the database initialization script
+            try:
+                # Import and run db_init.py
                 import importlib.util
-                import os
                 import sys
 
                 # Get the path to db_init.py
@@ -151,19 +166,43 @@ async def init_database():
                     # Load the module
                     spec = importlib.util.spec_from_file_location("db_init", db_init_path)
                     db_init = importlib.util.module_from_spec(spec)
+                    sys.modules["db_init"] = db_init
                     spec.loader.exec_module(db_init)
 
                     # Run the initialization
                     await db_init.init_database()
                     logger.info("Database initialization completed")
                 else:
-                    logger.error(f"Database initialization script not found at {db_init_path}")
+                    # Manual initialization as fallback
+                    logger.warning(f"Database initialization script not found at {db_init_path}")
+                    logger.warning("Attempting manual schema creation...")
+
+                    # Execute basic SQL for schema creation
+                    from db.supabase_client import execute_sql
+
+                    # Create the game schema
+                    await execute_sql("CREATE SCHEMA IF NOT EXISTS game;")
+                    logger.info("Created basic game schema")
+            except Exception as init_error:
+                logger.error(f"Error during database initialization: {init_error}")
+                logger.error("The application may not function correctly without proper database setup")
+        else:
+            logger.info("Database schema 'game' already exists")
+
+        # Test basic database connectivity
+        try:
+            from db.supabase_client import get_districts
+            districts = await get_districts()
+            if districts:
+                logger.info(f"Database connection test successful - found {len(districts)} districts")
             else:
-                logger.info("Database schema 'game' already exists")
-        except Exception as e:
-            logger.error(f"Error checking database schema: {e}")
+                logger.warning("Database connection test successful but no districts found - data may be incomplete")
+        except Exception as test_error:
+            logger.error(f"Database connection test failed: {test_error}")
+
     except Exception as e:
         logger.error(f"Error initializing database: {e}")
+        logger.error("The application will continue but may encounter database errors")
 
 
 async def main():
@@ -181,36 +220,44 @@ async def main():
     # Load configuration
     config = load_config()
 
-    # Initialize Supabase client
-    init_supabase()
-
-    # Initialize database if needed
-    await init_database()
-
-    # Set up internationalization (init default translations)
+    # Initialize internationalization (set up default translations)
     setup_i18n()
-
-    # Asynchronously load translations
-    await init_translations()
 
     # Initialize the Application with better error handling
     application = Application.builder().token(token).build()
 
-    # Register command handlers first
+    # Register error handler first so it can catch initialization errors
+    application.add_error_handler(error_handler)
+
+    # Start initialization tasks
+    logger.info("Initializing Supabase client and database...")
+    try:
+        # Initialize Supabase client and database
+        await init_database()
+    except Exception as e:
+        logger.error(f"Database initialization failed: {e}")
+        logger.warning("Bot will continue but database functionality may be limited")
+
+    # Asynchronously load translations
+    logger.info("Loading translations...")
+    await init_translations()
+
+    # Register command handlers
+    logger.info("Registering command handlers...")
     register_commands(application)
 
     # Register callback query handlers
+    logger.info("Registering callback handlers...")
     register_callbacks(application)
 
     # Add conversation handlers
+    logger.info("Registering conversation handlers...")
     for handler in conversation_handlers:
         application.add_handler(handler)
 
     # Set up middleware (AFTER all other handlers)
+    logger.info("Setting up middleware...")
     setup_middleware(application, admin_ids)
-
-    # Register error handler
-    application.add_error_handler(error_handler)
 
     # Start the bot
     logger.info("Starting Meta Game bot...")

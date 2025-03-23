@@ -2,24 +2,29 @@
 # -*- coding: utf-8 -*-
 
 """
-Database initialization script for the Meta Game bot.
+Enhanced database initialization script for the Meta Game bot.
 
 This script initializes all necessary tables in the Supabase database.
-It reads the SQL files in the db directory and executes them in the correct order.
+It reads the SQL files in the db directory and executes them in the correct order,
+with improved error handling and recovery.
 """
 
 import asyncio
 import os
 import sys
+import time
 from typing import List, Optional
 
 from dotenv import load_dotenv
 
-from db.supabase_client import get_supabase, init_supabase
+from db.supabase_client import init_supabase, get_supabase, execute_sql
 from utils.logger import setup_logger
 
 # Load environment variables
 load_dotenv()
+
+# Create log directory if it doesn't exist
+os.makedirs("logs", exist_ok=True)
 
 # Setup logging
 logger = setup_logger(name="db_init", level="INFO", log_file="logs/db_init.log")
@@ -40,70 +45,127 @@ SQL_FILE_ORDER = [
 
 
 async def execute_sql_file(file_path: str) -> None:
-    """Execute a SQL file using the Supabase client."""
+    """Execute a SQL file with better error handling."""
     try:
         # Read the SQL file
         with open(file_path, "r", encoding="utf-8") as f:
             sql = f.read()
 
         # Execute the SQL
-        client = get_supabase()
+        await execute_sql_statements(split_sql_statements(sql), os.path.basename(file_path))
 
-        # For larger files, split into separate statements
-        statements = split_sql_statements(sql)
-        executed = 0
-
-        for statement in statements:
-            if statement.strip():
-                try:
-                    # Execute the SQL statement
-                    client.postgrest.rpc("exec_sql", {"sql": statement})
-                    executed += 1
-                except Exception as e:
-                    logger.error(f"Error executing SQL statement: {e}")
-                    logger.error(f"Statement: {statement[:100]}...")
-
-        logger.info(f"Executed {executed} SQL statements from {os.path.basename(file_path)}")
+        logger.info(f"Successfully executed SQL file: {os.path.basename(file_path)}")
     except Exception as e:
         logger.error(f"Error executing SQL file {file_path}: {e}")
         raise
 
 
+async def execute_sql_statements(statements: List[str], file_name: str) -> None:
+    """Execute a list of SQL statements with retries."""
+    executed = 0
+    failed = 0
+
+    for i, statement in enumerate(statements):
+        if not statement.strip():
+            continue
+
+        max_retries = 3
+        retry_count = 0
+
+        while retry_count < max_retries:
+            try:
+                # Try to execute the statement
+                await execute_sql(statement)
+                executed += 1
+                break  # Success, exit retry loop
+            except Exception as e:
+                retry_count += 1
+                if retry_count < max_retries:
+                    wait_time = 1 * retry_count  # Linear backoff
+                    logger.warning(f"Retry {retry_count}/{max_retries} for statement {i + 1} in {file_name}: {e}")
+                    await asyncio.sleep(wait_time)
+                else:
+                    logger.error(f"Failed to execute statement {i + 1} after {max_retries} attempts: {e}")
+                    logger.error(f"Statement: {statement[:200]}...")
+                    failed += 1
+                    # Continue with next statement instead of aborting everything
+                    break
+
+    logger.info(f"File {file_name}: Successfully executed {executed} statements, failed {failed} statements")
+
+    # If too many failures, warn but don't stop the entire process
+    if failed > len(statements) / 2:
+        logger.warning(f"High failure rate in {file_name}: {failed}/{len(statements)} statements failed")
+
+
 def split_sql_statements(sql: str) -> List[str]:
-    """Split a SQL string into individual statements, handling edge cases."""
+    """Split a SQL string into individual statements with improved handling."""
     statements = []
     current_statement = []
     in_function_body = False
     in_string = False
     string_delimiter = None
+    in_comment = False
+
+    # Add a final newline to ensure last statement is processed
+    if not sql.endswith('\n'):
+        sql += '\n'
 
     lines = sql.split('\n')
 
     for line in lines:
-        # Skip comment lines
-        if line.strip().startswith('--'):
+        stripped_line = line.strip()
+
+        # Skip empty lines
+        if not stripped_line:
             continue
 
-        # Check for function body start/end
-        if 'CREATE OR REPLACE FUNCTION' in line or 'CREATE FUNCTION' in line:
+        # Skip comment lines
+        if stripped_line.startswith('--'):
+            continue
+
+        # Check for multiline comment start/end
+        if '/*' in line and not in_string and not in_comment:
+            in_comment = True
+
+        if '*/' in line and in_comment:
+            in_comment = False
+            continue
+
+        # Skip lines inside comments
+        if in_comment:
+            continue
+
+        # Check for function body start
+        if ('CREATE OR REPLACE FUNCTION' in line or 'CREATE FUNCTION' in line) and not in_function_body:
             in_function_body = True
 
         # Process the line character by character for string detection
-        for char in line:
+        i = 0
+        while i < len(line):
+            char = line[i]
+
+            # Handle string literals
             if char in ['"', "'"] and not in_string:
                 in_string = True
                 string_delimiter = char
-            elif char == string_delimiter and in_string:
+            elif char == string_delimiter and in_string and (i == 0 or line[i - 1] != '\\'):
                 in_string = False
 
-        # Check for function body end
-        if in_function_body and line.strip().endswith('LANGUAGE plpgsql;'):
-            in_function_body = False
+            i += 1
 
+        # Add line to current statement
         current_statement.append(line)
 
+        # Check for function body end
+        if in_function_body and stripped_line.endswith('LANGUAGE plpgsql;'):
+            in_function_body = False
+            statements.append('\n'.join(current_statement))
+            current_statement = []
+            continue
+
         # If we hit a statement end and we're not in a function body or string
-        if line.strip().endswith(';') and not in_function_body and not in_string:
+        if stripped_line.endswith(';') and not in_function_body and not in_string:
             statements.append('\n'.join(current_statement))
             current_statement = []
 
@@ -119,53 +181,84 @@ async def init_database() -> None:
     try:
         # Initialize Supabase client
         init_supabase()
-        client = get_supabase()
 
-        # Check if DB already initialized
+        # Create game schema if it doesn't exist
         try:
-            # Instead of directly accessing tables, use a simple check query
-            response = client.postgrest.rpc("exec_sql", {
-                "sql": "SELECT 1 FROM information_schema.schemata WHERE schema_name = 'game';"})
-            if response.data:
-                logger.warning("Database schema 'game' already exists. Proceeding anyway.")
-        except Exception as e:
-            # Schema doesn't exist yet, which is expected
-            logger.info("Database schema doesn't exist yet. Initializing...")
+            logger.info("Creating game schema if it doesn't exist...")
+            await execute_sql("CREATE SCHEMA IF NOT EXISTS game;")
+        except Exception as schema_error:
+            logger.error(f"Error creating game schema: {schema_error}")
+            # Continue anyway as it might already exist
 
         # Get database folder path
         script_dir = os.path.dirname(os.path.abspath(__file__))
         db_folder = os.path.join(script_dir, "db")
 
+        # Check if db folder exists in the current directory
         if not os.path.exists(db_folder):
             # Try alternative path (when run from project root)
             db_folder = os.path.join(os.getcwd(), "db")
 
         if not os.path.exists(db_folder):
             logger.error(f"Database folder not found at {db_folder}")
-            logger.error("Please run this script from the project root directory")
+            logger.error("Please make sure the 'db' directory exists with the SQL files")
             sys.exit(1)
 
         logger.info(f"Initializing database from SQL files in {db_folder}")
 
-        # Execute SQL files in order
+        # Execute SQL files in order with retries
         for sql_file in SQL_FILE_ORDER:
             file_path = os.path.join(db_folder, sql_file)
 
-            if os.path.exists(file_path):
+            if not os.path.exists(file_path):
+                logger.warning(f"SQL file {sql_file} not found in {db_folder}, skipping")
+                continue
+
+            # Wait a short time between files to avoid overwhelming the database
+            await asyncio.sleep(1)
+
+            try:
                 logger.info(f"Executing {sql_file}...")
                 await execute_sql_file(file_path)
-            else:
-                logger.warning(f"SQL file {sql_file} not found in {db_folder}")
+            except Exception as file_error:
+                logger.error(f"Error executing {sql_file}: {file_error}")
+                if sql_file in ["01_schema.sql", "02_tables.sql"]:
+                    # Critical files - can't continue without tables
+                    raise
+                else:
+                    # Non-critical files - can continue with warnings
+                    logger.warning(f"Skipping {sql_file} due to errors, some functionality may be missing")
 
-        logger.info("Database initialization complete")
+        logger.info("Database initialization process completed")
 
-        # Verify initialization with a simple query
+        # Verify initialization by checking for some key tables
         try:
-            response = client.postgrest.rpc("exec_sql", {"sql": "SELECT COUNT(*) FROM game.players;"})
-            logger.info("Successfully verified database initialization!")
-        except Exception as e:
-            logger.error(f"Error verifying database: {e}")
-            logger.error("Database may not be fully initialized. Please check the logs for errors.")
+            # Check if players table exists
+            result = await execute_sql(
+                "SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_schema = 'game' AND table_name = 'players');")
+            if result and result[0]['exists']:
+                logger.info("Verification: players table exists")
+            else:
+                logger.warning("Verification failed: players table not found")
+
+            # Check if districts table exists
+            result = await execute_sql(
+                "SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_schema = 'game' AND table_name = 'districts');")
+            if result and result[0]['exists']:
+                logger.info("Verification: districts table exists")
+
+                # Check if there's data in the districts table
+                result = await execute_sql("SELECT COUNT(*) FROM game.districts;")
+                if result and result[0]['count'] > 0:
+                    logger.info(f"Verification: districts table has {result[0]['count']} rows")
+                else:
+                    logger.warning("Verification: districts table is empty")
+            else:
+                logger.warning("Verification failed: districts table not found")
+
+        except Exception as verify_error:
+            logger.error(f"Verification error: {verify_error}")
+            logger.warning("Database may not be fully initialized")
 
     except Exception as e:
         logger.error(f"Database initialization failed: {e}")
