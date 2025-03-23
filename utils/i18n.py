@@ -1,60 +1,139 @@
-async def load_translations() -> None:
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+"""
+Unified internationalization module for the Meta Game bot.
+"""
+
+import json
+import logging
+import os
+from typing import Dict, Any, Optional
+
+from db import player_exists
+
+# Initialize logger
+logger = logging.getLogger(__name__)
+
+# Global translations storage
+_translations = {
+    "en_US": {},
+    "ru_RU": {}
+}
+
+
+def _(text: str, language: str = "en_US") -> str:
     """
-    Unified method to load translations from all sources.
+    Translate a text string to the specified language.
 
-    This function loads translations in the following order:
-    1. Default fallback translations (hardcoded)
-    2. Local files (from translations directory)
-    3. Database (overrides previous sources)
+    Args:
+        text: Text string to translate
+        language: Language code (en_US or ru_RU)
 
-    The loading is done sequentially to ensure proper override priority.
+    Returns:
+        Translated string or original text if no translation is found
+    """
+    if language not in _translations:
+        language = "en_US"
+
+    # Return the translation if it exists, otherwise return the original text
+    return _translations[language].get(text, text)
+
+
+async def get_user_language(telegram_id: str) -> str:
+    """
+    Get a user's preferred language.
+
+    Args:
+        telegram_id: User's Telegram ID
+
+    Returns:
+        Language code (en_US or ru_RU)
     """
     try:
-        # 1. First set up default fallback translations
-        _initialize_default_translations()
+        # Check if player exists in database
+        exists = await player_exists(telegram_id)
 
-        # 2. Then load from files
-        await _load_translations_from_files()
+        if exists:
+            # Try to get language from database
+            try:
+                from db.db_client import get_player_language
+                language = await get_player_language(telegram_id)
+                if language in ["en_US", "ru_RU"]:
+                    return language
+            except Exception as e:
+                logger.warning(f"Error getting player language from database: {e}")
 
-        # 3. Finally, try to load from database (which may override file translations)
-        await _load_translations_from_database()
-
-        logger.info(
-            f"Loaded translations successfully: {len(_translations['en_US'])} English, "
-            f"{len(_translations['ru_RU'])} Russian keys"
-        )
+        # Default to English if not found or error occurs
+        return "en_US"
     except Exception as e:
-        logger.error(f"Error loading translations: {str(e)}")
-        logger.info("Continuing with default translations only")
+        logger.error(f"Error in get_user_language: {e}")
+        return "en_US"
 
 
-def _initialize_default_translations() -> None:
-    """Initialize default fallback translations."""
-    # Default English translations
+async def set_user_language(telegram_id: str, language: str) -> bool:
+    """
+    Set a user's preferred language.
+
+    Args:
+        telegram_id: User's Telegram ID
+        language: Language code (en_US or ru_RU)
+
+    Returns:
+        True if successful, False otherwise
+    """
+    if language not in ["en_US", "ru_RU"]:
+        return False
+
+    try:
+        # Check if player exists in database
+        exists = await player_exists(telegram_id)
+
+        if exists:
+            # Try to set language in database
+            try:
+                from db.db_client import set_player_language
+                return await set_player_language(telegram_id, language)
+            except Exception as e:
+                logger.warning(f"Error setting player language in database: {e}")
+                return False
+        else:
+            # Store in memory for now (will be saved after registration)
+            return True
+    except Exception as e:
+        logger.error(f"Error in set_user_language: {e}")
+        return False
+
+
+def setup_i18n() -> None:
+    """Initialize the internationalization system with default translations."""
+    # Initialize default translations for English
     _translations["en_US"].update({
         "Yes": "Yes",
         "No": "No",
         "Back": "Back",
         "Cancel": "Cancel",
         "Confirm": "Confirm",
-        # Add more default translations as needed
+        # More default translations can be added here
     })
 
-    # Default Russian translations
+    # Initialize default translations for Russian
     _translations["ru_RU"].update({
         "Yes": "Да",
         "No": "Нет",
         "Back": "Назад",
         "Cancel": "Отмена",
         "Confirm": "Подтвердить",
-        # Add more default translations as needed
+        # More default translations can be added here
     })
 
+    logger.info("Basic internationalization system initialized")
 
-async def _load_translations_from_files() -> None:
+
+async def load_translations_from_file() -> None:
     """Load translations from JSON files with improved error handling."""
     # Path to translations directory
-    translations_dir = os.path.join(os.path.dirname(__file__), "../translations")
+    translations_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "translations")
 
     # Create the directory if it doesn't exist
     os.makedirs(translations_dir, exist_ok=True)
@@ -77,7 +156,7 @@ async def _load_translations_from_files() -> None:
             logger.error(f"Error loading translation file {lang_path}: {str(e)}")
 
 
-async def _load_translations_from_database() -> None:
+async def load_translations_from_db() -> None:
     """Load translations from the database with unified error handling."""
     try:
         # Try using the db_client method first
@@ -90,7 +169,7 @@ async def _load_translations_from_database() -> None:
             return response.data if hasattr(response, 'data') else None
 
         translations_data = await db_operation(
-            "load_translations_from_database",
+            "load_translations_from_db",
             fetch_translations,
             default_return=[]
         )
@@ -110,3 +189,33 @@ async def _load_translations_from_database() -> None:
             logger.info("No translations found in database")
     except Exception as e:
         logger.warning(f"Error loading translations from database: {e}")
+
+
+async def load_translations() -> None:
+    """
+    Unified method to load translations from all sources.
+
+    This function loads translations in the following order:
+    1. Default fallback translations (hardcoded)
+    2. Local files (from translations directory)
+    3. Database (overrides previous sources)
+
+    The loading is done sequentially to ensure proper override priority.
+    """
+    try:
+        # 1. First set up default fallback translations
+        setup_i18n()
+
+        # 2. Then load from files
+        await load_translations_from_file()
+
+        # 3. Finally, try to load from database (which may override file translations)
+        await load_translations_from_db()
+
+        logger.info(
+            f"Loaded translations successfully: {len(_translations['en_US'])} English, "
+            f"{len(_translations['ru_RU'])} Russian keys"
+        )
+    except Exception as e:
+        logger.error(f"Error loading translations: {str(e)}")
+        logger.info("Continuing with default translations only")

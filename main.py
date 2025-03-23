@@ -17,16 +17,13 @@ from telegram.ext import (
     ContextTypes,
 )
 
-from bot.callbacks import register_callbacks
-# Import bot components
-from bot.commands import register_commands
+# Import core components
+from bot.handlers import register_all_handlers
 from bot.middleware import setup_middleware
 from bot.states import conversation_handlers
-# Import enhanced database client
 from db.supabase_client import init_supabase, check_schema_exists
-# Import utility functions
 from utils.config import load_config
-from utils.i18n import setup_i18n, _, get_user_language, load_translations_from_file, load_translations_from_db
+from utils.i18n import load_translations, get_user_language
 from utils.logger import setup_logger, configure_telegram_logger, configure_supabase_logger
 from utils.error_handling import handle_error
 from utils.context_manager import context_manager
@@ -82,9 +79,8 @@ async def init_translations():
         max_attempts = 3
         for attempt in range(1, max_attempts + 1):
             try:
-                # Load translations in the correct order
-                await load_translations_from_file()
-                await load_translations_from_db()
+                # Load translations using the unified loading function
+                await load_translations()
                 logger.info("Translations initialized successfully")
                 return
             except Exception as e:
@@ -182,9 +178,6 @@ async def main():
     # Load configuration
     config = load_config()
 
-    # Initialize internationalization (set up default translations)
-    setup_i18n()
-
     # Initialize the Application with better error handling
     application = Application.builder().token(token).build()
 
@@ -208,18 +201,9 @@ async def main():
     logger.info("Setting up middleware...")
     setup_middleware(application, admin_ids)
 
-    # THEN register command handlers
-    logger.info("Registering command handlers...")
-    register_commands(application)
-
-    # THEN register callback query handlers
-    logger.info("Registering callback handlers...")
-    register_callbacks(application)
-
-    # THEN add conversation handlers
-    logger.info("Registering conversation handlers...")
-    for handler in conversation_handlers:
-        application.add_handler(handler)
+    # Register all handlers using the unified handler registration system
+    logger.info("Registering handlers...")
+    register_all_handlers(application)
 
     # Start the bot
     logger.info("Starting Meta Game bot...")

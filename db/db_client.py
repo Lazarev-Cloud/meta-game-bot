@@ -8,10 +8,11 @@ This module serves as the primary interface for all database operations,
 providing a clean, consistent API.
 """
 
+import asyncio
 import logging
 from typing import Dict, Any, Optional, List, TypeVar, Callable
 
-from db.error_handling import db_retry
+from db.error_handling import db_retry, DatabaseError
 from db.supabase_client import (
     get_supabase,
     execute_function,
@@ -32,6 +33,7 @@ async def db_operation(operation_name: str,
                        default_return=None,
                        log_error: bool = True,
                        max_retries: int = 3,
+                       retry_delay: float = 1.5,
                        **kwargs) -> Any:
     """
     Execute a database operation with standardized error handling and retries.
@@ -42,6 +44,7 @@ async def db_operation(operation_name: str,
         default_return: Value to return on error
         log_error: Whether to log errors
         max_retries: Maximum number of retry attempts
+        retry_delay: Base delay between retries in seconds
         *args, **kwargs: Arguments to pass to the function
 
     Returns:
@@ -49,7 +52,6 @@ async def db_operation(operation_name: str,
     """
     retries = 0
     last_exception = None
-    retry_delay = 1.5  # Base delay in seconds
 
     while retries < max_retries:
         try:
@@ -147,7 +149,6 @@ async def get_player_language(telegram_id: str) -> str:
 
     async def fetch_language():
         client = get_supabase()
-        # FIX: Correct schema reference
         response = client.from_("players").schema("game").select("language").eq("telegram_id", telegram_id).execute()
         if hasattr(response, 'data') and response.data and response.data[0].get("language"):
             return response.data[0]["language"]
@@ -162,14 +163,13 @@ async def set_player_language(telegram_id: str, language: str) -> bool:
 
     async def update_language():
         client = get_supabase()
-        # FIX: Correct schema reference
         player_response = client.from_("players").schema("game").select("player_id").eq("telegram_id", telegram_id).execute()
         if hasattr(player_response, 'data') and player_response.data:
-            # FIX: Correct schema reference
             client.from_("players").schema("game").update({"language": language}).eq("telegram_id", telegram_id).execute()
         return True
 
     return await db_operation("set_player_language", update_language, default_return=False)
+
 
 # ---------------------------
 # Game cycle and actions
@@ -458,6 +458,7 @@ async def get_active_collective_actions() -> List[Dict[str, Any]]:
         return []
 
     return await db_operation("get_active_collective_actions", fetch_actions, default_return=[])
+
 
 async def get_collective_action(action_id: str) -> Optional[Dict[str, Any]]:
     """Get details of a specific collective action."""
