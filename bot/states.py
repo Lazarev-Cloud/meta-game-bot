@@ -158,7 +158,15 @@ async def ideology_choice(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     player_name = context.user_data.get("player_name", update.effective_user.first_name)
 
     try:
-        await register_player(telegram_id, player_name, ideology_value)
+        # Call the registration function with proper error handling
+        result = await register_player(telegram_id, player_name, ideology_value)
+
+        if not result or not result.get('success', False):
+            error_message = result.get('message', 'Unknown error during registration')
+            await query.edit_message_text(
+                _("Error during registration: {error}", language).format(error=error_message)
+            )
+            return ConversationHandler.END
 
         # Save the language preference permanently
         await set_user_language(telegram_id, language)

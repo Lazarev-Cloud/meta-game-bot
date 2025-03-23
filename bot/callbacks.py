@@ -23,7 +23,7 @@ from bot.keyboards import (
     get_politicians_keyboard,
     get_politician_interaction_keyboard,
     get_resource_type_keyboard,
-    get_back_keyboard
+    get_back_keyboard, get_resources_keyboard, get_language_keyboard
 )
 from db import (
     get_player,
@@ -32,16 +32,16 @@ from db import (
     check_income,
     get_politicians,
     get_politician_status,
-    submit_action, get_latest_news, get_active_collective_actions
+    submit_action, get_latest_news, get_active_collective_actions, get_cycle_info
 )
 from utils.formatting import (
     format_player_status,
     format_district_info,
     format_income_info,
     format_politicians_list,
-    format_politician_info
+    format_politician_info, format_time
 )
-from utils.i18n import _, get_user_language
+from utils.i18n import _, get_user_language, set_user_language
 
 # Initialize logger
 logger = logging.getLogger(__name__)
@@ -340,18 +340,45 @@ async def resources_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
     query = update.callback_query
     await query.answer()
 
-    # Forward to resources command handler
-    from bot.commands import resources_command
+    telegram_id = str(update.effective_user.id)
+    language = await get_user_language(telegram_id)
 
-    # Create a message that resources_command can respond to
-    context._message = query.message
-    update.message = query.message
+    # Get player information
+    player_data = await get_player(telegram_id)
 
-    # Call the resources command handler
-    await resources_command(update, context)
+    if not player_data:
+        await query.edit_message_text(
+            _("Error retrieving your information. Please try again later.", language)
+        )
+        return
 
-    # Restore update.message
-    update.message = None
+    # Get and format resources
+    resources = player_data.get("resources", {})
+    influence = resources.get("influence", 0)
+    money = resources.get("money", 0)
+    information = resources.get("information", 0)
+    force = resources.get("force", 0)
+
+    resources_text = _(
+        "*Your Resources*\n\n"
+        "🔵 *Influence:* {influence} - Used for political maneuvers\n"
+        "💰 *Money:* {money} - Used for economic actions\n"
+        "🔍 *Information:* {information} - Used for intelligence and research\n"
+        "👊 *Force:* {force} - Used for military and security actions\n\n"
+        "_Use the buttons below to exchange resources (2:1 ratio)_",
+        language
+    ).format(
+        influence=influence,
+        money=money,
+        information=information,
+        force=force
+    )
+
+    await query.edit_message_text(
+        resources_text,
+        parse_mode="Markdown",
+        reply_markup=get_resources_keyboard(language)
+    )
 
 
 async def actions_left_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -359,18 +386,39 @@ async def actions_left_callback(update: Update, context: ContextTypes.DEFAULT_TY
     query = update.callback_query
     await query.answer()
 
-    # Forward to actions_left command handler
-    from bot.commands import actions_left_command
+    telegram_id = str(update.effective_user.id)
+    language = await get_user_language(telegram_id)
 
-    # Create a message that actions_left_command can respond to
-    context._message = query.message
-    update.message = query.message
+    # Get player information
+    player_data = await get_player(telegram_id)
 
-    # Call the actions_left command handler
-    await actions_left_command(update, context)
+    if not player_data:
+        await query.edit_message_text(
+            _("Error retrieving your information. Please try again later.", language)
+        )
+        return
 
-    # Restore update.message
-    update.message = None
+    # Get remaining actions
+    actions_remaining = player_data.get("actions_remaining", 0)
+    quick_actions_remaining = player_data.get("quick_actions_remaining", 0)
+
+    # Get cycle info for time remaining
+    cycle_info = await get_cycle_info(language)
+    time_to_deadline = cycle_info.get("time_to_deadline", "unknown")
+
+    # Format and send actions remaining message
+    await query.edit_message_text(
+        _("*Actions Remaining*\n\n"
+          "Main Actions: {main_actions}\n"
+          "Quick Actions: {quick_actions}\n\n"
+          "Time remaining in this cycle: {time_remaining}", language).format(
+            main_actions=actions_remaining,
+            quick_actions=quick_actions_remaining,
+            time_remaining=await format_time(time_to_deadline, language)
+        ),
+        parse_mode="Markdown",
+        reply_markup=get_back_keyboard(language)
+    )
 
 
 async def controlled_districts_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

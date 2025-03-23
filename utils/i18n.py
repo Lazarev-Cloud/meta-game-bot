@@ -99,9 +99,14 @@ async def load_translations_from_file() -> None:
         # Load English translations
         en_path = os.path.join(translations_dir, "en_US.json")
         if os.path.exists(en_path):
-            with open(en_path, "r", encoding="utf-8") as f:
-                _translations["en_US"].update(json.load(f))
-                logger.info(f"Loaded English translations from file: {len(_translations['en_US'])} keys")
+            try:
+                with open(en_path, "r", encoding="utf-8") as f:
+                    _translations["en_US"].update(json.load(f))
+                    logger.info(f"Loaded English translations from file: {len(_translations['en_US'])} keys")
+            except json.JSONDecodeError:
+                logger.warning(f"Error parsing JSON in {en_path}, creating a new file")
+                with open(en_path, "w", encoding="utf-8") as f:
+                    json.dump({}, f, indent=4)
         else:
             # Create an empty translations file for future use
             with open(en_path, "w", encoding="utf-8") as f:
@@ -111,9 +116,14 @@ async def load_translations_from_file() -> None:
         # Load Russian translations
         ru_path = os.path.join(translations_dir, "ru_RU.json")
         if os.path.exists(ru_path):
-            with open(ru_path, "r", encoding="utf-8") as f:
-                _translations["ru_RU"].update(json.load(f))
-                logger.info(f"Loaded Russian translations from file: {len(_translations['ru_RU'])} keys")
+            try:
+                with open(ru_path, "r", encoding="utf-8") as f:
+                    _translations["ru_RU"].update(json.load(f))
+                    logger.info(f"Loaded Russian translations from file: {len(_translations['ru_RU'])} keys")
+            except json.JSONDecodeError:
+                logger.warning(f"Error parsing JSON in {ru_path}, creating a new file")
+                with open(ru_path, "w", encoding="utf-8") as f:
+                    json.dump({}, f, indent=4)
         else:
             # Create an empty translations file for future use
             with open(ru_path, "w", encoding="utf-8") as f:

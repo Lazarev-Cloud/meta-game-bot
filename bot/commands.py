@@ -86,7 +86,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     language = await get_user_language(telegram_id)
 
     help_text = _(
-        "Here are the available commands:\n\n"
+        "*Here are the available commands:*\n\n"
         "*Basic Commands*\n"
         "/start - Start the game, register as a player\n"
         "/help - Show this help message\n"
@@ -100,21 +100,21 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         "/quick_action - Submit a quick action\n"
         "/cancel_action - Cancel your last action\n"
         "/actions_left - Check remaining actions\n"
-        "/view_district [district] - View district information\n\n"
+        "/view_district - View district information\n\n"
 
         "*Resource Commands*\n"
         "/resources - View your current resources\n"
-        "/convert_resource [type] [amount] - Convert resources\n"
+        "/convert_resource - Convert resources\n"
         "/check_income - Check expected resource income\n\n"
 
         "*Politicians Commands*\n"
         "/politicians - List available politicians\n"
-        "/politician_status [name] - Information about a politician\n"
+        "/politician_status - Information about a politician\n"
         "/international - Information about international politicians\n\n"
 
         "*Collective Action Commands*\n"
         "/collective - Initiate a collective action\n"
-        "/join [action_id] - Join a collective action\n"
+        "/join - Join a collective action\n"
         "/active_actions - View all active collective actions",
         language
     )

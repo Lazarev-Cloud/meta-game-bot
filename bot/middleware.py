@@ -73,14 +73,20 @@ async def authentication_middleware(update: Update, context: ContextTypes.DEFAUL
         if update.message.text.startswith("/help"):
             return True
 
-        is_registered = await player_exists(str(user.id))
+        try:
+            # Use the fixed player_exists function
+            is_registered = await player_exists(str(user.id))
 
-        if not is_registered:
-            language = "en_US"  # Default before registration
-            await update.message.reply_text(
-                _("You are not registered as a player. Please use the /start command to register.", language)
-            )
-            return False
+            if not is_registered:
+                language = "en_US"  # Default before registration
+                await update.message.reply_text(
+                    _("You are not registered as a player. Please use the /start command to register.", language)
+                )
+                return False
+        except Exception as e:
+            logger.error(f"Error checking if player exists: {str(e)}")
+            # Default to allowing access when there's an error to avoid locking users out
+            return True
 
     return True
 
