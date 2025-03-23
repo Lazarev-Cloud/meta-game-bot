@@ -2,13 +2,12 @@
 # -*- coding: utf-8 -*-
 
 """
-Complete middleware implementation for the Meta Game bot including 
-authentication, logging, and rate limiting.
+Middleware implementation for the Meta Game bot with improved error handling.
 """
 
 import logging
 import time
-from typing import Dict, Set, List, Any
+from typing import Dict, Set, List, Any, Callable, Awaitable, Optional
 
 from telegram import Update
 from telegram.ext import ContextTypes, Application, MessageHandler, CallbackQueryHandler, filters
@@ -23,6 +22,24 @@ logger = logging.getLogger(__name__)
 rate_limit_data: Dict[int, Dict[str, Any]] = {}
 blocked_users: Set[int] = set()
 admin_ids: List[int] = []
+
+# Generic middleware handler type
+MiddlewareFunc = Callable[[Update, ContextTypes.DEFAULT_TYPE], Awaitable[Optional[bool]]]
+
+
+async def apply_middleware_chain(update: Update, context: ContextTypes.DEFAULT_TYPE,
+                                 middleware_funcs: List[MiddlewareFunc]) -> bool:
+    """Apply a chain of middleware functions, stopping if any returns False."""
+    for func in middleware_funcs:
+        try:
+            result = await func(update, context)
+            if result is False:  # Explicit check for False return
+                return False
+        except Exception as e:
+            logger.error(f"Error in middleware function {func.__name__}: {e}")
+            await error_handler_middleware(update, context, e)
+            return False
+    return True
 
 
 async def log_middleware(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -67,14 +84,13 @@ async def authentication_middleware(update: Update, context: ContextTypes.DEFAUL
             )
             return False
 
+    # Skip registration check for help command
+    if update.message and update.message.text and update.message.text.startswith("/help"):
+        return True
+
     # Check if user is registered for game commands
     if update.message and update.message.text and update.message.text.startswith("/"):
-        # Skip common non-game commands
-        if update.message.text.startswith("/help"):
-            return True
-
         try:
-            # Use the fixed player_exists function
             is_registered = await player_exists(str(user.id))
 
             if not is_registered:
@@ -205,28 +221,16 @@ async def game_state_middleware(update: Update, context: ContextTypes.DEFAULT_TY
 
 
 async def combined_middleware_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Combined middleware handler to run all middleware functions."""
-    try:
-        # Always log first
-        await log_middleware(update, context)
+    """Combined middleware handler that runs middleware functions in sequence with optimized error handling."""
+    middleware_funcs = [
+        log_middleware,
+        rate_limit_middleware,
+        authentication_middleware,
+        language_middleware,
+        game_state_middleware
+    ]
 
-        # Run rate limiting check
-        if not await rate_limit_middleware(update, context):
-            return
-
-        # Run authentication check
-        if not await authentication_middleware(update, context):
-            return
-
-        # Set language in context
-        await language_middleware(update, context)
-
-        # Update game state if needed
-        await game_state_middleware(update, context)
-
-    except Exception as e:
-        # Handle any errors in middleware
-        await error_handler_middleware(update, context, e)
+    await apply_middleware_chain(update, context, middleware_funcs)
 
 
 def setup_middleware(application: Application, admin_user_ids: List[int]) -> None:

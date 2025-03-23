@@ -5,15 +5,13 @@
 Consolidated database client for Meta Game.
 
 This module serves as the primary interface for all database operations,
-providing a clean, consistent API and eliminating duplication between
-supabase_client.py and queries.py.
+providing a clean, consistent API.
 """
 
 import logging
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List, TypeVar, Callable
 
 from db.error_handling import db_retry
-# Internal imports from our database modules
 from db.supabase_client import (
     get_supabase,
     execute_function,
@@ -23,6 +21,37 @@ from db.supabase_client import (
 # Initialize logger
 logger = logging.getLogger(__name__)
 
+# Type variable for generic return type
+T = TypeVar('T')
+
+
+# Create a wrapper function to handle common database operation patterns
+async def db_operation(operation_name: str,
+                       func: Callable,
+                       *args,
+                       default_return=None,
+                       log_error: bool = True,
+                       **kwargs) -> Any:
+    """
+    Execute a database operation with standardized error handling.
+
+    Args:
+        operation_name: Name of operation for logging
+        func: Function to execute
+        default_return: Value to return on error
+        log_error: Whether to log errors
+        *args, **kwargs: Arguments to pass to the function
+
+    Returns:
+        Result of the function or default_return on error
+    """
+    try:
+        return await func(*args, **kwargs)
+    except Exception as e:
+        if log_error:
+            logger.error(f"Error in {operation_name}: {str(e)}")
+        return default_return
+
 
 # ---------------------------
 # Player-related functions
@@ -31,12 +60,6 @@ logger = logging.getLogger(__name__)
 async def player_exists(telegram_id: str) -> bool:
     """
     Check if a player exists by Telegram ID.
-
-    Args:
-        telegram_id: The Telegram ID to check
-
-    Returns:
-        True if player exists, False otherwise
     """
     try:
         client = get_supabase()
@@ -47,10 +70,9 @@ async def player_exists(telegram_id: str) -> bool:
             if hasattr(response, 'data'):
                 return response.data
         except Exception:
-            # Fallback to direct query if function call fails
             pass
 
-        # Fallback to direct query - Use game schema prefix
+        # Fallback to direct query
         response = client.from_("game.players").select("player_id").eq("telegram_id", telegram_id).execute()
         return hasattr(response, 'data') and len(response.data) > 0
     except Exception as e:
@@ -61,80 +83,41 @@ async def player_exists(telegram_id: str) -> bool:
 @db_retry
 async def get_player(telegram_id: str) -> Optional[Dict[str, Any]]:
     """Get comprehensive player information including resources, actions, etc."""
-    try:
-        result = await execute_function("api_get_player_status", {"p_telegram_id": telegram_id})
-        return result
-    except Exception as e:
-        logger.error(f"Error getting player data: {str(e)}")
-
-        # Fallback to basic query if API function fails
-        try:
-            client = get_supabase()
-            response = client.from_("game.players").select("*").eq("telegram_id", telegram_id).execute()
-
-            if not hasattr(response, 'data') or not response.data:
-                return None
-
-            # Format and return minimal player data
-            player = response.data[0]
-            return {
-                "player_name": player.get("name", "Unknown"),
-                "ideology_score": player.get("ideology_score", 0),
-                "resources": {},
-                "actions_remaining": player.get("remaining_actions", 0),
-                "quick_actions_remaining": player.get("remaining_quick_actions", 0)
-            }
-        except Exception:
-            return None
+    return await db_operation(
+        "get_player",
+        execute_function,
+        "api_get_player_status",
+        {"p_telegram_id": telegram_id}
+    )
 
 
 async def get_player_by_telegram_id(telegram_id: str) -> Optional[Dict[str, Any]]:
-    """
-    Get basic player record by Telegram ID.
+    """Get basic player record by Telegram ID."""
 
-    Args:
-        telegram_id: The Telegram ID of the player
-
-    Returns:
-        Raw player database record or None if not found
-    """
-    try:
+    async def fetch_player():
         client = get_supabase()
         response = client.from_("game.players").select("*").eq("telegram_id", telegram_id).execute()
-
         if hasattr(response, 'data') and response.data:
             return response.data[0]
         return None
-    except Exception as e:
-        logger.error(f"Error getting player by Telegram ID: {str(e)}")
-        return None
+
+    return await db_operation("get_player_by_telegram_id", fetch_player)
 
 
+@db_retry
 async def register_player(telegram_id: str, name: str, ideology_score: int = 0) -> Dict[str, Any]:
-    """
-    Register a new player.
-
-    Args:
-        telegram_id: The Telegram ID of the player
-        name: The player's name
-        ideology_score: The player's ideology score (-5 to 5)
-
-    Returns:
-        Result of registration containing success status
-    """
-    try:
-        result = await execute_function(
-            "api_register_player",
-            {
-                "p_telegram_id": telegram_id,
-                "p_name": name,
-                "p_ideology_score": ideology_score
-            }
-        )
-        return result
-    except Exception as e:
-        logger.error(f"Error registering player: {str(e)}")
-        raise
+    """Register a new player."""
+    return await db_operation(
+        "register_player",
+        execute_function,
+        "api_register_player",
+        {
+            "p_telegram_id": telegram_id,
+            "p_name": name,
+            "p_ideology_score": ideology_score
+        },
+        log_error=True
+    )
 
 
 # ---------------------------
@@ -142,54 +125,30 @@ async def register_player(telegram_id: str, name: str, ideology_score: int = 0) 
 # ---------------------------
 
 async def get_player_language(telegram_id: str) -> str:
-    """
-    Get a player's preferred language.
+    """Get a player's preferred language."""
 
-    Args:
-        telegram_id: The Telegram ID of the player
-
-    Returns:
-        Language code (e.g., 'en_US', 'ru_RU') or 'en_US' if not set
-    """
-    try:
+    async def fetch_language():
         client = get_supabase()
         response = client.from_("game.players").select("language").eq("telegram_id", telegram_id).execute()
-
         if hasattr(response, 'data') and response.data and response.data[0].get("language"):
             return response.data[0]["language"]
         return "en_US"
-    except Exception as e:
-        logger.error(f"Error getting player language: {str(e)}")
-        return "en_US"
+
+    result = await db_operation("get_player_language", fetch_language, default_return="en_US")
+    return result
 
 
 async def set_player_language(telegram_id: str, language: str) -> bool:
-    """
-    Set a player's preferred language.
+    """Set user's preferred language."""
 
-    Args:
-        telegram_id: The Telegram ID of the player
-        language: Language code to set ('en_US', 'ru_RU')
-
-    Returns:
-        True if successful, False otherwise
-    """
-    try:
+    async def update_language():
         client = get_supabase()
-
-        # Check if player exists
         player_response = client.from_("game.players").select("player_id").eq("telegram_id", telegram_id).execute()
-
         if hasattr(player_response, 'data') and player_response.data:
-            # Update language
             client.from_("game.players").update({"language": language}).eq("telegram_id", telegram_id).execute()
-            return True
-
-        # Player doesn't exist yet, will be set during registration
         return True
-    except Exception as e:
-        logger.error(f"Error setting player language: {str(e)}")
-        return False
+
+    return await db_operation("set_player_language", update_language, default_return=False)
 
 
 # ---------------------------
@@ -197,47 +156,30 @@ async def set_player_language(telegram_id: str, language: str) -> bool:
 # ---------------------------
 
 async def get_cycle_info(language: str = "en_US") -> Dict[str, Any]:
-    """
-    Get information about the current game cycle.
-
-    Args:
-        language: Language for translations
-
-    Returns:
-        Dictionary with cycle information
-    """
-    try:
-        result = await execute_function(
-            "api_get_cycle_info",
-            {
-                "p_language": language
-            }
-        )
-        return result
-    except Exception as e:
-        logger.error(f"Error getting cycle info: {str(e)}")
-        return {}
+    """Get information about the current game cycle."""
+    return await db_operation(
+        "get_cycle_info",
+        execute_function,
+        "api_get_cycle_info",
+        {"p_language": language},
+        default_return={}
+    )
 
 
 async def is_submission_open() -> bool:
-    """
-    Check if submissions are open for the current cycle.
+    """Check if submissions are open for the current cycle."""
 
-    Returns:
-        True if submissions are open, False otherwise
-    """
-    try:
+    async def check_submission():
         client = get_supabase()
         response = client.rpc("game.is_submission_open").execute()
-
         if hasattr(response, 'data'):
             return response.data
         return False
-    except Exception as e:
-        logger.error(f"Error checking if submissions are open: {str(e)}")
-        return False
+
+    return await db_operation("is_submission_open", check_submission, default_return=False)
 
 
+@db_retry
 async def submit_action(
         telegram_id: str,
         action_type: str,
@@ -251,71 +193,36 @@ async def submit_action(
         expected_outcome: Optional[str] = None,
         language: str = "en_US"
 ) -> Dict[str, Any]:
-    """
-    Submit a player action.
+    """Submit a player action."""
+    params = {
+        "p_telegram_id": telegram_id,
+        "p_action_type": action_type,
+        "p_is_quick_action": is_quick_action,
+        "p_district_name": district_name,
+        "p_target_player_name": target_player_name,
+        "p_target_politician_name": target_politician_name,
+        "p_resource_type": resource_type,
+        "p_resource_amount": resource_amount,
+        "p_physical_presence": physical_presence,
+        "p_expected_outcome": expected_outcome,
+        "p_language": language
+    }
 
-    Args:
-        telegram_id: The Telegram ID of the player
-        action_type: Type of action to perform
-        is_quick_action: Whether this is a quick action
-        district_name: Target district name
-        target_player_name: Target player name
-        target_politician_name: Target politician name
-        resource_type: Type of resource to use
-        resource_amount: Amount of resource to use
-        physical_presence: Whether player is physically present
-        expected_outcome: Expected outcome of the action
-        language: Language for translations
-
-    Returns:
-        Action submission result
-    """
-    try:
-        result = await execute_function(
-            "api_submit_action",
-            {
-                "p_telegram_id": telegram_id,
-                "p_action_type": action_type,
-                "p_is_quick_action": is_quick_action,
-                "p_district_name": district_name,
-                "p_target_player_name": target_player_name,
-                "p_target_politician_name": target_politician_name,
-                "p_resource_type": resource_type,
-                "p_resource_amount": resource_amount,
-                "p_physical_presence": physical_presence,
-                "p_expected_outcome": expected_outcome,
-                "p_language": language
-            }
-        )
-        return result
-    except Exception as e:
-        logger.error(f"Error submitting action: {str(e)}")
-        raise
+    return await db_operation("submit_action", execute_function, "api_submit_action", params)
 
 
+@db_retry
 async def cancel_latest_action(telegram_id: str, language: str = "en_US") -> Dict[str, Any]:
-    """
-    Cancel the latest action submitted by a player.
-
-    Args:
-        telegram_id: The Telegram ID of the player
-        language: Language for translations
-
-    Returns:
-        Result of cancellation
-    """
-    try:
-        result = await execute_function(
-            "api_cancel_latest_action",
-            {
-                "p_telegram_id": telegram_id,
-                "p_language": language
-            }
-        )
-        return result
-    except Exception as e:
-        logger.error(f"Error canceling action: {str(e)}")
-        raise
+    """Cancel the latest action submitted by a player."""
+    return await db_operation(
+        "cancel_latest_action",
+        execute_function,
+        "api_cancel_latest_action",
+        {
+            "p_telegram_id": telegram_id,
+            "p_language": language
+        }
+    )
 
 
 # ---------------------------
@@ -323,85 +230,59 @@ async def cancel_latest_action(telegram_id: str, language: str = "en_US") -> Dic
 # ---------------------------
 
 async def get_districts() -> List[Dict[str, Any]]:
-    """
-    Get all districts.
+    """Get all districts."""
 
-    Returns:
-        List of district information
-    """
-    try:
+    async def fetch_districts():
         client = get_supabase()
         response = client.from_("game.districts").select("*").execute()
-
         if hasattr(response, 'data'):
             return response.data
         return []
-    except Exception as e:
-        logger.error(f"Error getting districts: {str(e)}")
-        # Try a fallback approach with raw SQL
+
+    districts = await db_operation("get_districts", fetch_districts, default_return=[])
+
+    # If primary method fails, try fallback with raw SQL
+    if not districts:
         try:
-            result = await execute_sql("SELECT * FROM game.districts;")
-            if result:
-                return result
-        except Exception as sql_e:
-            logger.error(f"Fallback query failed: {str(sql_e)}")
-        return []
+            return await execute_sql("SELECT * FROM game.districts;") or []
+        except Exception as e:
+            logger.error(f"Fallback query for districts failed: {str(e)}")
+            return []
+
+    return districts
 
 
 async def get_district_info(telegram_id: str, district_name: str, language: str = "en_US") -> Dict[str, Any]:
-    """
-    Get detailed information about a district.
-
-    Args:
-        telegram_id: The Telegram ID of the player
-        district_name: Name of the district
-        language: Language for translations
-
-    Returns:
-        District information
-    """
-    try:
-        result = await execute_function(
-            "api_get_district_info",
-            {
-                "p_telegram_id": telegram_id,
-                "p_district_name": district_name,
-                "p_language": language
-            }
-        )
-        return result
-    except Exception as e:
-        logger.error(f"Error getting district info: {str(e)}")
-        return {}
+    """Get detailed information about a district."""
+    return await db_operation(
+        "get_district_info",
+        execute_function,
+        "api_get_district_info",
+        {
+            "p_telegram_id": telegram_id,
+            "p_district_name": district_name,
+            "p_language": language
+        },
+        default_return={}
+    )
 
 
 async def get_map_data(language: str = "en_US") -> Dict[str, Any]:
-    """
-    Get the current map data showing district control.
-
-    Args:
-        language: Language for translations
-
-    Returns:
-        Map data with district control information
-    """
-    try:
-        result = await execute_function(
-            "api_get_map_data",
-            {
-                "p_language": language
-            }
-        )
-        return result
-    except Exception as e:
-        logger.error(f"Error getting map data: {str(e)}")
-        return {}
+    """Get the current map data showing district control."""
+    return await db_operation(
+        "get_map_data",
+        execute_function,
+        "api_get_map_data",
+        {"p_language": language},
+        default_return={}
+    )
 
 
 # ---------------------------
 # Resources and Economy
 # ---------------------------
 
+@db_retry
 async def exchange_resources(
         telegram_id: str,
         from_resource: str,
@@ -409,59 +290,30 @@ async def exchange_resources(
         amount: int,
         language: str = "en_US"
 ) -> Dict[str, Any]:
-    """
-    Exchange resources between types.
+    """Exchange resources between types."""
+    params = {
+        "p_telegram_id": telegram_id,
+        "p_from_resource": from_resource,
+        "p_to_resource": to_resource,
+        "p_amount": amount,
+        "p_language": language
+    }
 
-    Args:
-        telegram_id: The Telegram ID of the player
-        from_resource: Resource type to convert from
-        to_resource: Resource type to convert to
-        amount: Amount to convert
-        language: Language for translations
-
-    Returns:
-        Result of exchange
-    """
-    try:
-        result = await execute_function(
-            "api_exchange_resources",
-            {
-                "p_telegram_id": telegram_id,
-                "p_from_resource": from_resource,
-                "p_to_resource": to_resource,
-                "p_amount": amount,
-                "p_language": language
-            }
-        )
-        return result
-    except Exception as e:
-        logger.error(f"Error exchanging resources: {str(e)}")
-        raise
+    return await db_operation("exchange_resources", execute_function, "api_exchange_resources", params)
 
 
 async def check_income(telegram_id: str, language: str = "en_US") -> Dict[str, Any]:
-    """
-    Check expected resource income.
-
-    Args:
-        telegram_id: The Telegram ID of the player
-        language: Language for translations
-
-    Returns:
-        Expected income information
-    """
-    try:
-        result = await execute_function(
-            "api_check_income",
-            {
-                "p_telegram_id": telegram_id,
-                "p_language": language
-            }
-        )
-        return result
-    except Exception as e:
-        logger.error(f"Error checking income: {str(e)}")
-        return {}
+    """Check expected resource income."""
+    return await db_operation(
+        "check_income",
+        execute_function,
+        "api_check_income",
+        {
+            "p_telegram_id": telegram_id,
+            "p_language": language
+        },
+        default_return={}
+    )
 
 
 # ---------------------------
@@ -469,30 +321,22 @@ async def check_income(telegram_id: str, language: str = "en_US") -> Dict[str, A
 # ---------------------------
 
 async def get_latest_news(telegram_id: str, count: int = 5, language: str = "en_US") -> Dict[str, Any]:
-    """
-    Get the latest news for a player.
+    """Get the latest news for a player."""
+    params = {
+        "p_telegram_id": telegram_id,
+        "p_count": count,
+        "p_language": language
+    }
 
-    Args:
-        telegram_id: The Telegram ID of the player
-        count: Number of news items to retrieve
-        language: Language for translations
+    result = await db_operation(
+        "get_latest_news",
+        execute_function,
+        "api_get_latest_news",
+        params,
+        default_return={"public": [], "faction": []}
+    )
 
-    Returns:
-        Latest news
-    """
-    try:
-        result = await execute_function(
-            "api_get_latest_news",
-            {
-                "p_telegram_id": telegram_id,
-                "p_count": count,
-                "p_language": language
-            }
-        )
-        return result
-    except Exception as e:
-        logger.error(f"Error getting news: {str(e)}")
-        return {"public": [], "faction": []}
+    return result
 
 
 # ---------------------------
@@ -500,63 +344,44 @@ async def get_latest_news(telegram_id: str, count: int = 5, language: str = "en_
 # ---------------------------
 
 async def get_politicians(telegram_id: str, type: str = "local", language: str = "en_US") -> Dict[str, Any]:
-    """
-    Get politicians of specified type.
+    """Get politicians of specified type."""
+    params = {
+        "p_telegram_id": telegram_id,
+        "p_type": type,
+        "p_language": language
+    }
 
-    Args:
-        telegram_id: The Telegram ID of the player
-        type: Type of politicians to get ('local', 'international', 'all')
-        language: Language for translations
-
-    Returns:
-        Politicians information
-    """
-    try:
-        result = await execute_function(
-            "api_get_politicians",
-            {
-                "p_telegram_id": telegram_id,
-                "p_type": type,
-                "p_language": language
-            }
-        )
-        return result
-    except Exception as e:
-        logger.error(f"Error getting politicians: {str(e)}")
-        return {"politicians": []}
+    return await db_operation(
+        "get_politicians",
+        execute_function,
+        "api_get_politicians",
+        params,
+        default_return={"politicians": []}
+    )
 
 
 async def get_politician_status(telegram_id: str, politician_name: str, language: str = "en_US") -> Dict[str, Any]:
-    """
-    Get detailed information about a politician.
+    """Get detailed information about a politician."""
+    params = {
+        "p_telegram_id": telegram_id,
+        "p_politician_name": politician_name,
+        "p_language": language
+    }
 
-    Args:
-        telegram_id: The Telegram ID of the player
-        politician_name: Name of the politician
-        language: Language for translations
-
-    Returns:
-        Politician information
-    """
-    try:
-        result = await execute_function(
-            "api_get_politician_status",
-            {
-                "p_telegram_id": telegram_id,
-                "p_politician_name": politician_name,
-                "p_language": language
-            }
-        )
-        return result
-    except Exception as e:
-        logger.error(f"Error getting politician status: {str(e)}")
-        return {}
+    return await db_operation(
+        "get_politician_status",
+        execute_function,
+        "api_get_politician_status",
+        params,
+        default_return={}
+    )
 
 
 # ---------------------------
 # Collective Actions
 # ---------------------------
 
+@db_retry
 async def initiate_collective_action(
         telegram_id: str,
         action_type: str,
@@ -567,42 +392,22 @@ async def initiate_collective_action(
         physical_presence: bool = False,
         language: str = "en_US"
 ) -> Dict[str, Any]:
-    """
-    Initiate a collective action.
+    """Initiate a collective action."""
+    params = {
+        "p_telegram_id": telegram_id,
+        "p_action_type": action_type,
+        "p_district_name": district_name,
+        "p_target_player_name": target_player_name,
+        "p_resource_type": resource_type,
+        "p_resource_amount": resource_amount,
+        "p_physical_presence": physical_presence,
+        "p_language": language
+    }
 
-    Args:
-        telegram_id: The Telegram ID of the initiator
-        action_type: Type of collective action
-        district_name: Target district
-        target_player_name: Target player (for attacks)
-        resource_type: Type of resource to contribute
-        resource_amount: Amount of resource to contribute
-        physical_presence: Whether player is physically present
-        language: Language for translations
-
-    Returns:
-        Result of collective action initiation
-    """
-    try:
-        result = await execute_function(
-            "api_initiate_collective_action",
-            {
-                "p_telegram_id": telegram_id,
-                "p_action_type": action_type,
-                "p_district_name": district_name,
-                "p_target_player_name": target_player_name,
-                "p_resource_type": resource_type,
-                "p_resource_amount": resource_amount,
-                "p_physical_presence": physical_presence,
-                "p_language": language
-            }
-        )
-        return result
-    except Exception as e:
-        logger.error(f"Error initiating collective action: {str(e)}")
-        raise
+    return await db_operation("initiate_collective_action", execute_function, "api_initiate_collective_action", params)
 
 
+@db_retry
 async def join_collective_action(
         telegram_id: str,
         collective_action_id: str,
@@ -611,126 +416,69 @@ async def join_collective_action(
         physical_presence: bool = False,
         language: str = "en_US"
 ) -> Dict[str, Any]:
-    """
-    Join a collective action.
+    """Join a collective action."""
+    params = {
+        "p_telegram_id": telegram_id,
+        "p_collective_action_id": collective_action_id,
+        "p_resource_type": resource_type,
+        "p_resource_amount": resource_amount,
+        "p_physical_presence": physical_presence,
+        "p_language": language
+    }
 
-    Args:
-        telegram_id: The Telegram ID of the player
-        collective_action_id: ID of the collective action
-        resource_type: Type of resource to contribute
-        resource_amount: Amount of resource to contribute
-        physical_presence: Whether player is physically present
-        language: Language for translations
-
-    Returns:
-        Result of joining collective action
-    """
-    try:
-        result = await execute_function(
-            "api_join_collective_action",
-            {
-                "p_telegram_id": telegram_id,
-                "p_collective_action_id": collective_action_id,
-                "p_resource_type": resource_type,
-                "p_resource_amount": resource_amount,
-                "p_physical_presence": physical_presence,
-                "p_language": language
-            }
-        )
-        return result
-    except Exception as e:
-        logger.error(f"Error joining collective action: {str(e)}")
-        raise
+    return await db_operation("join_collective_action", execute_function, "api_join_collective_action", params)
 
 
 async def get_active_collective_actions() -> List[Dict[str, Any]]:
-    """
-    Get all active collective actions.
+    """Get all active collective actions."""
 
-    Returns:
-        List of active collective actions
-    """
-    try:
+    async def fetch_actions():
         client = get_supabase()
         response = client.from_("game.collective_actions").select("*").eq("status", "active").execute()
-
         if hasattr(response, 'data'):
             return response.data
         return []
-    except Exception as e:
-        logger.error(f"Error getting active collective actions: {str(e)}")
-        return []
+
+    return await db_operation("get_active_collective_actions", fetch_actions, default_return=[])
 
 
 async def get_collective_action(action_id: str) -> Optional[Dict[str, Any]]:
-    """
-    Get details of a specific collective action.
+    """Get details of a specific collective action."""
 
-    Args:
-        action_id: ID of the collective action
-
-    Returns:
-        Collective action details or None if not found
-    """
-    try:
+    async def fetch_action():
         client = get_supabase()
         response = client.from_("game.collective_actions").select("*").eq("collective_action_id", action_id).execute()
-
         if hasattr(response, 'data') and response.data:
             return response.data[0]
         return None
-    except Exception as e:
-        logger.error(f"Error getting collective action: {str(e)}")
-        return None
+
+    return await db_operation("get_collective_action", fetch_action)
 
 
 # ---------------------------
 # Admin Functions
 # ---------------------------
 
+@db_retry
 async def admin_process_actions(telegram_id: str) -> Dict[str, Any]:
-    """
-    Process all pending actions (admin only).
-
-    Args:
-        telegram_id: The Telegram ID of the admin
-
-    Returns:
-        Result of processing actions
-    """
-    try:
-        result = await execute_function(
-            "api_admin_process_actions",
-            {
-                "p_telegram_id": telegram_id
-            }
-        )
-        return result
-    except Exception as e:
-        logger.error(f"Error processing actions: {str(e)}")
-        raise
+    """Process all pending actions (admin only)."""
+    return await db_operation(
+        "admin_process_actions",
+        execute_function,
+        "api_admin_process_actions",
+        {"p_telegram_id": telegram_id}
+    )
 
 
+@db_retry
 async def admin_generate_international_effects(telegram_id: str, count: int = 2) -> Dict[str, Any]:
-    """
-    Generate international effects (admin only).
-
-    Args:
-        telegram_id: The Telegram ID of the admin
-        count: Number of effects to generate
-
-    Returns:
-        Result of generating effects
-    """
-    try:
-        result = await execute_function(
-            "api_admin_generate_international_effects",
-            {
-                "p_telegram_id": telegram_id,
-                "p_count": count
-            }
-        )
-        return result
-    except Exception as e:
-        logger.error(f"Error generating international effects: {str(e)}")
-        raise
+    """Generate international effects (admin only)."""
+    return await db_operation(
+        "admin_generate_international_effects",
+        execute_function,
+        "api_admin_generate_international_effects",
+        {
+            "p_telegram_id": telegram_id,
+            "p_count": count
+        }
+    )

@@ -2,12 +2,13 @@
 # -*- coding: utf-8 -*-
 
 """
-Internationalization (i18n) utilities for the Meta Game bot with improved database handling.
+Internationalization (i18n) utilities for the Meta Game bot with improved caching and error handling.
 """
 import json
 import logging
 import os
-from typing import Dict
+from typing import Dict, Optional, Any, Callable, Awaitable
+from functools import lru_cache
 
 # Initialize logger
 logger = logging.getLogger(__name__)
@@ -18,12 +19,23 @@ _translations: Dict[str, Dict[str, str]] = {
     "ru_RU": {}
 }
 
-# User language preferences cache
-_user_languages: Dict[str, str] = {}
+# User language preferences cache with expiration time (30 minutes)
+_user_languages: Dict[str, Dict[str, Any]] = {}
+_CACHE_EXPIRATION = 1800  # 30 minutes in seconds
+
+
+async def handle_async_operation(operation_name: str, func: Callable[..., Awaitable[Any]],
+                                 *args, default_return: Any = None, **kwargs) -> Any:
+    """Generic error handler for async operations"""
+    try:
+        return await func(*args, **kwargs)
+    except Exception as e:
+        logger.error(f"Error in {operation_name}: {str(e)}")
+        return default_return
 
 
 async def load_translations() -> None:
-    """Load translations from both files and database in proper sequence."""
+    """Load translations from both files and database in proper sequence, with improved error handling."""
     try:
         # First load from files as fallback
         await load_translations_from_file()
@@ -39,108 +51,108 @@ async def load_translations() -> None:
 
 
 async def load_translations_from_db() -> None:
-    """Load translations from the database with improved error handling."""
+    """Load translations from the database with improved error handling and retry logic."""
+    # Try using get_translations function
+    db_translations = await _load_translations_via_function()
+    if db_translations:
+        return
+
+    # Fallback to direct table query
+    await _load_translations_via_table()
+
+
+async def _load_translations_via_function() -> bool:
+    """Load translations using the get_translations RPC function."""
     try:
-        # First try using get_translations function
-        try:
-            from db.supabase_client import get_supabase
-            client = get_supabase()
+        from db.supabase_client import get_supabase
+        client = get_supabase()
 
-            # Try the public helper function
-            response = client.rpc("get_translations").execute()
-            if hasattr(response, 'data') and response.data:
-                translations_dict = response.data
-                loaded_count = 0
+        # Try the public helper function
+        response = client.rpc("get_translations").execute()
+        if hasattr(response, 'data') and response.data:
+            translations_dict = response.data
+            loaded_count = 0
 
-                for key, value in translations_dict.items():
-                    _translations["en_US"][key] = value.get("en_US", key)
-                    _translations["ru_RU"][key] = value.get("ru_RU", key)
+            for key, value in translations_dict.items():
+                _translations["en_US"][key] = value.get("en_US", key)
+                _translations["ru_RU"][key] = value.get("ru_RU", key)
+                loaded_count += 1
+
+            logger.info(f"Loaded {loaded_count} translations using get_translations function")
+            return True
+        return False
+    except Exception as e:
+        logger.warning(f"Error using get_translations function: {e}, will try direct table access")
+        return False
+
+
+async def _load_translations_via_table() -> None:
+    """Load translations directly from the translations table."""
+    try:
+        from db.supabase_client import get_supabase
+        client = get_supabase()
+
+        # Use the correct schema reference
+        response = client.from_("game.translations").select("translation_key,en_US,ru_RU").execute()
+
+        if hasattr(response, 'data') and response.data:
+            translations_data = response.data
+            loaded_count = 0
+
+            for translation in translations_data:
+                key = translation.get("translation_key", "")
+                if key:
+                    _translations["en_US"][key] = translation.get("en_US", key)
+                    _translations["ru_RU"][key] = translation.get("ru_RU", key)
                     loaded_count += 1
 
-                logger.info(f"Loaded {loaded_count} translations using get_translations function")
-                return
-        except Exception as func_error:
-            logger.warning(f"Error using get_translations function: {func_error}, trying direct table access")
-
-        # Direct table query - use correct schema syntax
-        try:
-            from db.supabase_client import get_supabase
-            client = get_supabase()
-
-            # Use the correct schema reference (just "game.translations", not "public.game.translations")
-            response = client.from_("game.translations").select("translation_key,en_US,ru_RU").execute()
-
-            if hasattr(response, 'data'):
-                translations_data = response.data
-                loaded_count = 0
-
-                for translation in translations_data:
-                    key = translation.get("translation_key", "")
-                    if key:
-                        _translations["en_US"][key] = translation.get("en_US", key)
-                        _translations["ru_RU"][key] = translation.get("ru_RU", key)
-                        loaded_count += 1
-
-                logger.info(f"Loaded {loaded_count} translations from database")
-            else:
-                logger.warning("No translations found or unexpected response format")
-        except Exception as table_error:
-            logger.warning(f"Error accessing translations table: {table_error}")
-            # Continue with default translations
+            logger.info(f"Loaded {loaded_count} translations from database")
+        else:
+            logger.warning("No translations found or unexpected response format")
     except Exception as e:
-        logger.error(f"Error loading translations from database: {str(e)}")
-        # Continue with default translations
+        logger.warning(f"Error accessing translations table: {e}")
 
 
 async def load_translations_from_file() -> None:
-    """Load translations from JSON files as fallback or initial setup."""
+    """Load translations from JSON files with improved error handling."""
+    # Path to translations directory
+    translations_dir = os.path.join(os.path.dirname(__file__), "../translations")
+
+    # Create the directory if it doesn't exist
+    os.makedirs(translations_dir, exist_ok=True)
+
+    # Load for each supported language
+    for lang_code in ["en_US", "ru_RU"]:
+        lang_path = os.path.join(translations_dir, f"{lang_code}.json")
+
+        # Load existing file or create new one
+        await _load_or_create_translation_file(lang_path, lang_code)
+
+
+async def _load_or_create_translation_file(filepath: str, lang_code: str) -> None:
+    """Load a translation file or create it if it doesn't exist."""
     try:
-        # Path to translations directory
-        translations_dir = os.path.join(os.path.dirname(__file__), "../translations")
-
-        # Create the directory if it doesn't exist
-        os.makedirs(translations_dir, exist_ok=True)
-
-        # Load English translations
-        en_path = os.path.join(translations_dir, "en_US.json")
-        if os.path.exists(en_path):
+        if os.path.exists(filepath):
             try:
-                with open(en_path, "r", encoding="utf-8") as f:
-                    _translations["en_US"].update(json.load(f))
-                    logger.info(f"Loaded English translations from file: {len(_translations['en_US'])} keys")
+                with open(filepath, "r", encoding="utf-8") as f:
+                    _translations[lang_code].update(json.load(f))
+                    logger.info(f"Loaded {lang_code} translations from file: {len(_translations[lang_code])} keys")
             except json.JSONDecodeError:
-                logger.warning(f"Error parsing JSON in {en_path}, creating a new file")
-                with open(en_path, "w", encoding="utf-8") as f:
+                logger.warning(f"Error parsing JSON in {filepath}, creating a new file")
+                with open(filepath, "w", encoding="utf-8") as f:
                     json.dump({}, f, indent=4)
         else:
             # Create an empty translations file for future use
-            with open(en_path, "w", encoding="utf-8") as f:
+            with open(filepath, "w", encoding="utf-8") as f:
                 json.dump({}, f, indent=4)
-                logger.info("Created empty English translations file")
-
-        # Load Russian translations
-        ru_path = os.path.join(translations_dir, "ru_RU.json")
-        if os.path.exists(ru_path):
-            try:
-                with open(ru_path, "r", encoding="utf-8") as f:
-                    _translations["ru_RU"].update(json.load(f))
-                    logger.info(f"Loaded Russian translations from file: {len(_translations['ru_RU'])} keys")
-            except json.JSONDecodeError:
-                logger.warning(f"Error parsing JSON in {ru_path}, creating a new file")
-                with open(ru_path, "w", encoding="utf-8") as f:
-                    json.dump({}, f, indent=4)
-        else:
-            # Create an empty translations file for future use
-            with open(ru_path, "w", encoding="utf-8") as f:
-                json.dump({}, f, indent=4)
-                logger.info("Created empty Russian translations file")
-
+                logger.info(f"Created empty {lang_code} translations file")
     except Exception as e:
-        logger.error(f"Error loading translations from files: {str(e)}")
+        logger.error(f"Error loading/creating translation file {filepath}: {str(e)}")
 
 
+@lru_cache(maxsize=1000)
 def _(key: str, language: str = "en_US") -> str:
-    """Translate a key into the specified language."""
+    """Translate a key into the specified language with caching for performance."""
     # Default to English if language not supported
     if language not in _translations:
         language = "en_US"
@@ -149,77 +161,89 @@ def _(key: str, language: str = "en_US") -> str:
     return _translations[language].get(key, key)
 
 
-# Standardized database access
 async def get_user_language(telegram_id: str) -> str:
-    """Get the user's preferred language with improved error handling."""
+    """Get the user's preferred language with caching and improved error handling."""
     # Check cache first
-    if telegram_id in _user_languages:
-        return _user_languages[telegram_id]
+    current_time = int(os.time() if hasattr(os, 'time') else time.time())
 
+    if telegram_id in _user_languages:
+        cache_entry = _user_languages[telegram_id]
+        # Check if cache is still valid
+        if current_time - cache_entry['timestamp'] < _CACHE_EXPIRATION:
+            return cache_entry['language']
+
+    # Cache missed or expired, fetch from database
     try:
         # Use enhanced db_client instead of direct Supabase calls
-        from db_client import get_player_language
-        language = await get_player_language(telegram_id)
-        if language:
-            # Cache the result
-            _user_languages[telegram_id] = language
-            return language
+        try:
+            from db_client import get_player_language
+            language = await get_player_language(telegram_id)
+        except (ImportError, Exception):
+            # Fallback to direct database query
+            from db.supabase_client import get_supabase
+            client = get_supabase()
+            response = client.from_("game.players").select("language").eq("telegram_id", telegram_id).execute()
+            language = response.data[0]["language"] if hasattr(response, 'data') and response.data and response.data[
+                0].get("language") else "en_US"
+
+        # Cache the result with timestamp
+        _user_languages[telegram_id] = {
+            'language': language,
+            'timestamp': current_time
+        }
+        return language
     except Exception as e:
         logger.error(f"Error getting user language: {str(e)}")
-
-    # Default to English
-    return "en_US"
+        return "en_US"
 
 
 async def set_user_language(telegram_id: str, language: str) -> bool:
-    """Set user's preferred language with improved error handling."""
+    """Set user's preferred language with improved error handling and caching."""
     if language not in _translations:
         logger.warning(f"Unsupported language: {language}")
         return False
 
     try:
         # Try using the enhanced db_client
+        updated = False
         try:
             from db_client import set_player_language
-            success = await set_player_language(telegram_id, language)
-            if success:
-                # Update cache
-                _user_languages[telegram_id] = language
-                return True
-        except ImportError:
-            logger.debug("Enhanced db_client not available for language setting, using fallback")
-        except Exception as e:
-            logger.debug(f"Error using set_player_language from db_client: {e}")
+            updated = await set_player_language(telegram_id, language)
+        except (ImportError, Exception) as e:
+            logger.debug(f"Error using set_player_language: {e}")
 
-        # Direct database approach as fallback
-        try:
-            # First check if the player exists
+            # Direct database approach as fallback
             from db.supabase_client import get_player_by_telegram_id, get_supabase
-
             player = await get_player_by_telegram_id(telegram_id)
 
             if player:
                 # Player exists, update their language
                 client = get_supabase()
                 client.from_("game.players").update({"language": language}).eq("telegram_id", telegram_id).execute()
+                updated = True
                 logger.info(f"Updated language for existing player {telegram_id} to {language}")
             else:
-                # Player does not exist yet, only update the cache
                 logger.info(f"Player {telegram_id} not registered yet, caching language preference")
-        except Exception as db_error:
-            logger.warning(f"Error updating language in database: {db_error}")
 
-        # Update cache even if DB update fails
-        _user_languages[telegram_id] = language
+        # Update cache regardless of database update result
+        current_time = int(os.time() if hasattr(os, 'time') else time.time())
+        _user_languages[telegram_id] = {
+            'language': language,
+            'timestamp': current_time
+        }
+
         return True
     except Exception as e:
         logger.error(f"Error setting user language: {str(e)}")
         # Still update the cache even if there was an error
-        _user_languages[telegram_id] = language
+        _user_languages[telegram_id] = {
+            'language': language,
+            'timestamp': int(os.time() if hasattr(os, 'time') else time.time())
+        }
         return False
 
 
-async def get_available_languages() -> Dict[str, str]:
+def get_available_languages() -> Dict[str, str]:
     """Get list of available languages."""
     return {
         "en_US": "English",
@@ -227,7 +251,7 @@ async def get_available_languages() -> Dict[str, str]:
     }
 
 
-def clear_language_cache(telegram_id: str = None) -> None:
+def clear_language_cache(telegram_id: Optional[str] = None) -> None:
     """Clear language cache for a user or all users."""
     global _user_languages
 
@@ -238,32 +262,9 @@ def clear_language_cache(telegram_id: str = None) -> None:
         _user_languages = {}
 
 
-def save_translations_to_file():
-    """Save current translations to JSON files for persistence."""
-    try:
-        # Path to translations directory
-        translations_dir = os.path.join(os.path.dirname(__file__), "../translations")
-        os.makedirs(translations_dir, exist_ok=True)
-
-        # Save English translations
-        en_path = os.path.join(translations_dir, "en_US.json")
-        with open(en_path, "w", encoding="utf-8") as f:
-            json.dump(_translations["en_US"], f, indent=4, sort_keys=True)
-            logger.info(f"Saved {len(_translations['en_US'])} English translations to file")
-
-        # Save Russian translations
-        ru_path = os.path.join(translations_dir, "ru_RU.json")
-        with open(ru_path, "w", encoding="utf-8") as f:
-            json.dump(_translations["ru_RU"], f, indent=4, sort_keys=True)
-            logger.info(f"Saved {len(_translations['ru_RU'])} Russian translations to file")
-    except Exception as e:
-        logger.error(f"Error saving translations to files: {str(e)}")
-
-
 def setup_i18n() -> None:
     """Initialize the internationalization system."""
     logger.info("Initializing internationalization system")
 
-    load_translations_from_file()
     # We don't call the async functions directly here anymore
     # They will be called from main.py in the initialization sequence
