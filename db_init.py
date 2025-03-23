@@ -40,7 +40,7 @@ SQL_FILE_ORDER = [
     "07_functions_api.sql",
     "08_security.sql",
     "09_initial_data.sql",
-    # "10_sample_data.sql",  # Comment this line if you don't want sample data
+    # "10_sample_data.sql",  # Include sample data for testing
 ]
 
 
@@ -176,11 +176,57 @@ def split_sql_statements(sql: str) -> List[str]:
     return statements
 
 
+async def run_exec_sql_setup() -> None:
+    """Set up the exec_sql function for running raw SQL in Supabase."""
+    try:
+        client = get_supabase()
+
+        # Create the exec_sql function in the public schema
+        sql = """
+        CREATE OR REPLACE FUNCTION exec_sql(sql text) RETURNS JSONB
+        LANGUAGE plpgsql SECURITY DEFINER
+        AS $$
+        DECLARE
+            result JSONB;
+        BEGIN
+            EXECUTE sql;
+            result := '{"success": true}'::JSONB;
+            RETURN result;
+        EXCEPTION WHEN OTHERS THEN
+            result := jsonb_build_object(
+                'success', false,
+                'error', SQLERRM,
+                'detail', SQLSTATE
+            );
+            RETURN result;
+        END;
+        $$;
+        """
+
+        try:
+            # Try to execute it directly first
+            response = client.rpc("exec_sql", {"sql": "SELECT 1"}).execute()
+            logger.info("exec_sql function already exists")
+        except Exception:
+            # If it doesn't exist, create it
+            logger.info("Creating exec_sql function...")
+            # This is a direct call to PostgreSQL, bypassing RLS
+            # For Supabase, you'd need to make sure your service role has permissions to create this function
+            await execute_sql(sql)
+            logger.info("exec_sql function created successfully")
+    except Exception as e:
+        logger.error(f"Error setting up exec_sql function: {e}")
+        # Continue anyway, as we'll try to use the regular SQL methods
+
+
 async def init_database() -> None:
     """Initialize the database with all necessary tables and data."""
     try:
         # Initialize Supabase client
         init_supabase()
+
+        # Set up exec_sql function if needed
+        await run_exec_sql_setup()
 
         # Create game schema if it doesn't exist
         try:

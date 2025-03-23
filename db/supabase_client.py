@@ -110,8 +110,8 @@ async def player_exists(telegram_id: str) -> bool:
         if hasattr(response, 'data'):
             return response.data
 
-        # Fallback to direct query
-        response = client.table("game.players").select("player_id").eq("telegram_id", telegram_id).execute()
+        # Fallback to direct query - FIXED: Use from_ instead of table
+        response = client.from_("players").select("player_id").eq("telegram_id", telegram_id).execute()
         return hasattr(response, 'data') and len(response.data) > 0
     except Exception as e:
         logger.error(f"Error checking if player exists: {str(e)}")
@@ -129,7 +129,8 @@ async def get_player(telegram_id: str) -> Optional[Dict[str, Any]]:
         # Fallback to basic query if API function fails
         try:
             client = get_supabase()
-            response = client.table("game.players").select("*").eq("telegram_id", telegram_id).execute()
+            # FIXED: Use from_ instead of table
+            response = client.from_("players").select("*").eq("telegram_id", telegram_id).execute()
 
             if not hasattr(response, 'data') or not response.data:
                 return None
@@ -137,8 +138,8 @@ async def get_player(telegram_id: str) -> Optional[Dict[str, Any]]:
             player = response.data[0]
 
             # Get resources separately
-            resources_response = client.table("game.resources").select("*").eq("player_id",
-                                                                               player["player_id"]).execute()
+            # FIXED: Use from_ instead of table
+            resources_response = client.from_("resources").select("*").eq("player_id", player["player_id"]).execute()
             resources = {}
 
             if hasattr(resources_response, 'data') and resources_response.data:
@@ -169,7 +170,8 @@ async def get_player_by_telegram_id(telegram_id: str) -> Optional[Dict[str, Any]
     """Get player by Telegram ID directly."""
     try:
         client = get_supabase()
-        response = client.table("game.players").select("*").eq("telegram_id", telegram_id).execute()
+        # FIXED: Use from_ instead of table
+        response = client.from_("players").select("*").eq("telegram_id", telegram_id).execute()
 
         if hasattr(response, 'data') and response.data:
             return response.data[0]
@@ -253,7 +255,8 @@ async def get_districts() -> List[Dict[str, Any]]:
     """Get all districts."""
     try:
         client = get_supabase()
-        response = client.table("game.districts").select("*").execute()
+        # FIXED: Use from_ instead of table
+        response = client.from_("districts").select("*").execute()
 
         if hasattr(response, 'data'):
             return response.data
@@ -478,7 +481,8 @@ async def get_active_collective_actions() -> List[Dict[str, Any]]:
     """Get all active collective actions."""
     try:
         client = get_supabase()
-        response = client.table("game.collective_actions").select("*").eq("status", "active").execute()
+        # FIXED: Use from_ instead of table
+        response = client.from_("collective_actions").select("*").eq("status", "active").execute()
 
         if hasattr(response, 'data'):
             return response.data
@@ -492,7 +496,8 @@ async def get_collective_action(action_id: str) -> Optional[Dict[str, Any]]:
     """Get a specific collective action."""
     try:
         client = get_supabase()
-        response = client.table("game.collective_actions").select("*").eq("collective_action_id", action_id).execute()
+        # FIXED: Use from_ instead of table
+        response = client.from_("collective_actions").select("*").eq("collective_action_id", action_id).execute()
 
         if hasattr(response, 'data') and response.data:
             return response.data[0]
@@ -506,7 +511,8 @@ async def get_player_language(telegram_id: str) -> str:
     """Get a player's preferred language."""
     try:
         client = get_supabase()
-        response = client.table("game.players").select("language").eq("telegram_id", telegram_id).execute()
+        # FIXED: Use from_ instead of table
+        response = client.from_("players").select("language").eq("telegram_id", telegram_id).execute()
 
         if hasattr(response, 'data') and response.data and response.data[0].get("language"):
             return response.data[0]["language"]
@@ -522,11 +528,13 @@ async def set_player_language(telegram_id: str, language: str) -> bool:
         client = get_supabase()
 
         # Check if player exists
-        player_response = client.table("game.players").select("player_id").eq("telegram_id", telegram_id).execute()
+        # FIXED: Use from_ instead of table
+        player_response = client.from_("players").select("player_id").eq("telegram_id", telegram_id).execute()
 
         if hasattr(player_response, 'data') and player_response.data:
             # Update language
-            client.table("game.players").update({"language": language}).eq("telegram_id", telegram_id).execute()
+            # FIXED: Use from_ instead of table
+            client.from_("players").update({"language": language}).eq("telegram_id", telegram_id).execute()
             return True
 
         # Player doesn't exist yet, will be set during registration
