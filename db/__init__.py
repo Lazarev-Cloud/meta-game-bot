@@ -8,15 +8,17 @@ This module provides a unified API for database operations, consolidating
 functionality from supabase_client.py and queries.py to eliminate duplication.
 """
 
-# Re-export all public functions from our new db_client module
-from db.db_client import (
-    # Core database functionality
+# Import core database functions from supabase_client
+from db.supabase_client import (
     init_supabase,
     get_supabase,
     execute_function,
     execute_sql,
-    check_schema_exists,
+    check_schema_exists
+)
 
+# Import business logic functions from db_client
+from db.db_client import (
     # Player management
     player_exists,
     get_player,
