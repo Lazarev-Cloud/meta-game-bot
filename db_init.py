@@ -40,7 +40,7 @@ SQL_FILE_ORDER = [
     "07_functions_api.sql",
     "08_security.sql",
     "09_initial_data.sql",
-    "10_sample_data.sql",  # Comment this line if you don't want sample data
+    # "10_sample_data.sql",  # Comment this line if you don't want sample data
 ]
 
 
