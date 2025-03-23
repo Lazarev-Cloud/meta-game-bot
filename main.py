@@ -240,8 +240,8 @@ async def main():
     # Asynchronously load translations
     logger.info("Loading translations...")
     await init_translations()
-    
-        # Set up middleware FIRST
+
+    # Set up middleware FIRST
     logger.info("Setting up middleware...")
     setup_middleware(application, admin_ids)
 
