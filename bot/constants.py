@@ -6,6 +6,7 @@ Constants and shared state for the Meta Game bot.
 """
 import time
 from typing import Dict, Any
+from bot.context import get_user_context, set_user_context, clear_user_context
 
 # Define conversation states
 (
@@ -51,15 +52,6 @@ user_context: Dict[str, Dict[str, Any]] = {}
 USER_CONTEXT_TIMEOUT = 1800  # seconds
 
 
-def get_user_context(telegram_id: str) -> Dict[str, Any]:
-    """Get user context data, initializing if needed."""
-    if telegram_id not in user_context:
-        user_context[telegram_id] = {'data': {}, 'timestamp': time.time()}
-    else:
-        # Update timestamp on access
-        user_context[telegram_id]['timestamp'] = time.time()
-
-    return user_context[telegram_id]['data']
 
 
 def set_user_context(telegram_id: str, data: Dict[str, Any]) -> None:

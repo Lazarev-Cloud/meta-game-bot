@@ -6,10 +6,9 @@ Meta Game - Telegram Bot
 A political strategy game set in Novi-Sad, Yugoslavia in 1999.
 """
 
-import os
 import asyncio
+import os
 import traceback
-import time
 
 from dotenv import load_dotenv
 from telegram import Update
@@ -18,12 +17,12 @@ from telegram.ext import (
     ContextTypes,
 )
 
+from bot.callbacks import register_callbacks
 # Import bot components
 from bot.commands import register_commands
-from bot.callbacks import register_callbacks
+from bot.keyboards import get_back_keyboard
 from bot.middleware import setup_middleware
 from bot.states import conversation_handlers
-from bot.keyboards import get_back_keyboard
 # Import enhanced database client
 from db.supabase_client import init_supabase, check_schema_exists
 # Import utility functions
@@ -241,23 +240,23 @@ async def main():
     # Asynchronously load translations
     logger.info("Loading translations...")
     await init_translations()
+    
+        # Set up middleware FIRST
+    logger.info("Setting up middleware...")
+    setup_middleware(application, admin_ids)
 
-    # Register command handlers
+    # THEN register command handlers
     logger.info("Registering command handlers...")
     register_commands(application)
 
-    # Register callback query handlers
+    # THEN register callback query handlers
     logger.info("Registering callback handlers...")
     register_callbacks(application)
 
-    # Add conversation handlers
+    # THEN add conversation handlers
     logger.info("Registering conversation handlers...")
     for handler in conversation_handlers:
         application.add_handler(handler)
-
-    # Set up middleware (AFTER all other handlers)
-    logger.info("Setting up middleware...")
-    setup_middleware(application, admin_ids)
 
     # Start the bot
     logger.info("Starting Meta Game bot...")
