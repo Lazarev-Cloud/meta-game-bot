@@ -20,7 +20,6 @@ from telegram.ext import (
 from bot.callbacks import register_callbacks
 # Import bot components
 from bot.commands import register_commands
-from bot.keyboards import get_back_keyboard
 from bot.middleware import setup_middleware
 from bot.states import conversation_handlers
 # Import enhanced database client
@@ -29,6 +28,8 @@ from db.supabase_client import init_supabase, check_schema_exists
 from utils.config import load_config
 from utils.i18n import setup_i18n, _, get_user_language, load_translations_from_file, load_translations_from_db
 from utils.logger import setup_logger, configure_telegram_logger, configure_supabase_logger
+from utils.error_handling import handle_error
+from utils.context_manager import context_manager
 
 # Load environment variables
 load_dotenv()
@@ -62,53 +63,13 @@ async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     error_details = ''.join(traceback.format_exception(None, context.error, context.error.__traceback__))
     logger.error(f"Detailed error trace: {error_details}")
 
-    # Different error types need different responses
-    if isinstance(context.error, Exception):
-        error_type = type(context.error).__name__
-        error_message = str(context.error)
-    else:
-        error_type = "Unknown Error"
-        error_message = "An unexpected error occurred"
-
-    logger.error(f"Error type: {error_type}, Message: {error_message}")
-
-    # Create user-friendly message based on error type
-    user_message = _("An error occurred while processing your request.", language)
-
-    if "resource" in error_message.lower():
-        user_message = _("You don't have enough resources for this action.", language)
-    elif "permission" in error_message.lower():
-        user_message = _("You don't have permission to perform this action.", language)
-    elif "not found" in error_message.lower():
-        user_message = _("The requested item was not found.", language)
-    elif "deadline" in error_message.lower():
-        user_message = _("The submission deadline for this cycle has passed.", language)
-    elif "database" in error_message.lower() or "connection" in error_message.lower():
-        user_message = _("Database connection error. Please try again later.", language)
-
-    # Send the error message to the user
-    try:
-        keyboard = get_back_keyboard(language)
-
-        if update and update.callback_query:
-            await update.callback_query.answer(
-                user_message[:200]  # Callback answers have a character limit
-            )
-            # Try to edit the message if possible
-            try:
-                await update.callback_query.edit_message_text(
-                    user_message,
-                    reply_markup=keyboard
-                )
-            except Exception as e:
-                logger.error(f"Failed to edit message in error handler: {e}")
-        elif update and update.message:
-            await update.message.reply_text(
-                user_message,
-                reply_markup=keyboard
-            )
-    except Exception as e:
-        logger.error(f"Failed to send error message to user: {e}")
+    # Use the centralized error handler
+    await handle_error(
+        update,
+        language,
+        context.error,
+        "global_error_handler"
+    )
 
     # Return True to mark the error as handled
     return True
@@ -192,6 +153,19 @@ async def init_database():
             logger.info("Database schema 'game' already exists")
     except Exception as e:
         logger.error(f"Error initializing database: {e}")
+
+
+async def cleanup_task():
+    """Periodically clean up expired user contexts."""
+    while True:
+        try:
+            cleaned = context_manager.cleanup_expired()
+            if cleaned > 0:
+                logger.info(f"Cleaned up {cleaned} expired user contexts")
+        except Exception as e:
+            logger.error(f"Error in cleanup task: {e}")
+        await asyncio.sleep(300)  # Run every 5 minutes
+
 
 async def main():
     """Initialize and start the bot."""
@@ -287,20 +261,6 @@ async def main():
     await application.start()
     await application.updater.start_polling(allowed_updates=Update.ALL_TYPES)
     logger.info("Bot is running!")
-
-    # Set up periodic tasks
-    from bot.context import cleanup_expired_contexts
-
-    async def cleanup_task():
-        """Periodically clean up expired user contexts."""
-        while True:
-            try:
-                cleaned = cleanup_expired_contexts()
-                if cleaned > 0:
-                    logger.info(f"Cleaned up {cleaned} expired user contexts")
-            except Exception as e:
-                logger.error(f"Error in cleanup task: {e}")
-            await asyncio.sleep(300)  # Run every 5 minutes
 
     # Start cleanup task as a background task
     cleanup_job = asyncio.create_task(cleanup_task())

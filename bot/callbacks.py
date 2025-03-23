@@ -11,7 +11,6 @@ from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import ContextTypes, CallbackQueryHandler, ConversationHandler
 
 from bot.constants import ACTION_SELECT_RESOURCE, JOIN_ACTION_RESOURCE
-from bot.context import get_user_context, user_context
 from bot.keyboards import (
     get_start_keyboard,
     get_help_keyboard,
@@ -37,8 +36,7 @@ from db import (
     submit_action,
     get_latest_news,
     get_active_collective_actions,
-    get_cycle_info,
-    player_exists
+    get_cycle_info
 )
 from utils.formatting import (
     format_player_status,
@@ -50,58 +48,18 @@ from utils.formatting import (
     format_news
 )
 from utils.i18n import _, get_user_language, set_user_language
+from utils.error_handling import require_registration, handle_error
+from utils.message_utils import send_message, edit_or_reply, answer_callback
+from utils.context_manager import get_user_data, set_user_data, clear_user_data
 
 # Initialize logger
 logger = logging.getLogger(__name__)
 
 
-async def _require_registration_callback(update: Update, language: str) -> bool:
-    """Check if player is registered for a callback query. Returns True if registered."""
-    query = update.callback_query
-    telegram_id = str(update.effective_user.id)
-
-    try:
-        exists = await player_exists(telegram_id)
-    except Exception as e:
-        logger.error(f"Error checking if player exists: {e}")
-        await query.answer(
-            _("Sorry, we're experiencing technical difficulties. Please try again later.", language)
-        )
-        await query.edit_message_text(
-            _("Sorry, we're experiencing technical difficulties. Please try again later.", language)
-        )
-        return False
-
-    if not exists:
-        await query.answer(
-            _("You need to register first.", language)
-        )
-        await query.edit_message_text(
-            _("You are not registered yet. Use /start to register.", language)
-        )
-        return False
-
-    return True
-
-
-async def _handle_db_error_callback(update: Update, language: str, error: Exception, operation: str) -> None:
-    """Handle database errors in callbacks consistently."""
-    query = update.callback_query
-    logger.error(f"Error in {operation}: {str(error)}")
-
-    message = _("Database connection error. Please try again later.", language)
-
-    await query.answer(message[:200])  # Callback answers have character limit
-    try:
-        await query.edit_message_text(message)
-    except Exception:
-        pass  # Message might be unchanged
-
-
 async def general_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle general callbacks that don't need specific processing."""
     query = update.callback_query
-    await query.answer()
+    await answer_callback(update)
 
     telegram_id = str(update.effective_user.id)
     language = await get_user_language(telegram_id)
@@ -109,9 +67,10 @@ async def general_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
     if callback_data == "back_to_menu":
         # Return to main menu
-        await query.edit_message_text(
+        await edit_or_reply(
+            update,
             _("Main Menu", language),
-            reply_markup=get_start_keyboard(language)
+            keyboard=get_start_keyboard(language)
         )
     elif callback_data == "help":
         # Show help menu
@@ -119,9 +78,10 @@ async def general_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             "Welcome to Novi-Sad! What would you like to learn about?",
             language
         )
-        await query.edit_message_text(
+        await edit_or_reply(
+            update,
             help_text,
-            reply_markup=get_help_keyboard(language)
+            keyboard=get_help_keyboard(language)
         )
     elif callback_data.startswith("help:"):
         # Show specific help section
@@ -131,13 +91,12 @@ async def general_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
 async def status_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle status callback."""
-    query = update.callback_query
-    await query.answer()
+    await answer_callback(update)
 
     telegram_id = str(update.effective_user.id)
     language = await get_user_language(telegram_id)
 
-    if not await _require_registration_callback(update, language):
+    if not await require_registration(update, language):
         return
 
     try:
@@ -145,7 +104,8 @@ async def status_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         player_status = await get_player(telegram_id)
 
         if not player_status:
-            await query.edit_message_text(
+            await edit_or_reply(
+                update,
                 _("Error retrieving your status. Please try again later.", language)
             )
             return
@@ -153,24 +113,24 @@ async def status_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         # Format and send status message
         status_text = await format_player_status(player_status, language)
 
-        await query.edit_message_text(
+        await edit_or_reply(
+            update,
             status_text,
-            parse_mode="Markdown",
-            reply_markup=get_status_keyboard(language)
+            keyboard=get_status_keyboard(language),
+            parse_mode="Markdown"
         )
     except Exception as e:
-        await _handle_db_error_callback(update, language, e, "status_callback")
+        await handle_error(update, language, e, "status_callback")
 
 
 async def map_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle map callback."""
-    query = update.callback_query
-    await query.answer()
+    await answer_callback(update)
 
     telegram_id = str(update.effective_user.id)
     language = await get_user_language(telegram_id)
 
-    if not await _require_registration_callback(update, language):
+    if not await require_registration(update, language):
         return
 
     try:
@@ -178,7 +138,8 @@ async def map_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         map_data = await get_map_data(language)
 
         if not map_data:
-            await query.edit_message_text(
+            await edit_or_reply(
+                update,
                 _("Error retrieving map data. Please try again later.", language)
             )
             return
@@ -212,24 +173,24 @@ async def map_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         # Add map link if available
         map_text += "\n" + _("For a visual map, use the button below:", language)
 
-        await query.edit_message_text(
+        await edit_or_reply(
+            update,
             map_text,
-            parse_mode="Markdown",
-            reply_markup=get_map_keyboard(language)
+            keyboard=get_map_keyboard(language),
+            parse_mode="Markdown"
         )
     except Exception as e:
-        await _handle_db_error_callback(update, language, e, "map_callback")
+        await handle_error(update, language, e, "map_callback")
 
 
 async def news_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle news callback with improved interactivity."""
-    query = update.callback_query
-    await query.answer()
+    await answer_callback(update)
 
     telegram_id = str(update.effective_user.id)
     language = await get_user_language(telegram_id)
 
-    if not await _require_registration_callback(update, language):
+    if not await require_registration(update, language):
         return
 
     try:
@@ -237,8 +198,8 @@ async def news_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         page = context.user_data.get("news_page", 0)
 
         # Extract page action if there is one
-        if query.data.startswith("news_page:"):
-            action = query.data.split(":", 1)[1]
+        if update.callback_query.data.startswith("news_page:"):
+            action = update.callback_query.data.split(":", 1)[1]
             if action == "next":
                 page += 1
             elif action == "prev" and page > 0:
@@ -253,7 +214,8 @@ async def news_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
                                           language=language)  # +1 to check if there's more
 
         if not news_data:
-            await query.edit_message_text(
+            await edit_or_reply(
+                update,
                 _("Error retrieving news. Please try again later.", language)
             )
             return
@@ -288,13 +250,14 @@ async def news_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         # Create keyboard
         keyboard = InlineKeyboardMarkup(buttons)
 
-        await query.edit_message_text(
+        await edit_or_reply(
+            update,
             news_text,
-            parse_mode="Markdown",
-            reply_markup=keyboard
+            keyboard=keyboard,
+            parse_mode="Markdown"
         )
     except Exception as e:
-        await _handle_db_error_callback(update, language, e, "news_callback")
+        await handle_error(update, language, e, "news_callback")
 
 
 async def district_info_callback(update: Update, context: ContextTypes.DEFAULT_TYPE, district_name: str = None) -> None:
@@ -302,7 +265,7 @@ async def district_info_callback(update: Update, context: ContextTypes.DEFAULT_T
     query = None
     if update.callback_query:
         query = update.callback_query
-        await query.answer()
+        await answer_callback(update)
 
         # Extract district name if not provided
         if not district_name and query.data.startswith("district:"):
@@ -311,7 +274,7 @@ async def district_info_callback(update: Update, context: ContextTypes.DEFAULT_T
     telegram_id = str(update.effective_user.id)
     language = await get_user_language(telegram_id)
 
-    if query and not await _require_registration_callback(update, language):
+    if query and not await require_registration(update, language):
         return
 
     try:
@@ -323,10 +286,7 @@ async def district_info_callback(update: Update, context: ContextTypes.DEFAULT_T
                         language).format(
                 district=district_name
             )
-            if query:
-                await query.edit_message_text(message)
-            else:
-                await update.message.reply_text(message)
+            await edit_or_reply(update, message)
             return
 
         # Format district info
@@ -335,57 +295,45 @@ async def district_info_callback(update: Update, context: ContextTypes.DEFAULT_T
         # Create back button keyboard
         keyboard = get_back_keyboard(language, "select_district")
 
-        if query:
-            await query.edit_message_text(
-                district_text,
-                parse_mode="Markdown",
-                reply_markup=keyboard
-            )
-        else:
-            await update.message.reply_text(
-                district_text,
-                parse_mode="Markdown",
-                reply_markup=keyboard
-            )
+        await edit_or_reply(
+            update,
+            district_text,
+            keyboard=keyboard,
+            parse_mode="Markdown"
+        )
     except Exception as e:
-        if query:
-            await _handle_db_error_callback(update, language, e, "district_info_callback")
-        else:
-            await update.message.reply_text(
-                _("Error retrieving district information: {error}", language).format(error=str(e))
-            )
+        await handle_error(update, language, e, "district_info_callback")
 
 
 async def select_district_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle district selection callback."""
-    query = update.callback_query
-    await query.answer()
+    await answer_callback(update)
 
     telegram_id = str(update.effective_user.id)
     language = await get_user_language(telegram_id)
 
-    if not await _require_registration_callback(update, language):
+    if not await require_registration(update, language):
         return
 
     try:
         # Show district selection keyboard
-        await query.edit_message_text(
+        await edit_or_reply(
+            update,
             _("Please select a district to view:", language),
-            reply_markup=await get_districts_keyboard(language)
+            keyboard=await get_districts_keyboard(language)
         )
     except Exception as e:
-        await _handle_db_error_callback(update, language, e, "select_district_callback")
+        await handle_error(update, language, e, "select_district_callback")
 
 
 async def resources_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle resources callback."""
-    query = update.callback_query
-    await query.answer()
+    await answer_callback(update)
 
     telegram_id = str(update.effective_user.id)
     language = await get_user_language(telegram_id)
 
-    if not await _require_registration_callback(update, language):
+    if not await require_registration(update, language):
         return
 
     try:
@@ -393,7 +341,8 @@ async def resources_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
         player_data = await get_player(telegram_id)
 
         if not player_data:
-            await query.edit_message_text(
+            await edit_or_reply(
+                update,
                 _("Error retrieving your information. Please try again later.", language)
             )
             return
@@ -420,24 +369,24 @@ async def resources_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
             force=force
         )
 
-        await query.edit_message_text(
+        await edit_or_reply(
+            update,
             resources_text,
-            parse_mode="Markdown",
-            reply_markup=get_resources_keyboard(language)
+            keyboard=get_resources_keyboard(language),
+            parse_mode="Markdown"
         )
     except Exception as e:
-        await _handle_db_error_callback(update, language, e, "resources_callback")
+        await handle_error(update, language, e, "resources_callback")
 
 
 async def actions_left_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle actions left callback."""
-    query = update.callback_query
-    await query.answer()
+    await answer_callback(update)
 
     telegram_id = str(update.effective_user.id)
     language = await get_user_language(telegram_id)
 
-    if not await _require_registration_callback(update, language):
+    if not await require_registration(update, language):
         return
 
     try:
@@ -445,7 +394,8 @@ async def actions_left_callback(update: Update, context: ContextTypes.DEFAULT_TY
         player_data = await get_player(telegram_id)
 
         if not player_data:
-            await query.edit_message_text(
+            await edit_or_reply(
+                update,
                 _("Error retrieving your information. Please try again later.", language)
             )
             return
@@ -459,7 +409,8 @@ async def actions_left_callback(update: Update, context: ContextTypes.DEFAULT_TY
         time_to_deadline = cycle_info.get("time_to_deadline", "unknown")
 
         # Format and send actions remaining message
-        await query.edit_message_text(
+        await edit_or_reply(
+            update,
             _("*Actions Remaining*\n\n"
               "Main Actions: {main_actions}\n"
               "Quick Actions: {quick_actions}\n\n"
@@ -468,22 +419,21 @@ async def actions_left_callback(update: Update, context: ContextTypes.DEFAULT_TY
                 quick_actions=quick_actions_remaining,
                 time_remaining=await format_time(time_to_deadline, language)
             ),
-            parse_mode="Markdown",
-            reply_markup=get_back_keyboard(language)
+            keyboard=get_back_keyboard(language),
+            parse_mode="Markdown"
         )
     except Exception as e:
-        await _handle_db_error_callback(update, language, e, "actions_left_callback")
+        await handle_error(update, language, e, "actions_left_callback")
 
 
 async def controlled_districts_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle controlled districts callback."""
-    query = update.callback_query
-    await query.answer()
+    await answer_callback(update)
 
     telegram_id = str(update.effective_user.id)
     language = await get_user_language(telegram_id)
 
-    if not await _require_registration_callback(update, language):
+    if not await require_registration(update, language):
         return
 
     try:
@@ -491,7 +441,8 @@ async def controlled_districts_callback(update: Update, context: ContextTypes.DE
         player_status = await get_player(telegram_id)
 
         if not player_status:
-            await query.edit_message_text(
+            await edit_or_reply(
+                update,
                 _("Error retrieving your status. Please try again later.", language)
             )
             return
@@ -500,10 +451,11 @@ async def controlled_districts_callback(update: Update, context: ContextTypes.DE
         controlled_districts = player_status.get("controlled_districts", [])
 
         if not controlled_districts:
-            await query.edit_message_text(
+            await edit_or_reply(
+                update,
                 _("You don't control any districts yet.\n\nDistricts are considered controlled when you have 60 or more control points.",
                   language),
-                reply_markup=get_back_keyboard(language)
+                keyboard=get_back_keyboard(language)
             )
             return
 
@@ -536,31 +488,32 @@ async def controlled_districts_callback(update: Update, context: ContextTypes.DE
             districts_text += ", ".join(resources)
             districts_text += "\n\n"
 
-        await query.edit_message_text(
+        await edit_or_reply(
+            update,
             districts_text,
-            parse_mode="Markdown",
-            reply_markup=get_back_keyboard(language)
+            keyboard=get_back_keyboard(language),
+            parse_mode="Markdown"
         )
     except Exception as e:
-        await _handle_db_error_callback(update, language, e, "controlled_districts_callback")
+        await handle_error(update, language, e, "controlled_districts_callback")
 
 
 async def politician_action_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle politician action buttons."""
-    query = update.callback_query
-    await query.answer()
+    await answer_callback(update)
 
     telegram_id = str(update.effective_user.id)
     language = await get_user_language(telegram_id)
 
-    if not await _require_registration_callback(update, language):
+    if not await require_registration(update, language):
         return
 
     try:
         # Extract action details
-        action_data = query.data.split(":", 2)
+        action_data = update.callback_query.data.split(":", 2)
         if len(action_data) < 3:
-            await query.edit_message_text(
+            await edit_or_reply(
+                update,
                 _("Invalid action format. Please try again.", language)
             )
             return
@@ -568,15 +521,18 @@ async def politician_action_handler(update: Update, context: ContextTypes.DEFAUL
         action_type = action_data[1]
         politician_name = action_data[2]
 
-        # Initialize user context for action
-        if telegram_id not in user_context:
-            user_context[telegram_id] = {}
+        # Store action info in user context
+        user_data = get_user_data(telegram_id, context)
+        set_user_data(telegram_id, "action_type", action_type, context)
+        set_user_data(telegram_id, "is_quick_action", False, context)
+        set_user_data(telegram_id, "target_politician_name", politician_name, context)
 
         # Get politician info to verify
         politician_data = await get_politician_status(telegram_id, politician_name, language)
 
         if not politician_data:
-            await query.edit_message_text(
+            await edit_or_reply(
+                update,
                 _("Politician not found. Please try again.", language)
             )
             return
@@ -592,16 +548,13 @@ async def politician_action_handler(update: Update, context: ContextTypes.DEFAUL
         actual_action_type = action_map.get(action_type)
 
         if not actual_action_type:
-            await query.edit_message_text(
+            await edit_or_reply(
+                update,
                 _("Invalid action type. Please try again.", language)
             )
             return
 
-        # Store action info in user context
-        user_data = get_user_context(telegram_id)
-        user_data["action_type"] = actual_action_type
-        user_data["is_quick_action"] = False
-        user_data["target_politician_name"] = politician_name
+        set_user_data(telegram_id, "action_type", actual_action_type, context)
 
         # For request resources, handle differently
         if actual_action_type == "politician_request_resources":
@@ -619,40 +572,43 @@ async def politician_action_handler(update: Update, context: ContextTypes.DEFAUL
 
                 if result and result.get("success"):
                     # Success message
-                    await query.edit_message_text(
+                    await edit_or_reply(
+                        update,
                         _("Resource request submitted to {politician_name}. You will receive resources soon if they approve your request.",
                           language).format(
                             politician_name=politician_name
                         )
                     )
                 else:
-                    await query.edit_message_text(
+                    await edit_or_reply(
+                        update,
                         _("Failed to submit resource request. Please try again.", language)
                     )
             except Exception as e:
                 logger.error(f"Error requesting resources: {str(e)}")
-                await query.edit_message_text(
+                await edit_or_reply(
+                    update,
                     _("An error occurred: {error}", language).format(error=str(e))
                 )
             return
 
         # For other actions, proceed with normal action flow
         # Ask for resource type
-        await query.edit_message_text(
+        await edit_or_reply(
+            update,
             _("What resource would you like to use for this action?", language),
-            reply_markup=get_resource_type_keyboard(language)
+            keyboard=get_resource_type_keyboard(language)
         )
 
         # This will continue the action flow in states.py from ACTION_SELECT_RESOURCE state
         return ACTION_SELECT_RESOURCE
     except Exception as e:
-        await _handle_db_error_callback(update, language, e, "politician_action_handler")
+        await handle_error(update, language, e, "politician_action_handler")
 
 
 async def exchange_resources_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle resource exchange initiation."""
-    query = update.callback_query
-    await query.answer()
+    await answer_callback(update)
 
     # This is the entry point for resource conversion from a button click
     from bot.states import resource_conversion_start
@@ -661,74 +617,64 @@ async def exchange_resources_callback(update: Update, context: ContextTypes.DEFA
 
 async def join_collective_action_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle joining collective actions from a button click."""
-    query = update.callback_query
-    await query.answer()
+    await answer_callback(update)
 
     telegram_id = str(update.effective_user.id)
     language = await get_user_language(telegram_id)
 
-    if not await _require_registration_callback(update, language):
+    if not await require_registration(update, language):
         return ConversationHandler.END
 
     try:
         # Extract action ID
-        action_data = query.data.split(":", 1)
+        action_data = update.callback_query.data.split(":", 1)
         if len(action_data) < 2:
-            await query.edit_message_text(
+            await edit_or_reply(
+                update,
                 _("Invalid action format. Please try again.", language)
             )
             return ConversationHandler.END
 
         action_id = action_data[1]
 
-        # Initialize user context for joining action
-        user_data = get_user_context(telegram_id)
-        user_data["join_action_id"] = action_id
+        # Store action ID in user context
+        set_user_data(telegram_id, "join_action_id", action_id, context)
 
         # Prompt for resource selection
-        await query.edit_message_text(
+        await edit_or_reply(
+            update,
             _("You are joining collective action {action_id}.\n\nWhat resource would you like to contribute?",
               language).format(
                 action_id=action_id
             ),
-            reply_markup=get_resource_type_keyboard(language)
+            keyboard=get_resource_type_keyboard(language)
         )
 
         return JOIN_ACTION_RESOURCE
     except Exception as e:
-        await _handle_db_error_callback(update, language, e, "join_collective_action_callback")
+        await handle_error(update, language, e, "join_collective_action_callback")
         return ConversationHandler.END
 
 
 async def check_income_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle income check callback."""
-    query = None
-    message = None
+    await answer_callback(update)
 
-    if update.callback_query:
-        query = update.callback_query
-        await query.answer()
+    telegram_id = str(update.effective_user.id)
+    language = await get_user_language(telegram_id)
 
-        telegram_id = str(update.effective_user.id)
-        language = await get_user_language(telegram_id)
-
-        if not await _require_registration_callback(update, language):
-            return
-    else:
-        message = update.message
-        telegram_id = str(update.effective_user.id)
-        language = await get_user_language(telegram_id)
+    if not await require_registration(update, language):
+        return
 
     try:
         # Get income data
         income_data = await check_income(telegram_id, language)
 
         if not income_data:
-            error_text = _("Error retrieving income information. Please try again later.", language)
-            if query:
-                await query.edit_message_text(error_text)
-            else:
-                await message.reply_text(error_text)
+            await edit_or_reply(
+                update,
+                _("Error retrieving income information. Please try again later.", language)
+            )
             return
 
         # Format income info
@@ -737,30 +683,18 @@ async def check_income_callback(update: Update, context: ContextTypes.DEFAULT_TY
         # Create back button keyboard
         keyboard = get_back_keyboard(language)
 
-        if query:
-            await query.edit_message_text(
-                income_text,
-                parse_mode="Markdown",
-                reply_markup=keyboard
-            )
-        else:
-            await message.reply_text(
-                income_text,
-                parse_mode="Markdown",
-                reply_markup=keyboard
-            )
+        await edit_or_reply(
+            update,
+            income_text,
+            keyboard=keyboard,
+            parse_mode="Markdown"
+        )
     except Exception as e:
-        if query:
-            await _handle_db_error_callback(update, language, e, "check_income_callback")
-        else:
-            await message.reply_text(
-                _("Error retrieving income information: {error}", language).format(error=str(e))
-            )
+        await handle_error(update, language, e, "check_income_callback")
 
 
 async def help_section_callback(update: Update, context: ContextTypes.DEFAULT_TYPE, section: str) -> None:
     """Handle specific help section callbacks."""
-    query = update.callback_query
     telegram_id = str(update.effective_user.id)
     language = await get_user_language(telegram_id)
 
@@ -879,29 +813,29 @@ async def help_section_callback(update: Update, context: ContextTypes.DEFAULT_TY
         else:
             help_text = _("Help section not found.", language)
 
-        await query.edit_message_text(
+        await edit_or_reply(
+            update,
             help_text,
-            parse_mode="Markdown",
-            reply_markup=get_back_keyboard(language, "help")
+            keyboard=get_back_keyboard(language, "help"),
+            parse_mode="Markdown"
         )
     except Exception as e:
-        await _handle_db_error_callback(update, language, e, "help_section_callback")
+        await handle_error(update, language, e, "help_section_callback")
 
 
 async def news_page_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle news pagination navigation."""
-    query = update.callback_query
-    await query.answer()
+    await answer_callback(update)
 
     telegram_id = str(update.effective_user.id)
     language = await get_user_language(telegram_id)
 
-    if not await _require_registration_callback(update, language):
+    if not await require_registration(update, language):
         return
 
     try:
         # Extract page action (next/prev)
-        action = query.data.split(":", 1)[1]
+        action = update.callback_query.data.split(":", 1)[1]
 
         # Get current page or initialize
         page = context.user_data.get("news_page", 0)
@@ -918,49 +852,50 @@ async def news_page_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
         # Forward to main news handler with updated page
         await news_callback(update, context)
     except Exception as e:
-        await _handle_db_error_callback(update, language, e, "news_page_callback")
+        await handle_error(update, language, e, "news_page_callback")
 
 
 async def language_setting_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle language setting callbacks."""
-    query = update.callback_query
-    await query.answer()
+    await answer_callback(update)
 
     telegram_id = str(update.effective_user.id)
 
     try:
         # Extract selected language
-        selected_language = query.data.split(":", 1)[1]
+        selected_language = update.callback_query.data.split(":", 1)[1]
 
         # Update user's language preference
         success = await set_user_language(telegram_id, selected_language)
         language = await get_user_language(telegram_id)
 
         if success:
-            await query.edit_message_text(
+            await edit_or_reply(
+                update,
                 _("Language set to {language}. You can change it at any time from the settings menu.", language).format(
                     language=_("English", language) if selected_language == "en_US" else _("Russian", language)
                 ),
-                reply_markup=get_back_keyboard(language)
+                keyboard=get_back_keyboard(language)
             )
         else:
-            await query.edit_message_text(
+            await edit_or_reply(
+                update,
                 _("Failed to set language. Please try again later.", language),
-                reply_markup=get_back_keyboard(language)
+                keyboard=get_back_keyboard(language)
             )
     except Exception as e:
         # Handle error with default language English since we don't know user's language
         logger.error(f"Error setting language: {str(e)}")
-        await query.edit_message_text(
+        await edit_or_reply(
+            update,
             "Failed to set language. Please try again later.",
-            reply_markup=get_back_keyboard("en_US")
+            keyboard=get_back_keyboard("en_US")
         )
 
 
 async def settings_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle settings menu."""
-    query = update.callback_query
-    await query.answer()
+    await answer_callback(update)
 
     telegram_id = str(update.effective_user.id)
     language = await get_user_language(telegram_id)
@@ -981,48 +916,49 @@ async def settings_menu_callback(update: Update, context: ContextTypes.DEFAULT_T
 
         reply_markup = InlineKeyboardMarkup(keyboard)
 
-        await query.edit_message_text(
+        await edit_or_reply(
+            update,
             settings_text,
-            parse_mode="Markdown",
-            reply_markup=reply_markup
+            keyboard=reply_markup,
+            parse_mode="Markdown"
         )
     except Exception as e:
-        await _handle_db_error_callback(update, language, e, "settings_menu_callback")
+        await handle_error(update, language, e, "settings_menu_callback")
 
 
 async def language_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Show language selection menu."""
-    query = update.callback_query
-    await query.answer()
+    await answer_callback(update)
 
     telegram_id = str(update.effective_user.id)
     language = await get_user_language(telegram_id)
 
     try:
-        await query.edit_message_text(
+        await edit_or_reply(
+            update,
             _("Select your preferred language:", language),
-            reply_markup=get_language_keyboard()
+            keyboard=get_language_keyboard()
         )
     except Exception as e:
-        await _handle_db_error_callback(update, language, e, "language_menu_callback")
+        await handle_error(update, language, e, "language_menu_callback")
 
 
 async def politicians_type_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle politician type selection callback."""
-    query = update.callback_query
-    await query.answer()
+    await answer_callback(update)
 
     telegram_id = str(update.effective_user.id)
     language = await get_user_language(telegram_id)
 
-    if not await _require_registration_callback(update, language):
+    if not await require_registration(update, language):
         return
 
     try:
         # Extract politician type
-        data_parts = query.data.split(":", 1)
+        data_parts = update.callback_query.data.split(":", 1)
         if len(data_parts) < 2:
-            await query.edit_message_text(
+            await edit_or_reply(
+                update,
                 _("Invalid selection. Please try again.", language)
             )
             return
@@ -1033,7 +969,8 @@ async def politicians_type_callback(update: Update, context: ContextTypes.DEFAUL
         politicians_data = await get_politicians(telegram_id, politician_type, language)
 
         if not politicians_data:
-            await query.edit_message_text(
+            await edit_or_reply(
+                update,
                 _("Error retrieving politicians data. Please try again later.", language)
             )
             return
@@ -1044,13 +981,14 @@ async def politicians_type_callback(update: Update, context: ContextTypes.DEFAUL
         # Create back button keyboard
         keyboard = get_back_keyboard(language, "back_to_politicians")
 
-        await query.edit_message_text(
+        await edit_or_reply(
+            update,
             politicians_text,
-            parse_mode="Markdown",
-            reply_markup=keyboard
+            keyboard=keyboard,
+            parse_mode="Markdown"
         )
     except Exception as e:
-        await _handle_db_error_callback(update, language, e, "politicians_type_callback")
+        await handle_error(update, language, e, "politicians_type_callback")
 
 
 async def politician_info_callback(update: Update, context: ContextTypes.DEFAULT_TYPE,
@@ -1059,7 +997,7 @@ async def politician_info_callback(update: Update, context: ContextTypes.DEFAULT
     query = None
     if update.callback_query:
         query = update.callback_query
-        await query.answer()
+        await answer_callback(update)
 
         # Extract politician name if not provided
         if not politician_name and query.data.startswith("politician:"):
@@ -1068,7 +1006,7 @@ async def politician_info_callback(update: Update, context: ContextTypes.DEFAULT
     telegram_id = str(update.effective_user.id)
     language = await get_user_language(telegram_id)
 
-    if query and not await _require_registration_callback(update, language):
+    if query and not await require_registration(update, language):
         return
 
     try:
@@ -1079,10 +1017,7 @@ async def politician_info_callback(update: Update, context: ContextTypes.DEFAULT
             message = _("Error retrieving information for {politician}. Please try again later.", language).format(
                 politician=politician_name
             )
-            if query:
-                await query.edit_message_text(message)
-            else:
-                await update.message.reply_text(message)
+            await edit_or_reply(update, message)
             return
 
         # Format politician info
@@ -1091,36 +1026,24 @@ async def politician_info_callback(update: Update, context: ContextTypes.DEFAULT
         # Create interaction keyboard
         keyboard = get_politician_interaction_keyboard(language, politician_data)
 
-        if query:
-            await query.edit_message_text(
-                politician_text,
-                parse_mode="Markdown",
-                reply_markup=keyboard
-            )
-        else:
-            await update.message.reply_text(
-                politician_text,
-                parse_mode="Markdown",
-                reply_markup=keyboard
-            )
+        await edit_or_reply(
+            update,
+            politician_text,
+            keyboard=keyboard,
+            parse_mode="Markdown"
+        )
     except Exception as e:
-        if query:
-            await _handle_db_error_callback(update, language, e, "politician_info_callback")
-        else:
-            await update.message.reply_text(
-                _("Error retrieving politician information: {error}", language).format(error=str(e))
-            )
+        await handle_error(update, language, e, "politician_info_callback")
 
 
 async def action_button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle the action button from main menu."""
-    query = update.callback_query
-    await query.answer()
+    await answer_callback(update)
 
     telegram_id = str(update.effective_user.id)
     language = await get_user_language(telegram_id)
 
-    if not await _require_registration_callback(update, language):
+    if not await require_registration(update, language):
         return
 
     try:
@@ -1130,7 +1053,8 @@ async def action_button_callback(update: Update, context: ContextTypes.DEFAULT_T
         # Check if submissions are open
         cycle_info = await get_cycle_info(language)
         if not cycle_info.get("is_accepting_submissions", False):
-            await query.edit_message_text(
+            await edit_or_reply(
+                update,
                 _("The submission deadline for this cycle has passed. "
                   "Wait until the next cycle to submit actions.", language)
             )
@@ -1140,30 +1064,31 @@ async def action_button_callback(update: Update, context: ContextTypes.DEFAULT_T
         actions_remaining = player_data.get("actions_remaining", 0)
 
         if actions_remaining <= 0:
-            await query.edit_message_text(
+            await edit_or_reply(
+                update,
                 _("You have no main actions remaining for this cycle.", language),
-                reply_markup=get_back_keyboard(language)
+                keyboard=get_back_keyboard(language)
             )
             return
 
         # Show action options
-        await query.edit_message_text(
+        await edit_or_reply(
+            update,
             _("What type of main action would you like to take?", language),
-            reply_markup=get_action_keyboard(language)
+            keyboard=get_action_keyboard(language)
         )
     except Exception as e:
-        await _handle_db_error_callback(update, language, e, "action_button_callback")
+        await handle_error(update, language, e, "action_button_callback")
 
 
 async def quick_action_button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle the quick action button from main menu."""
-    query = update.callback_query
-    await query.answer()
+    await answer_callback(update)
 
     telegram_id = str(update.effective_user.id)
     language = await get_user_language(telegram_id)
 
-    if not await _require_registration_callback(update, language):
+    if not await require_registration(update, language):
         return
 
     try:
@@ -1173,7 +1098,8 @@ async def quick_action_button_callback(update: Update, context: ContextTypes.DEF
         # Check if submissions are open
         cycle_info = await get_cycle_info(language)
         if not cycle_info.get("is_accepting_submissions", False):
-            await query.edit_message_text(
+            await edit_or_reply(
+                update,
                 _("The submission deadline for this cycle has passed. "
                   "Wait until the next cycle to submit actions.", language)
             )
@@ -1183,51 +1109,52 @@ async def quick_action_button_callback(update: Update, context: ContextTypes.DEF
         quick_actions_remaining = player_data.get("quick_actions_remaining", 0)
 
         if quick_actions_remaining <= 0:
-            await query.edit_message_text(
+            await edit_or_reply(
+                update,
                 _("You have no quick actions remaining for this cycle.", language),
-                reply_markup=get_back_keyboard(language)
+                keyboard=get_back_keyboard(language)
             )
             return
 
         # Show quick action options
-        await query.edit_message_text(
+        await edit_or_reply(
+            update,
             _("What type of quick action would you like to take?", language),
-            reply_markup=get_quick_action_keyboard(language)
+            keyboard=get_quick_action_keyboard(language)
         )
     except Exception as e:
-        await _handle_db_error_callback(update, language, e, "quick_action_button_callback")
+        await handle_error(update, language, e, "quick_action_button_callback")
 
 
 async def politicians_button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle the politicians button from main menu."""
-    query = update.callback_query
-    await query.answer()
+    await answer_callback(update)
 
     telegram_id = str(update.effective_user.id)
     language = await get_user_language(telegram_id)
 
-    if not await _require_registration_callback(update, language):
+    if not await require_registration(update, language):
         return
 
     try:
         # Show politician options
-        await query.edit_message_text(
+        await edit_or_reply(
+            update,
             _("Which politicians would you like to see?", language),
-            reply_markup=get_politicians_keyboard(language)
+            keyboard=get_politicians_keyboard(language)
         )
     except Exception as e:
-        await _handle_db_error_callback(update, language, e, "politicians_button_callback")
+        await handle_error(update, language, e, "politicians_button_callback")
 
 
 async def view_collective_actions_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle view collective actions button."""
-    query = update.callback_query
-    await query.answer()
+    await answer_callback(update)
 
     telegram_id = str(update.effective_user.id)
     language = await get_user_language(telegram_id)
 
-    if not await _require_registration_callback(update, language):
+    if not await require_registration(update, language):
         return
 
     try:
@@ -1235,9 +1162,10 @@ async def view_collective_actions_callback(update: Update, context: ContextTypes
         active_actions = await get_active_collective_actions()
 
         if not active_actions:
-            await query.edit_message_text(
+            await edit_or_reply(
+                update,
                 _("There are no active collective actions at the moment.", language),
-                reply_markup=get_back_keyboard(language)
+                keyboard=get_back_keyboard(language)
             )
             return
 
@@ -1281,60 +1209,52 @@ async def view_collective_actions_callback(update: Update, context: ContextTypes
         keyboard = InlineKeyboardMarkup(buttons)
 
         # Send message with formatted text and join buttons
-        await query.edit_message_text(
+        await edit_or_reply(
+            update,
             actions_text,
-            parse_mode="Markdown",
-            reply_markup=keyboard
+            keyboard=keyboard,
+            parse_mode="Markdown"
         )
     except Exception as e:
-        await _handle_db_error_callback(update, language, e, "view_collective_actions_callback")
+        await handle_error(update, language, e, "view_collective_actions_callback")
 
 
 async def back_to_politicians_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle back to politicians list callback."""
-    query = update.callback_query
-    await query.answer()
+    await answer_callback(update)
 
     telegram_id = str(update.effective_user.id)
     language = await get_user_language(telegram_id)
 
-    if not await _require_registration_callback(update, language):
+    if not await require_registration(update, language):
         return
 
     try:
         # Show politician options
-        await query.edit_message_text(
+        await edit_or_reply(
+            update,
             _("Which politicians would you like to see?", language),
-            reply_markup=get_politicians_keyboard(language)
+            keyboard=get_politicians_keyboard(language)
         )
     except Exception as e:
-        await _handle_db_error_callback(update, language, e, "back_to_politicians_callback")
+        await handle_error(update, language, e, "back_to_politicians_callback")
 
 
 async def international_politicians_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle international politicians callback."""
-    query = None
-    message = None
+    telegram_id = str(update.effective_user.id)
+    language = await get_user_language(telegram_id)
 
     if update.callback_query:
-        query = update.callback_query
-        await query.answer()
-
-        telegram_id = str(update.effective_user.id)
-        language = await get_user_language(telegram_id)
-
-        if not await _require_registration_callback(update, language):
+        await answer_callback(update)
+        if not await require_registration(update, language):
             return
-    else:
-        message = update.message
-        telegram_id = str(update.effective_user.id)
-        language = await get_user_language(telegram_id)
 
     try:
         # Forward to politicians_type_callback with type "international"
-        if query:
+        if update.callback_query:
             # Modify query.data to simulate politicians:international
-            query.data = "politicians:international"
+            update.callback_query.data = "politicians:international"
             await politicians_type_callback(update, context)
         else:
             # Create a fake update with callback_query
@@ -1343,7 +1263,7 @@ async def international_politicians_callback(update: Update, context: ContextTyp
                 id="0",
                 from_user=update.effective_user,
                 chat_instance="0",
-                message=message,
+                message=update.message,
                 data="politicians:international"
             )
             fake_update = Update(0)
@@ -1352,29 +1272,24 @@ async def international_politicians_callback(update: Update, context: ContextTyp
 
             await politicians_type_callback(fake_update, context)
     except Exception as e:
-        if query:
-            await _handle_db_error_callback(update, language, e, "international_politicians_callback")
-        else:
-            await message.reply_text(
-                _("Error retrieving international politicians: {error}", language).format(error=str(e))
-            )
+        await handle_error(update, language, e, "international_politicians_callback")
 
 
 async def cancel_selection_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle cancel selection callback."""
-    query = update.callback_query
-    await query.answer()
+    await answer_callback(update)
 
     telegram_id = str(update.effective_user.id)
     language = await get_user_language(telegram_id)
 
     try:
-        await query.edit_message_text(
+        await edit_or_reply(
+            update,
             _("Action canceled.", language),
-            reply_markup=get_back_keyboard(language)
+            keyboard=get_back_keyboard(language)
         )
     except Exception as e:
-        await _handle_db_error_callback(update, language, e, "cancel_selection_callback")
+        await handle_error(update, language, e, "cancel_selection_callback")
 
 
 # Register these additional callbacks in register_callbacks function:

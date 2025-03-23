@@ -10,7 +10,6 @@ import re
 from datetime import datetime
 from typing import Dict, Any
 
-from utils.i18n import _
 
 # Initialize logger
 logger = logging.getLogger(__name__)

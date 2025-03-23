@@ -48,41 +48,13 @@ from utils.formatting import (
     format_politicians_list,
     format_politician_info
 )
-from utils.i18n import _, get_user_language
+from utils.i18n import _, get_user_language, set_user_language
+from utils.error_handling import require_registration, handle_error
+from utils.message_utils import send_message, edit_or_reply
+from utils.context_manager import get_user_data, set_user_data, clear_user_data
 
 # Initialize logger
 logger = logging.getLogger(__name__)
-
-
-async def _require_registration(update: Update, language: str) -> bool:
-    """Check if player is registered and send error message if not. Returns True if registered."""
-    telegram_id = str(update.effective_user.id)
-
-    try:
-        exists = await player_exists(telegram_id)
-    except Exception as e:
-        logger.error(f"Error checking if player exists: {e}")
-        await update.message.reply_text(
-            _("Sorry, we're experiencing technical difficulties. Please try again later.", language)
-        )
-        return False
-
-    if not exists:
-        await update.message.reply_text(
-            _("You are not registered yet. Use /start to register.", language)
-        )
-        return False
-
-    return True
-
-
-async def _handle_db_error(update: Update, language: str, error: Exception, operation: str) -> None:
-    """Handle database errors consistently."""
-    logger.error(f"Error in {operation}: {str(error)}")
-
-    message = _("Database connection error. Please try again later.", language)
-
-    await update.message.reply_text(message)
 
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Optional[int]:
@@ -98,19 +70,23 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> O
         player_data = await get_player(telegram_id)
         if player_data:
             # Welcome back message for existing player
-            await update.message.reply_text(
+            await send_message(
+                update,
                 _("Welcome back to Novi-Sad, {name}! What would you like to do?", language).format(
                     name=player_data.get("player_name", user.first_name)
                 ),
-                reply_markup=get_start_keyboard(language)
+                keyboard=get_start_keyboard(language),
+                context=context
             )
             return None
 
     # For new players, start registration process
-    await update.message.reply_text(
+    await send_message(
+        update,
         _("Welcome to Novi-Sad, a city at the crossroads of Yugoslavia's future! "
           "You're about to enter a political game set in September 1999.\n\n"
-          "First, tell me your character's name:", language)
+          "First, tell me your character's name:", language),
+        context=context
     )
     return NAME_ENTRY
 
@@ -154,10 +130,12 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         language
     )
 
-    await update.message.reply_text(
+    await send_message(
+        update,
         help_text,
+        keyboard=get_help_keyboard(language),
         parse_mode="Markdown",
-        reply_markup=get_help_keyboard(language)
+        context=context
     )
 
 
@@ -166,7 +144,7 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     telegram_id = str(update.effective_user.id)
     language = await get_user_language(telegram_id)
 
-    if not await _require_registration(update, language):
+    if not await require_registration(update, language):
         return
 
     try:
@@ -174,21 +152,25 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         player_status = await get_player(telegram_id)
 
         if not player_status:
-            await update.message.reply_text(
-                _("Error retrieving your status. Please try again later.", language)
+            await send_message(
+                update,
+                _("Error retrieving your status. Please try again later.", language),
+                context=context
             )
             return
 
         # Format and send status message
         status_text = await format_player_status(player_status, language)
 
-        await update.message.reply_text(
+        await send_message(
+            update,
             status_text,
+            keyboard=get_status_keyboard(language),
             parse_mode="Markdown",
-            reply_markup=get_status_keyboard(language)
+            context=context
         )
     except Exception as e:
-        await _handle_db_error(update, language, e, "status_command")
+        await handle_error(update, language, e, "status_command")
 
 
 async def map_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -196,7 +178,7 @@ async def map_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     telegram_id = str(update.effective_user.id)
     language = await get_user_language(telegram_id)
 
-    if not await _require_registration(update, language):
+    if not await require_registration(update, language):
         return
 
     try:
@@ -204,8 +186,10 @@ async def map_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         map_data = await get_map_data(language)
 
         if not map_data:
-            await update.message.reply_text(
-                _("Error retrieving map data. Please try again later.", language)
+            await send_message(
+                update,
+                _("Error retrieving map data. Please try again later.", language),
+                context=context
             )
             return
 
@@ -238,13 +222,15 @@ async def map_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         # Add map link if available
         map_text += "\n" + _("For a visual map, use the button below:", language)
 
-        await update.message.reply_text(
+        await send_message(
+            update,
             map_text,
+            keyboard=get_map_keyboard(language),
             parse_mode="Markdown",
-            reply_markup=get_map_keyboard(language)
+            context=context
         )
     except Exception as e:
-        await _handle_db_error(update, language, e, "map_command")
+        await handle_error(update, language, e, "map_command")
 
 
 async def active_collective_actions_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -252,7 +238,7 @@ async def active_collective_actions_command(update: Update, context: ContextType
     telegram_id = str(update.effective_user.id)
     language = await get_user_language(telegram_id)
 
-    if not await _require_registration(update, language):
+    if not await require_registration(update, language):
         return
 
     try:
@@ -260,9 +246,11 @@ async def active_collective_actions_command(update: Update, context: ContextType
         active_actions = await get_active_collective_actions()
 
         if not active_actions:
-            await update.message.reply_text(
+            await send_message(
+                update,
                 _("There are no active collective actions at the moment.", language),
-                reply_markup=get_back_keyboard(language)
+                keyboard=get_back_keyboard(language),
+                context=context
             )
             return
 
@@ -312,13 +300,15 @@ async def active_collective_actions_command(update: Update, context: ContextType
             keyboard.append(keyboard_row)
 
         # Send message with formatted text and join buttons
-        await update.message.reply_text(
+        await send_message(
+            update,
             actions_text,
+            keyboard=InlineKeyboardMarkup(keyboard),
             parse_mode="Markdown",
-            reply_markup=InlineKeyboardMarkup(keyboard)
+            context=context
         )
     except Exception as e:
-        await _handle_db_error(update, language, e, "active_collective_actions_command")
+        await handle_error(update, language, e, "active_collective_actions_command")
 
 
 async def time_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -331,21 +321,25 @@ async def time_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         cycle_info = await get_cycle_info(language)
 
         if not cycle_info:
-            await update.message.reply_text(
-                _("Error retrieving cycle information. Please try again later.", language)
+            await send_message(
+                update,
+                _("Error retrieving cycle information. Please try again later.", language),
+                context=context
             )
             return
 
         # Format and send cycle information
         cycle_text = await format_cycle_info(cycle_info, language)
 
-        await update.message.reply_text(
+        await send_message(
+            update,
             cycle_text,
+            keyboard=get_back_keyboard(language),
             parse_mode="Markdown",
-            reply_markup=get_back_keyboard(language)
+            context=context
         )
     except Exception as e:
-        await _handle_db_error(update, language, e, "time_command")
+        await handle_error(update, language, e, "time_command")
 
 
 async def news_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -353,7 +347,7 @@ async def news_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     telegram_id = str(update.effective_user.id)
     language = await get_user_language(telegram_id)
 
-    if not await _require_registration(update, language):
+    if not await require_registration(update, language):
         return
 
     try:
@@ -369,8 +363,10 @@ async def news_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         news_data = await get_latest_news(telegram_id, count=count, language=language)
 
         if not news_data:
-            await update.message.reply_text(
-                _("Error retrieving news. Please try again later.", language)
+            await send_message(
+                update,
+                _("Error retrieving news. Please try again later.", language),
+                context=context
             )
             return
 
@@ -387,18 +383,20 @@ async def news_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
                 InlineKeyboardButton(_("More News", language), callback_data="news_page:next")
             ])
 
-        # Add back button
+        # Add back to menu button
         buttons.append([
             InlineKeyboardButton(_("Back to Menu", language), callback_data="back_to_menu")
         ])
 
-        await update.message.reply_text(
+        await send_message(
+            update,
             news_text,
+            keyboard=InlineKeyboardMarkup(buttons),
             parse_mode="Markdown",
-            reply_markup=InlineKeyboardMarkup(buttons)
+            context=context
         )
     except Exception as e:
-        await _handle_db_error(update, language, e, "news_command")
+        await handle_error(update, language, e, "news_command")
 
 
 async def action_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -406,7 +404,7 @@ async def action_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     telegram_id = str(update.effective_user.id)
     language = await get_user_language(telegram_id)
 
-    if not await _require_registration(update, language):
+    if not await require_registration(update, language):
         return
 
     try:
@@ -416,9 +414,11 @@ async def action_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         # Check if submissions are open
         cycle_info = await get_cycle_info(language)
         if not cycle_info.get("is_accepting_submissions", False):
-            await update.message.reply_text(
+            await send_message(
+                update,
                 _("The submission deadline for this cycle has passed. "
-                  "Wait until the next cycle to submit actions.", language)
+                  "Wait until the next cycle to submit actions.", language),
+                context=context
             )
             return
 
@@ -426,19 +426,23 @@ async def action_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         actions_remaining = player_data.get("actions_remaining", 0)
 
         if actions_remaining <= 0:
-            await update.message.reply_text(
+            await send_message(
+                update,
                 _("You have no main actions remaining for this cycle.", language),
-                reply_markup=get_back_keyboard(language)
+                keyboard=get_back_keyboard(language),
+                context=context
             )
             return
 
         # Show action options
-        await update.message.reply_text(
+        await send_message(
+            update,
             _("What type of main action would you like to take?", language),
-            reply_markup=get_action_keyboard(language)
+            keyboard=get_action_keyboard(language),
+            context=context
         )
     except Exception as e:
-        await _handle_db_error(update, language, e, "action_command")
+        await handle_error(update, language, e, "action_command")
 
 
 async def quick_action_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -446,7 +450,7 @@ async def quick_action_command(update: Update, context: ContextTypes.DEFAULT_TYP
     telegram_id = str(update.effective_user.id)
     language = await get_user_language(telegram_id)
 
-    if not await _require_registration(update, language):
+    if not await require_registration(update, language):
         return
 
     try:
@@ -456,9 +460,11 @@ async def quick_action_command(update: Update, context: ContextTypes.DEFAULT_TYP
         # Check if submissions are open
         cycle_info = await get_cycle_info(language)
         if not cycle_info.get("is_accepting_submissions", False):
-            await update.message.reply_text(
+            await send_message(
+                update,
                 _("The submission deadline for this cycle has passed. "
-                  "Wait until the next cycle to submit actions.", language)
+                  "Wait until the next cycle to submit actions.", language),
+                context=context
             )
             return
 
@@ -466,19 +472,23 @@ async def quick_action_command(update: Update, context: ContextTypes.DEFAULT_TYP
         quick_actions_remaining = player_data.get("quick_actions_remaining", 0)
 
         if quick_actions_remaining <= 0:
-            await update.message.reply_text(
+            await send_message(
+                update,
                 _("You have no quick actions remaining for this cycle.", language),
-                reply_markup=get_back_keyboard(language)
+                keyboard=get_back_keyboard(language),
+                context=context
             )
             return
 
         # Show quick action options
-        await update.message.reply_text(
+        await send_message(
+            update,
             _("What type of quick action would you like to take?", language),
-            reply_markup=get_quick_action_keyboard(language)
+            keyboard=get_quick_action_keyboard(language),
+            context=context
         )
     except Exception as e:
-        await _handle_db_error(update, language, e, "quick_action_command")
+        await handle_error(update, language, e, "quick_action_command")
 
 
 async def cancel_action_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -486,7 +496,7 @@ async def cancel_action_command(update: Update, context: ContextTypes.DEFAULT_TY
     telegram_id = str(update.effective_user.id)
     language = await get_user_language(telegram_id)
 
-    if not await _require_registration(update, language):
+    if not await require_registration(update, language):
         return
 
     try:
@@ -501,7 +511,8 @@ async def cancel_action_command(update: Update, context: ContextTypes.DEFAULT_TY
             resource_amount = resource_refunded.get("amount", 0)
 
             # Success message
-            await update.message.reply_text(
+            await send_message(
+                update,
                 _("Action canceled successfully!\n\n"
                   "Action type: {action_type}\n"
                   "Resources refunded: {amount} {resource_type}", language).format(
@@ -509,17 +520,20 @@ async def cancel_action_command(update: Update, context: ContextTypes.DEFAULT_TY
                     amount=resource_amount,
                     resource_type=_(resource_type, language)
                 ),
-                reply_markup=get_back_keyboard(language)
+                keyboard=get_back_keyboard(language),
+                context=context
             )
         else:
             # Error message
-            await update.message.reply_text(
+            await send_message(
+                update,
                 _("Failed to cancel action. You may not have any pending actions, or the action may already be processed.",
                   language),
-                reply_markup=get_back_keyboard(language)
+                keyboard=get_back_keyboard(language),
+                context=context
             )
     except Exception as e:
-        await _handle_db_error(update, language, e, "cancel_action_command")
+        await handle_error(update, language, e, "cancel_action_command")
 
 
 async def actions_left_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -527,7 +541,7 @@ async def actions_left_command(update: Update, context: ContextTypes.DEFAULT_TYP
     telegram_id = str(update.effective_user.id)
     language = await get_user_language(telegram_id)
 
-    if not await _require_registration(update, language):
+    if not await require_registration(update, language):
         return
 
     try:
@@ -535,8 +549,10 @@ async def actions_left_command(update: Update, context: ContextTypes.DEFAULT_TYP
         player_data = await get_player(telegram_id)
 
         if not player_data:
-            await update.message.reply_text(
-                _("Error retrieving your information. Please try again later.", language)
+            await send_message(
+                update,
+                _("Error retrieving your information. Please try again later.", language),
+                context=context
             )
             return
 
@@ -549,7 +565,8 @@ async def actions_left_command(update: Update, context: ContextTypes.DEFAULT_TYP
         time_to_deadline = cycle_info.get("time_to_deadline", "unknown")
 
         # Format and send actions remaining message
-        await update.message.reply_text(
+        await send_message(
+            update,
             _("*Actions Remaining*\n\n"
               "Main Actions: {main_actions}\n"
               "Quick Actions: {quick_actions}\n\n"
@@ -558,11 +575,12 @@ async def actions_left_command(update: Update, context: ContextTypes.DEFAULT_TYP
                 quick_actions=quick_actions_remaining,
                 time_remaining=await format_time(time_to_deadline, language)
             ),
+            keyboard=get_back_keyboard(language),
             parse_mode="Markdown",
-            reply_markup=get_back_keyboard(language)
+            context=context
         )
     except Exception as e:
-        await _handle_db_error(update, language, e, "actions_left_command")
+        await handle_error(update, language, e, "actions_left_command")
 
 
 async def view_district_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -570,16 +588,18 @@ async def view_district_command(update: Update, context: ContextTypes.DEFAULT_TY
     telegram_id = str(update.effective_user.id)
     language = await get_user_language(telegram_id)
 
-    if not await _require_registration(update, language):
+    if not await require_registration(update, language):
         return
 
     try:
         # Check if district name is provided
         if not context.args or not context.args[0]:
             # Show list of all districts to choose from
-            await update.message.reply_text(
+            await send_message(
+                update,
                 _("Please select a district to view:", language),
-                reply_markup=await get_districts_keyboard(language)
+                keyboard=await get_districts_keyboard(language),
+                context=context
             )
             return
 
@@ -590,11 +610,13 @@ async def view_district_command(update: Update, context: ContextTypes.DEFAULT_TY
         district_data = await get_district_info(telegram_id, district_name, language)
 
         if not district_data:
-            await update.message.reply_text(
+            await send_message(
+                update,
                 _("Error retrieving district information for {district}. The district may not exist or there was a server error.",
                   language).format(
                     district=district_name
-                )
+                ),
+                context=context
             )
             return
 
@@ -602,13 +624,15 @@ async def view_district_command(update: Update, context: ContextTypes.DEFAULT_TY
         district_text = await format_district_info(district_data, language)
 
         # Send district info
-        await update.message.reply_text(
+        await send_message(
+            update,
             district_text,
+            keyboard=await get_districts_keyboard(language),
             parse_mode="Markdown",
-            reply_markup=await get_districts_keyboard(language)
+            context=context
         )
     except Exception as e:
-        await _handle_db_error(update, language, e, "view_district_command")
+        await handle_error(update, language, e, "view_district_command")
 
 
 async def resources_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -616,7 +640,7 @@ async def resources_command(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     telegram_id = str(update.effective_user.id)
     language = await get_user_language(telegram_id)
 
-    if not await _require_registration(update, language):
+    if not await require_registration(update, language):
         return
 
     try:
@@ -624,8 +648,10 @@ async def resources_command(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         player_data = await get_player(telegram_id)
 
         if not player_data:
-            await update.message.reply_text(
-                _("Error retrieving your information. Please try again later.", language)
+            await send_message(
+                update,
+                _("Error retrieving your information. Please try again later.", language),
+                context=context
             )
             return
 
@@ -651,13 +677,15 @@ async def resources_command(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             force=force
         )
 
-        await update.message.reply_text(
+        await send_message(
+            update,
             resources_text,
+            keyboard=get_resources_keyboard(language),
             parse_mode="Markdown",
-            reply_markup=get_resources_keyboard(language)
+            context=context
         )
     except Exception as e:
-        await _handle_db_error(update, language, e, "resources_command")
+        await handle_error(update, language, e, "resources_command")
 
 
 async def convert_resource_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -665,15 +693,17 @@ async def convert_resource_command(update: Update, context: ContextTypes.DEFAULT
     telegram_id = str(update.effective_user.id)
     language = await get_user_language(telegram_id)
 
-    if not await _require_registration(update, language):
+    if not await require_registration(update, language):
         return
 
     # Check if resource type and amount are provided
     if len(context.args) < 2:
-        await update.message.reply_text(
+        await send_message(
+            update,
             _("Please specify the resource type and amount. For example:\n"
               "/convert_resource money 5\n\n"
-              "This would convert 10 money (2:1 ratio) into 5 of your chosen resource.", language)
+              "This would convert 10 money (2:1 ratio) into 5 of your chosen resource.", language),
+            context=context
         )
         return
 
@@ -684,11 +714,13 @@ async def convert_resource_command(update: Update, context: ContextTypes.DEFAULT
         amount = int(context.args[1])
         await resource_conversion_start(update, context, resource_type, amount)
     except ValueError:
-        await update.message.reply_text(
-            _("Invalid amount. Please provide a number.", language)
+        await send_message(
+            update,
+            _("Invalid amount. Please provide a number.", language),
+            context=context
         )
     except Exception as e:
-        await _handle_db_error(update, language, e, "convert_resource_command")
+        await handle_error(update, language, e, "convert_resource_command")
 
 
 async def check_income_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -696,7 +728,7 @@ async def check_income_command(update: Update, context: ContextTypes.DEFAULT_TYP
     telegram_id = str(update.effective_user.id)
     language = await get_user_language(telegram_id)
 
-    if not await _require_registration(update, language):
+    if not await require_registration(update, language):
         return
 
     try:
@@ -704,8 +736,10 @@ async def check_income_command(update: Update, context: ContextTypes.DEFAULT_TYP
         income_data = await check_income(telegram_id, language)
 
         if not income_data:
-            await update.message.reply_text(
-                _("Error retrieving income information. Please try again later.", language)
+            await send_message(
+                update,
+                _("Error retrieving income information. Please try again later.", language),
+                context=context
             )
             return
 
@@ -713,13 +747,15 @@ async def check_income_command(update: Update, context: ContextTypes.DEFAULT_TYP
         income_text = await format_income_info(income_data, language)
 
         # Send income info
-        await update.message.reply_text(
+        await send_message(
+            update,
             income_text,
+            keyboard=get_back_keyboard(language),
             parse_mode="Markdown",
-            reply_markup=get_back_keyboard(language)
+            context=context
         )
     except Exception as e:
-        await _handle_db_error(update, language, e, "check_income_command")
+        await handle_error(update, language, e, "check_income_command")
 
 
 async def politicians_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -727,17 +763,19 @@ async def politicians_command(update: Update, context: ContextTypes.DEFAULT_TYPE
     telegram_id = str(update.effective_user.id)
     language = await get_user_language(telegram_id)
 
-    if not await _require_registration(update, language):
+    if not await require_registration(update, language):
         return
 
     try:
         # Show politician options
-        await update.message.reply_text(
+        await send_message(
+            update,
             _("Which politicians would you like to see?", language),
-            reply_markup=get_politicians_keyboard(language)
+            keyboard=get_politicians_keyboard(language),
+            context=context
         )
     except Exception as e:
-        await _handle_db_error(update, language, e, "politicians_command")
+        await handle_error(update, language, e, "politicians_command")
 
 
 async def politician_status_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -745,15 +783,17 @@ async def politician_status_command(update: Update, context: ContextTypes.DEFAUL
     telegram_id = str(update.effective_user.id)
     language = await get_user_language(telegram_id)
 
-    if not await _require_registration(update, language):
+    if not await require_registration(update, language):
         return
 
     try:
         # Check if politician name is provided
         if not context.args or not context.args[0]:
-            await update.message.reply_text(
+            await send_message(
+                update,
                 _("Please specify a politician name. For example:\n"
-                  "/politician_status Nemanja Kovacevic", language)
+                  "/politician_status Nemanja Kovacevic", language),
+                context=context
             )
             return
 
@@ -764,11 +804,13 @@ async def politician_status_command(update: Update, context: ContextTypes.DEFAUL
         politician_data = await get_politician_status(telegram_id, politician_name, language)
 
         if not politician_data:
-            await update.message.reply_text(
+            await send_message(
+                update,
                 _("Error retrieving information for politician {name}. The politician may not exist or there was a server error.",
                   language).format(
                     name=politician_name
-                )
+                ),
+                context=context
             )
             return
 
@@ -776,13 +818,15 @@ async def politician_status_command(update: Update, context: ContextTypes.DEFAUL
         politician_text = await format_politician_info(politician_data, language)
 
         # Send politician info
-        await update.message.reply_text(
+        await send_message(
+            update,
             politician_text,
+            keyboard=get_politician_interaction_keyboard(language, politician_data),
             parse_mode="Markdown",
-            reply_markup=get_politician_interaction_keyboard(language, politician_data)
+            context=context
         )
     except Exception as e:
-        await _handle_db_error(update, language, e, "politician_status_command")
+        await handle_error(update, language, e, "politician_status_command")
 
 
 async def international_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -790,7 +834,7 @@ async def international_command(update: Update, context: ContextTypes.DEFAULT_TY
     telegram_id = str(update.effective_user.id)
     language = await get_user_language(telegram_id)
 
-    if not await _require_registration(update, language):
+    if not await require_registration(update, language):
         return
 
     try:
@@ -798,8 +842,10 @@ async def international_command(update: Update, context: ContextTypes.DEFAULT_TY
         politicians_data = await get_politicians(telegram_id, "international", language)
 
         if not politicians_data:
-            await update.message.reply_text(
-                _("Error retrieving international politicians. Please try again later.", language)
+            await send_message(
+                update,
+                _("Error retrieving international politicians. Please try again later.", language),
+                context=context
             )
             return
 
@@ -807,13 +853,15 @@ async def international_command(update: Update, context: ContextTypes.DEFAULT_TY
         politicians_text = await format_politicians_list(politicians_data, language)
 
         # Send politicians info
-        await update.message.reply_text(
+        await send_message(
+            update,
             politicians_text,
+            keyboard=get_politicians_keyboard(language),
             parse_mode="Markdown",
-            reply_markup=get_politicians_keyboard(language)
+            context=context
         )
     except Exception as e:
-        await _handle_db_error(update, language, e, "international_command")
+        await handle_error(update, language, e, "international_command")
 
 
 async def collective_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -844,23 +892,29 @@ async def admin_process_actions_command(update: Update, context: ContextTypes.DE
             actions_processed = result.get("actions_processed", 0)
             collective_actions_processed = result.get("collective_actions_processed", 0)
 
-            await update.message.reply_text(
+            await send_message(
+                update,
                 _("Actions processed successfully:\n\n"
                   "Regular actions: {actions}\n"
                   "Collective actions: {collective_actions}\n\n"
                   "New cycle has been created.", language).format(
                     actions=actions_processed,
                     collective_actions=collective_actions_processed
-                )
+                ),
+                context=context
             )
         else:
-            await update.message.reply_text(
-                _("Error processing actions. Make sure you have admin privileges.", language)
+            await send_message(
+                update,
+                _("Error processing actions. Make sure you have admin privileges.", language),
+                context=context
             )
     except Exception as e:
         logger.error(f"Error in admin_process_actions: {str(e)}")
-        await update.message.reply_text(
-            _("An error occurred while processing actions: {error}", language).format(error=str(e))
+        await send_message(
+            update,
+            _("An error occurred while processing actions: {error}", language).format(error=str(e)),
+            context=context
         )
 
 
@@ -895,20 +949,26 @@ async def admin_generate_effects_command(update: Update, context: ContextTypes.D
 
                 effects_text += f"• {politician}: {effect_type}\n  {description}\n\n"
 
-            await update.message.reply_text(
+            await send_message(
+                update,
                 _("Generated {count} international effects:\n\n{effects}", language).format(
                     count=effects_generated,
                     effects=effects_text
-                )
+                ),
+                context=context
             )
         else:
-            await update.message.reply_text(
-                _("Error generating international effects. Make sure you have admin privileges.", language)
+            await send_message(
+                update,
+                _("Error generating international effects. Make sure you have admin privileges.", language),
+                context=context
             )
     except Exception as e:
         logger.error(f"Error in admin_generate_effects: {str(e)}")
-        await update.message.reply_text(
-            _("An error occurred while generating effects: {error}", language).format(error=str(e))
+        await send_message(
+            update,
+            _("An error occurred while generating effects: {error}", language).format(error=str(e)),
+            context=context
         )
 
 
