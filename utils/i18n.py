@@ -27,65 +27,55 @@ _user_languages: Dict[str, str] = {}
 async def load_translations_from_db() -> None:
     """Load translations from the database with improved error handling."""
     try:
-        # Try to use the database client's execute_sql function
+        # First try using get_translations function
         try:
-            from db_client import execute_sql
+            from db.supabase_client import get_supabase
+            client = get_supabase()
 
-            # Query translations table in game schema
-            translations_data = await execute_sql("SELECT translation_key, en_US, ru_RU FROM game.translations;")
+            # Try the public helper function
+            response = client.rpc("get_translations").execute()
+            if hasattr(response, 'data') and response.data:
+                translations_dict = response.data
+                loaded_count = 0
 
-            if not translations_data:
-                logger.warning("No translations found in database")
-                return
-
-            loaded_count = 0
-            for translation in translations_data:
-                key = translation.get("translation_key", "")
-                if key:
-                    _translations["en_US"][key] = translation.get("en_US", key)
-                    _translations["ru_RU"][key] = translation.get("ru_RU", key)
+                for key, value in translations_dict.items():
+                    _translations["en_US"][key] = value.get("en_US", key)
+                    _translations["ru_RU"][key] = value.get("ru_RU", key)
                     loaded_count += 1
 
-            logger.info(f"Loaded {loaded_count} translations from database")
-            return
-        except ImportError:
-            logger.warning("Enhanced db_client not available, falling back to direct Supabase client")
-        except Exception as e:
-            logger.warning(f"Error using execute_sql from db_client: {e}, falling back to direct Supabase client")
+                logger.info(f"Loaded {loaded_count} translations using get_translations function")
+                return
+        except Exception as func_error:
+            logger.warning(f"Error using get_translations function: {func_error}, trying direct table access")
 
-        # Fallback to direct Supabase client if db_client is not available
-        from db.supabase_client import get_supabase
-        client = get_supabase()
-
-        # Check if the translations table exists in the game schema
+        # Direct table query - use correct schema syntax
         try:
-            # Use explicit schema reference
+            from db.supabase_client import get_supabase
+            client = get_supabase()
+
+            # Use the correct schema reference (just "game.translations", not "public.game.translations")
             response = client.from_("game.translations").select("translation_key,en_US,ru_RU").execute()
 
-            # Process the returned data if it has the expected format
             if hasattr(response, 'data'):
                 translations_data = response.data
-
-                if not translations_data:
-                    logger.warning("No translations found in database")
-                    return
+                loaded_count = 0
 
                 for translation in translations_data:
                     key = translation.get("translation_key", "")
                     if key:
                         _translations["en_US"][key] = translation.get("en_US", key)
                         _translations["ru_RU"][key] = translation.get("ru_RU", key)
+                        loaded_count += 1
 
-                logger.info(f"Loaded {len(translations_data)} translations from database")
+                logger.info(f"Loaded {loaded_count} translations from database")
             else:
-                logger.warning("Unexpected response format from translations table")
+                logger.warning("No translations found or unexpected response format")
         except Exception as table_error:
-            logger.warning(f"Error accessing translations in game schema: {table_error}")
+            logger.warning(f"Error accessing translations table: {table_error}")
             # Continue with default translations
     except Exception as e:
         logger.error(f"Error loading translations from database: {str(e)}")
         # Continue with default translations
-
 
 async def load_translations_from_file() -> None:
     """Load translations from JSON files as fallback or initial setup."""

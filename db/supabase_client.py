@@ -75,12 +75,23 @@ async def execute_function(function_name: str, params: Dict[str, Any]) -> Dict[s
 
 
 async def check_schema_exists() -> bool:
-    """Check if the game schema exists in the database."""
-    client = get_supabase()
+    """Check if the game schema exists using a more portable approach."""
     try:
-        # Direct table query instead of SQL execution
-        response = client.from_("pg_namespace").select("nspname").eq("nspname", "game").execute()
-        return hasattr(response, 'data') and len(response.data) > 0
+        # Use information_schema instead of pg_catalog
+        query = """
+        SELECT EXISTS (
+            SELECT 1 
+            FROM information_schema.schemata 
+            WHERE schema_name = 'game'
+        );
+        """
+
+        result = await execute_sql(query)
+        if result and result[0] and 'exists' in result[0]:
+            exists = result[0]['exists']
+            logger.info(f"Game schema exists: {exists}")
+            return exists
+        return False
     except Exception as e:
         logger.error(f"Error checking if schema exists: {str(e)}")
         return False
@@ -105,11 +116,15 @@ async def player_exists(telegram_id: str) -> bool:
     """Check if a player exists by Telegram ID."""
     try:
         client = get_supabase()
-        # First try via explicit function call
-        response = client.rpc("player_exists", {"p_telegram_id": telegram_id}).execute()
 
-        if hasattr(response, 'data'):
-            return response.data
+        # First try using the explicit schema prefix
+        try:
+            response = client.rpc("game.player_exists", {"p_telegram_id": telegram_id}).execute()
+            if hasattr(response, 'data'):
+                return response.data
+        except Exception:
+            # Fallback to direct query if function call fails
+            pass
 
         # Fallback to direct query - Use game schema prefix
         response = client.from_("game.players").select("player_id").eq("telegram_id", telegram_id).execute()
@@ -117,7 +132,6 @@ async def player_exists(telegram_id: str) -> bool:
     except Exception as e:
         logger.error(f"Error checking if player exists: {str(e)}")
         return False
-
 
 
 async def get_player(telegram_id: str) -> Optional[Dict[str, Any]]:
@@ -257,7 +271,7 @@ async def get_districts() -> List[Dict[str, Any]]:
     """Get all districts."""
     try:
         client = get_supabase()
-        # Use game schema prefix
+        # Use correct table reference without public prefix
         response = client.from_("game.districts").select("*").execute()
 
         if hasattr(response, 'data'):
@@ -265,6 +279,13 @@ async def get_districts() -> List[Dict[str, Any]]:
         return []
     except Exception as e:
         logger.error(f"Error getting districts: {str(e)}")
+        # Try a fallback approach with raw SQL
+        try:
+            result = await execute_sql("SELECT * FROM game.districts;")
+            if result:
+                return result
+        except Exception as sql_e:
+            logger.error(f"Fallback query failed: {str(sql_e)}")
         return []
 
 

@@ -1419,7 +1419,7 @@ join_command_handler = ConversationHandler(
     fallbacks=[
         CommandHandler("cancel", cancel_handler)
     ],
-    # Remove per_message=True since we're using CommandHandler in entry points
+    per_message=True  # Add this parameter to fix the warning
 )
 
 

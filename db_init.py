@@ -41,6 +41,7 @@ SQL_FILE_ORDER = [
     "08_security.sql",
     "09_initial_data.sql",
     # "10_sample_data.sql",  # Include sample data for testing
+    "11_fix_player_exists.sql",
 ]
 
 

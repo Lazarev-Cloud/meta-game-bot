@@ -269,11 +269,28 @@ async def main():
     async def shutdown(signal_number, frame):
         """Shut down the bot gracefully on receiving a signal."""
         logger.info(f"Received signal {signal_number}, shutting down...")
-        await application.stop()
-        await application.shutdown()
-        # Don't call sys.exit() directly from signal handler
 
-    # Register signal handlers - use create_task to avoid blocking
+        # Make sure updater is stopped first
+        if application.updater and application.updater.running:
+            try:
+                await application.updater.stop()
+            except Exception as e:
+                logger.error(f"Error stopping updater: {e}")
+
+        # Then stop the application
+        try:
+            if application.running:
+                await application.stop()
+        except Exception as e:
+            logger.error(f"Error stopping application: {e}")
+
+        # Finally, shutdown the application
+        try:
+            await application.shutdown()
+        except Exception as e:
+            logger.error(f"Error during application shutdown: {e}")
+
+    # Register signal handlers with proper error handling
     for sig in (signal.SIGINT, signal.SIGTERM):
         signal.signal(sig, lambda s, f: asyncio.create_task(shutdown(s, f)))
 
