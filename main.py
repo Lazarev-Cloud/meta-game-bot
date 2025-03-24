@@ -95,127 +95,129 @@ async def init_translations():
         logger.error(f"All attempts to initialize translations failed: {e}")
         logger.info("Continuing with default translations only")
 
-    async def init_database():
-        """Initialize the database if it hasn't been set up yet."""
+
+async def init_database():
+    """Initialize the database if it hasn't been set up yet."""
+    try:
+        # Initialize Supabase client
+        client = init_supabase()
+
+        # Check if game schema exists
+        schema_exists = False
         try:
-            # Initialize Supabase client
-            client = init_supabase()
-
-            # Check if game schema exists
-            schema_exists = False
+            schema_exists = await check_schema_exists()
+        except Exception as check_error:
+            logger.error(f"Error checking schema existence: {check_error}")
+            # Try a more direct approach
             try:
-                schema_exists = await check_schema_exists()
-            except Exception as check_error:
-                logger.error(f"Error checking schema existence: {check_error}")
-                # Try a more direct approach
+                from db.supabase_client import execute_sql
+                check_result = await execute_sql(
+                    "SELECT schema_name FROM information_schema.schemata WHERE schema_name = 'game';")
+                schema_exists = check_result and len(check_result) > 0
+                logger.info(f"Alternative schema check result: {schema_exists}")
+            except Exception as direct_check_error:
+                logger.error(f"Direct schema check also failed: {direct_check_error}")
+                # Last resort - try to query a table
                 try:
-                    from db.supabase_client import execute_sql
-                    check_result = await execute_sql(
-                        "SELECT schema_name FROM information_schema.schemata WHERE schema_name = 'game';")
-                    schema_exists = check_result and len(check_result) > 0
-                    logger.info(f"Alternative schema check result: {schema_exists}")
-                except Exception as direct_check_error:
-                    logger.error(f"Direct schema check also failed: {direct_check_error}")
-                    # Last resort - try to query a table
-                    try:
-                        test_result = await execute_sql(
-                            "SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'game' AND table_name = 'players');")
-                        if test_result and len(test_result) > 0 and 'exists' in test_result[0]:
-                            schema_exists = test_result[0]['exists']
-                            logger.info(f"Schema existence determined by players table check: {schema_exists}")
-                    except Exception as table_check_error:
-                        logger.error(f"Table existence check failed: {table_check_error}")
+                    test_result = await execute_sql(
+                        "SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'game' AND table_name = 'players');")
+                    if test_result and len(test_result) > 0 and 'exists' in test_result[0]:
+                        schema_exists = test_result[0]['exists']
+                        logger.info(f"Schema existence determined by players table check: {schema_exists}")
+                except Exception as table_check_error:
+                    logger.error(f"Table existence check failed: {table_check_error}")
 
-            if not schema_exists:
-                logger.info("Database schema 'game' doesn't exist. Running initialization...")
+        if not schema_exists:
+            logger.info("Database schema 'game' doesn't exist. Running initialization...")
 
-                try:
-                    # Execute basic SQL for schema and critical tables
-                    from db.supabase_client import execute_sql
+            try:
+                # Execute basic SQL for schema and critical tables
+                from db.supabase_client import execute_sql
 
-                    # Create the game schema
-                    await execute_sql("CREATE SCHEMA IF NOT EXISTS game;")
+                # Create the game schema
+                await execute_sql("CREATE SCHEMA IF NOT EXISTS game;")
 
-                    # Create essential tables with proper schema reference
-                    await execute_sql("""
-                    CREATE TABLE IF NOT EXISTS game.players (
-                        player_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-                        telegram_id TEXT UNIQUE NOT NULL,
-                        name TEXT NOT NULL,
-                        ideology_score INTEGER NOT NULL DEFAULT 0,
-                        remaining_actions INTEGER NOT NULL DEFAULT 1,
-                        remaining_quick_actions INTEGER NOT NULL DEFAULT 2,
-                        is_admin BOOLEAN DEFAULT FALSE,
-                        is_active BOOLEAN DEFAULT TRUE,
-                        language TEXT DEFAULT 'en_US',
-                        registered_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-                        last_active_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-                    );""")
+                # Create essential tables with proper schema reference
+                await execute_sql("""
+                CREATE TABLE IF NOT EXISTS game.players (
+                    player_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+                    telegram_id TEXT UNIQUE NOT NULL,
+                    name TEXT NOT NULL,
+                    ideology_score INTEGER NOT NULL DEFAULT 0,
+                    remaining_actions INTEGER NOT NULL DEFAULT 1,
+                    remaining_quick_actions INTEGER NOT NULL DEFAULT 2,
+                    is_admin BOOLEAN DEFAULT FALSE,
+                    is_active BOOLEAN DEFAULT TRUE,
+                    language TEXT DEFAULT 'en_US',
+                    registered_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+                    last_active_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+                );""")
 
-                    await execute_sql("""
-                    CREATE TABLE IF NOT EXISTS game.resources (
-                        resource_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-                        player_id UUID NOT NULL,
-                        influence_amount INTEGER NOT NULL DEFAULT 0,
-                        money_amount INTEGER NOT NULL DEFAULT 0,
-                        information_amount INTEGER NOT NULL DEFAULT 0,
-                        force_amount INTEGER NOT NULL DEFAULT 0,
-                        updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-                    );""")
+                await execute_sql("""
+                CREATE TABLE IF NOT EXISTS game.resources (
+                    resource_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+                    player_id UUID NOT NULL,
+                    influence_amount INTEGER NOT NULL DEFAULT 0,
+                    money_amount INTEGER NOT NULL DEFAULT 0,
+                    information_amount INTEGER NOT NULL DEFAULT 0,
+                    force_amount INTEGER NOT NULL DEFAULT 0,
+                    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+                );""")
 
-                    logger.info("Created minimal database schema and tables")
-                except Exception as init_error:
-                    logger.error(f"Error during database initialization: {init_error}")
-            else:
-                logger.info("Database schema 'game' already exists")
+                logger.info("Created minimal database schema and tables")
+            except Exception as init_error:
+                logger.error(f"Error during database initialization: {init_error}")
+        else:
+            logger.info("Database schema 'game' already exists")
 
-                # Verify critical tables exist
-                try:
-                    tables_check = await execute_sql("""
-                    SELECT table_name FROM information_schema.tables 
-                    WHERE table_schema = 'game' AND table_name IN ('players', 'resources');
-                    """)
+            # Verify critical tables exist
+            try:
+                from db.supabase_client import execute_sql
+                tables_check = await execute_sql("""
+                SELECT table_name FROM information_schema.tables 
+                WHERE table_schema = 'game' AND table_name IN ('players', 'resources');
+                """)
 
-                    if tables_check:
-                        existing_tables = [t.get('table_name') for t in tables_check]
-                        logger.info(f"Verified tables: {', '.join(existing_tables)}")
+                if tables_check:
+                    existing_tables = [t.get('table_name') for t in tables_check]
+                    logger.info(f"Verified tables: {', '.join(existing_tables)}")
 
-                        if 'players' not in existing_tables or 'resources' not in existing_tables:
-                            logger.warning("Critical tables missing. Will attempt to create them.")
+                    if 'players' not in existing_tables or 'resources' not in existing_tables:
+                        logger.warning("Critical tables missing. Will attempt to create them.")
 
-                            if 'players' not in existing_tables:
-                                await execute_sql("""
-                                CREATE TABLE IF NOT EXISTS game.players (
-                                    player_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-                                    telegram_id TEXT UNIQUE NOT NULL,
-                                    name TEXT NOT NULL,
-                                    ideology_score INTEGER NOT NULL DEFAULT 0,
-                                    remaining_actions INTEGER NOT NULL DEFAULT 1,
-                                    remaining_quick_actions INTEGER NOT NULL DEFAULT 2,
-                                    is_admin BOOLEAN DEFAULT FALSE,
-                                    is_active BOOLEAN DEFAULT TRUE,
-                                    language TEXT DEFAULT 'en_US',
-                                    registered_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-                                    last_active_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-                                );""")
-                                logger.info("Created players table")
+                        if 'players' not in existing_tables:
+                            await execute_sql("""
+                            CREATE TABLE IF NOT EXISTS game.players (
+                                player_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+                                telegram_id TEXT UNIQUE NOT NULL,
+                                name TEXT NOT NULL,
+                                ideology_score INTEGER NOT NULL DEFAULT 0,
+                                remaining_actions INTEGER NOT NULL DEFAULT 1,
+                                remaining_quick_actions INTEGER NOT NULL DEFAULT 2,
+                                is_admin BOOLEAN DEFAULT FALSE,
+                                is_active BOOLEAN DEFAULT TRUE,
+                                language TEXT DEFAULT 'en_US',
+                                registered_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+                                last_active_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+                            );""")
+                            logger.info("Created players table")
 
-                            if 'resources' not in existing_tables:
-                                await execute_sql("""
-                                CREATE TABLE IF NOT EXISTS game.resources (
-                                    resource_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-                                    player_id UUID NOT NULL,
-                                    influence_amount INTEGER NOT NULL DEFAULT 0,
-                                    money_amount INTEGER NOT NULL DEFAULT 0,
-                                    information_amount INTEGER NOT NULL DEFAULT 0,
-                                    force_amount INTEGER NOT NULL DEFAULT 0,
-                                    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-                                );""")
-                                logger.info("Created resources table")
-                except Exception as tables_check_error:
-                    logger.error(f"Error checking tables: {tables_check_error}")
-        except Exception as e:
-            logger.error(f"Error initializing database: {e}")
+                        if 'resources' not in existing_tables:
+                            await execute_sql("""
+                            CREATE TABLE IF NOT EXISTS game.resources (
+                                resource_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+                                player_id UUID NOT NULL,
+                                influence_amount INTEGER NOT NULL DEFAULT 0,
+                                money_amount INTEGER NOT NULL DEFAULT 0,
+                                information_amount INTEGER NOT NULL DEFAULT 0,
+                                force_amount INTEGER NOT NULL DEFAULT 0,
+                                updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+                            );""")
+                            logger.info("Created resources table")
+            except Exception as tables_check_error:
+                logger.error(f"Error checking tables: {tables_check_error}")
+    except Exception as e:
+        logger.error(f"Error initializing database: {e}")
 
 
 async def cleanup_task():
