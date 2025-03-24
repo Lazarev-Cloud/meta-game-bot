@@ -48,6 +48,12 @@ class HandlerRegistry:
         self.conversation_handlers.append(conversation_handler)
         logger.debug(f"Registered conversation handler")
 
+        # Track commands that are entry points in this conversation
+        for entry_point in conversation_handler.entry_points:
+            if isinstance(entry_point, CommandHandler):
+                for cmd in entry_point.command:
+                    self._added_commands.add(cmd)
+
     def register_message_handler(self, message_handler: MessageHandler) -> None:
         """Register a general message handler."""
         self.message_handlers.append(message_handler)
@@ -63,12 +69,6 @@ class HandlerRegistry:
         # Apply conversation handlers first (highest priority)
         for handler in self.conversation_handlers:
             application.add_handler(handler)
-
-            # Track commands that are entry points in conversations
-            for entry_point in handler.entry_points:
-                if isinstance(entry_point, CommandHandler):
-                    for cmd in entry_point.command:
-                        self._added_commands.add(cmd)
 
         # Add command handlers that aren't part of conversations
         for command, handler in self.command_handlers.items():

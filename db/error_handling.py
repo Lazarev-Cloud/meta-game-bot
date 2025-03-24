@@ -8,7 +8,7 @@ Error handling utilities for database operations.
 import asyncio
 import logging
 from functools import wraps
-from typing import Callable, Optional, TypeVar
+from typing import Callable, Optional, TypeVar, Any
 
 logger = logging.getLogger(__name__)
 
@@ -93,3 +93,55 @@ def handle_db_error(func: Callable[..., T]) -> Callable[..., Optional[T]]:
             return None
 
     return wrapper
+
+
+async def operation_with_retry(
+        operation_name: str,
+        func: Callable,
+        *args,
+        default_return: Any = None,
+        max_retries: int = MAX_RETRIES,
+        retry_delay: float = RETRY_DELAY,
+        **kwargs
+) -> Any:
+    """
+    Execute an operation with automatic retries.
+
+    Args:
+        operation_name: Name of the operation for logging
+        func: Function to execute
+        *args: Arguments for the function
+        default_return: Value to return on failure
+        max_retries: Maximum number of retry attempts
+        retry_delay: Base delay between retries in seconds
+        **kwargs: Keyword arguments for the function
+
+    Returns:
+        Result of the function or default_return on failure
+    """
+    retries = 0
+    last_exception = None
+
+    while retries < max_retries:
+        try:
+            result = await func(*args, **kwargs)
+            # Handle cases where result is a number that could be mistaken for an error
+            if result is not None or isinstance(result, (int, float, bool)):
+                return result
+            return default_return
+        except Exception as e:
+            last_exception = e
+            retries += 1
+
+            logger.warning(
+                f"Operation '{operation_name}' failed (attempt {retries}/{max_retries}): {str(e)}"
+            )
+
+            if retries < max_retries:
+                # Wait before retrying with exponential backoff
+                await asyncio.sleep(retry_delay * retries)
+            else:
+                logger.error(f"Operation '{operation_name}' failed after {max_retries} attempts: {str(e)}")
+
+    # Return default value on complete failure
+    return default_return

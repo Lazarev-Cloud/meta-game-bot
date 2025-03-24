@@ -6,7 +6,7 @@ Unified message handling utilities for the Meta Game bot.
 """
 
 import logging
-from typing import Optional, Dict, Any, List, Union, Tuple
+from typing import Optional, Dict, Any, List, Union
 
 from telegram import Update, InlineKeyboardMarkup, Message, InlineKeyboardButton
 from telegram.ext import ContextTypes
@@ -121,7 +121,7 @@ async def create_keyboard(
     Create an inline keyboard from a list of button definitions.
 
     Args:
-        buttons: List of button rows, each containing dicts with 'text' and 'callback_data'
+        buttons: List of button rows, each containing dicts with 'text' and 'callback_data' or 'url'
         language: User's language for translation
 
     Returns:
@@ -131,7 +131,7 @@ async def create_keyboard(
     for row in buttons:
         keyboard_row = []
         for button in row:
-            text = _(button["text"], language) if isinstance(button["text"], str) else button["text"]
+            text = _(button["text"], language) if "text" in button else "Button"
 
             # Handle different button types (callback, url, etc.)
             if "url" in button:
@@ -285,10 +285,10 @@ async def split_long_message(
         return [text]
 
     parts = []
+    current_part = ""
 
     # Try to split on double newlines to keep paragraphs together
     paragraphs = text.split('\n\n')
-    current_part = ""
 
     for paragraph in paragraphs:
         # If adding this paragraph would exceed the limit

@@ -6,12 +6,12 @@ Low-level Supabase client implementation for the Meta Game bot.
 
 This module handles core Supabase client initialization and
 provides basic database operations. Higher-level functions
-have been moved to db_client.py.
+are defined in db_client.py.
 """
 
 import logging
 import os
-from typing import Dict, Any
+from typing import Dict, Any, Optional, List
 
 from supabase import create_client, Client
 
@@ -70,7 +70,7 @@ def get_supabase() -> Client:
     return _supabase_client
 
 
-async def execute_function(function_name: str, params: Dict[str, Any]) -> Dict[str, Any]:
+async def execute_function(function_name: str, params: Dict[str, Any]) -> Any:
     """
     Execute a Postgres function through Supabase RPC.
 
@@ -86,10 +86,6 @@ async def execute_function(function_name: str, params: Dict[str, Any]) -> Dict[s
     """
     client = get_supabase()
     try:
-        # Properly prefix the function name with schema
-        if not function_name.startswith("game."):
-            function_name = f"game.{function_name}"
-
         response = client.rpc(function_name, params).execute()
 
         if hasattr(response, 'data'):
@@ -164,7 +160,7 @@ async def execute_sql(sql: str) -> Any:
         sql: SQL query to execute
 
     Returns:
-        Query result
+        Query results or None on error
 
     Raises:
         Exception: If query execution fails

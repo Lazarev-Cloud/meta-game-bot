@@ -397,3 +397,527 @@ def build_params(params_dict: Dict[str, Any], param_prefix: str = "p_") -> Dict[
         Dictionary with prefixed parameter names
     """
     return {f"{param_prefix}{k}": v for k, v in params_dict.items()}
+
+
+# ===== Player-related functions =====
+
+@db_retry
+async def player_exists(telegram_id: str) -> bool:
+    """
+    Check if a player exists in the database.
+
+    Args:
+        telegram_id: Player's Telegram ID
+
+    Returns:
+        True if player exists, False otherwise
+    """
+    params = {"p_telegram_id": telegram_id}
+    result = await execute_rpc("player_exists", params)
+
+    # Handle the case where the RPC might return a non-boolean value
+    if isinstance(result, bool):
+        return result
+    return bool(result)
+
+
+@db_retry
+async def get_player(telegram_id: str) -> Optional[Dict[str, Any]]:
+    """
+    Get player information by Telegram ID.
+
+    Args:
+        telegram_id: Player's Telegram ID
+
+    Returns:
+        Player information as a dictionary or None if not found
+    """
+    params = {"p_telegram_id": telegram_id}
+    return await execute_rpc("api_get_player_status", params)
+
+
+@db_retry
+async def get_player_by_telegram_id(telegram_id: str) -> Optional[Dict[str, Any]]:
+    """
+    Get detailed player record by Telegram ID.
+
+    Args:
+        telegram_id: Player's Telegram ID
+
+    Returns:
+        Player record as a dictionary or None if not found
+    """
+    return await get_record("players", "telegram_id", telegram_id)
+
+
+@db_retry
+async def register_player(telegram_id: str, name: str, ideology_score: int) -> Optional[Dict[str, Any]]:
+    """
+    Register a new player.
+
+    Args:
+        telegram_id: Player's Telegram ID
+        name: Player's name
+        ideology_score: Player's ideology score (-5 to 5)
+
+    Returns:
+        Player record or None on error
+    """
+    params = {
+        "p_telegram_id": telegram_id,
+        "p_name": name,
+        "p_ideology_score": ideology_score
+    }
+    return await execute_rpc("api_register_player", params)
+
+
+# ===== Language and preferences =====
+
+@db_retry
+async def get_player_language(telegram_id: str) -> str:
+    """
+    Get player's preferred language.
+
+    Args:
+        telegram_id: Player's Telegram ID
+
+    Returns:
+        Language code (en_US or ru_RU)
+    """
+    player = await get_record("players", "telegram_id", telegram_id)
+    if player and "language" in player:
+        return player["language"]
+    return "en_US"
+
+
+@db_retry
+async def set_player_language(telegram_id: str, language: str) -> bool:
+    """
+    Set player's preferred language.
+
+    Args:
+        telegram_id: Player's Telegram ID
+        language: Language code (en_US or ru_RU)
+
+    Returns:
+        True if successful, False otherwise
+    """
+    if language not in ["en_US", "ru_RU"]:
+        return False
+
+    player = await get_record("players", "telegram_id", telegram_id)
+    if not player:
+        return False
+
+    result = await update_record("players", "telegram_id", telegram_id, {"language": language})
+    return result is not None
+
+
+# ===== Game cycle and actions =====
+
+@db_retry
+async def get_cycle_info(language: str = "en_US") -> Optional[Dict[str, Any]]:
+    """
+    Get current game cycle information.
+
+    Args:
+        language: Language code for translations
+
+    Returns:
+        Cycle information as a dictionary
+    """
+    params = {"p_language": language}
+    return await execute_rpc("api_get_cycle_info", params)
+
+
+@db_retry
+async def is_submission_open() -> bool:
+    """
+    Check if submissions are open for the current cycle.
+
+    Returns:
+        True if submissions are open, False otherwise
+    """
+    result = await execute_rpc("is_submission_open", {})
+    if isinstance(result, bool):
+        return result
+    return bool(result)
+
+
+@db_retry
+async def submit_action(
+        telegram_id: str,
+        action_type: str,
+        is_quick_action: bool,
+        district_name: Optional[str] = None,
+        target_player_name: Optional[str] = None,
+        target_politician_name: Optional[str] = None,
+        resource_type: Optional[str] = None,
+        resource_amount: Optional[int] = None,
+        physical_presence: bool = False,
+        expected_outcome: Optional[str] = None,
+        language: str = "en_US"
+) -> Optional[Dict[str, Any]]:
+    """
+    Submit an action.
+
+    Args:
+        telegram_id: Player's Telegram ID
+        action_type: Type of action
+        is_quick_action: Whether this is a quick action
+        district_name: Target district name
+        target_player_name: Target player name
+        target_politician_name: Target politician name
+        resource_type: Type of resource to use
+        resource_amount: Amount of resource to use
+        physical_presence: Whether player is physically present
+        expected_outcome: Expected outcome of action
+        language: Language code for translations
+
+    Returns:
+        Action result information
+    """
+    params = {
+        "p_telegram_id": telegram_id,
+        "p_action_type": action_type,
+        "p_is_quick_action": is_quick_action,
+        "p_district_name": district_name,
+        "p_target_player_name": target_player_name,
+        "p_target_politician_name": target_politician_name,
+        "p_resource_type": resource_type,
+        "p_resource_amount": resource_amount,
+        "p_physical_presence": physical_presence,
+        "p_expected_outcome": expected_outcome,
+        "p_language": language
+    }
+    return await execute_rpc("api_submit_action", params)
+
+
+@db_retry
+async def cancel_latest_action(telegram_id: str, language: str = "en_US") -> Optional[Dict[str, Any]]:
+    """
+    Cancel the latest action.
+
+    Args:
+        telegram_id: Player's Telegram ID
+        language: Language code for translations
+
+    Returns:
+        Cancellation result information
+    """
+    params = {
+        "p_telegram_id": telegram_id,
+        "p_language": language
+    }
+    return await execute_rpc("api_cancel_latest_action", params)
+
+
+# ===== Districts and map =====
+
+@db_retry
+async def get_districts() -> List[Dict[str, Any]]:
+    """
+    Get all districts.
+
+    Returns:
+        List of district records
+    """
+    return await get_records("districts", order=[{"column": "name", "ascending": True}])
+
+
+@db_retry
+async def get_district_info(telegram_id: str, district_name: str, language: str = "en_US") -> Optional[Dict[str, Any]]:
+    """
+    Get detailed information about a district.
+
+    Args:
+        telegram_id: Player's Telegram ID
+        district_name: District name
+        language: Language code for translations
+
+    Returns:
+        District information
+    """
+    params = {
+        "p_telegram_id": telegram_id,
+        "p_district_name": district_name,
+        "p_language": language
+    }
+    return await execute_rpc("api_get_district_info", params)
+
+
+@db_retry
+async def get_map_data(language: str = "en_US") -> Optional[Dict[str, Any]]:
+    """
+    Get map data with district control information.
+
+    Args:
+        language: Language code for translations
+
+    Returns:
+        Map data
+    """
+    params = {"p_language": language}
+    return await execute_rpc("api_get_map_data", params)
+
+
+# ===== Resources and economy =====
+
+@db_retry
+async def exchange_resources(
+        telegram_id: str,
+        from_resource: str,
+        to_resource: str,
+        amount: int,
+        language: str = "en_US"
+) -> Optional[Dict[str, Any]]:
+    """
+    Exchange resources.
+
+    Args:
+        telegram_id: Player's Telegram ID
+        from_resource: Source resource type
+        to_resource: Target resource type
+        amount: Amount to exchange
+        language: Language code for translations
+
+    Returns:
+        Exchange result information
+    """
+    params = {
+        "p_telegram_id": telegram_id,
+        "p_from_resource": from_resource,
+        "p_to_resource": to_resource,
+        "p_amount": amount,
+        "p_language": language
+    }
+    return await execute_rpc("api_exchange_resources", params)
+
+
+@db_retry
+async def check_income(telegram_id: str, language: str = "en_US") -> Optional[Dict[str, Any]]:
+    """
+    Check expected resource income.
+
+    Args:
+        telegram_id: Player's Telegram ID
+        language: Language code for translations
+
+    Returns:
+        Income information
+    """
+    params = {
+        "p_telegram_id": telegram_id,
+        "p_language": language
+    }
+    return await execute_rpc("api_check_income", params)
+
+
+# ===== News and information =====
+
+@db_retry
+async def get_latest_news(telegram_id: str, count: int = 5, language: str = "en_US") -> Optional[Dict[str, Any]]:
+    """
+    Get latest news.
+
+    Args:
+        telegram_id: Player's Telegram ID
+        count: Number of news items to retrieve
+        language: Language code for translations
+
+    Returns:
+        News information
+    """
+    params = {
+        "p_telegram_id": telegram_id,
+        "p_count": count,
+        "p_language": language
+    }
+    return await execute_rpc("api_get_latest_news", params)
+
+
+# ===== Politicians =====
+
+@db_retry
+async def get_politicians(telegram_id: str, type_filter: str = "all", language: str = "en_US") -> Optional[
+    Dict[str, Any]]:
+    """
+    Get politicians.
+
+    Args:
+        telegram_id: Player's Telegram ID
+        type_filter: Type of politicians to retrieve (local, international, or all)
+        language: Language code for translations
+
+    Returns:
+        Politicians information
+    """
+    params = {
+        "p_telegram_id": telegram_id,
+        "p_type": type_filter,
+        "p_language": language
+    }
+    return await execute_rpc("api_get_politicians", params)
+
+
+@db_retry
+async def get_politician_status(telegram_id: str, politician_name: str, language: str = "en_US") -> Optional[
+    Dict[str, Any]]:
+    """
+    Get detailed information about a politician.
+
+    Args:
+        telegram_id: Player's Telegram ID
+        politician_name: Politician name
+        language: Language code for translations
+
+    Returns:
+        Politician information
+    """
+    params = {
+        "p_telegram_id": telegram_id,
+        "p_politician_name": politician_name,
+        "p_language": language
+    }
+    return await execute_rpc("api_get_politician_status", params)
+
+
+# ===== Collective actions =====
+
+@db_retry
+async def initiate_collective_action(
+        telegram_id: str,
+        action_type: str,
+        district_name: str,
+        target_player_name: Optional[str] = None,
+        resource_type: str = "influence",
+        resource_amount: int = 1,
+        physical_presence: bool = False,
+        language: str = "en_US"
+) -> Optional[Dict[str, Any]]:
+    """
+    Initiate a collective action.
+
+    Args:
+        telegram_id: Player's Telegram ID
+        action_type: Type of action
+        district_name: Target district name
+        target_player_name: Target player name
+        resource_type: Type of resource to use
+        resource_amount: Amount of resource to use
+        physical_presence: Whether player is physically present
+        language: Language code for translations
+
+    Returns:
+        Collective action result information
+    """
+    params = {
+        "p_telegram_id": telegram_id,
+        "p_action_type": action_type,
+        "p_district_name": district_name,
+        "p_target_player_name": target_player_name,
+        "p_resource_type": resource_type,
+        "p_resource_amount": resource_amount,
+        "p_physical_presence": physical_presence,
+        "p_language": language
+    }
+    return await execute_rpc("api_initiate_collective_action", params)
+
+
+@db_retry
+async def join_collective_action(
+        telegram_id: str,
+        collective_action_id: str,
+        resource_type: str,
+        resource_amount: int,
+        physical_presence: bool = False,
+        language: str = "en_US"
+) -> Optional[Dict[str, Any]]:
+    """
+    Join a collective action.
+
+    Args:
+        telegram_id: Player's Telegram ID
+        collective_action_id: Collective action ID
+        resource_type: Type of resource to contribute
+        resource_amount: Amount of resource to contribute
+        physical_presence: Whether player is physically present
+        language: Language code for translations
+
+    Returns:
+        Join result information
+    """
+    params = {
+        "p_telegram_id": telegram_id,
+        "p_collective_action_id": collective_action_id,
+        "p_resource_type": resource_type,
+        "p_resource_amount": resource_amount,
+        "p_physical_presence": physical_presence,
+        "p_language": language
+    }
+    return await execute_rpc("api_join_collective_action", params)
+
+
+@db_retry
+async def get_active_collective_actions() -> List[Dict[str, Any]]:
+    """
+    Get all active collective actions.
+
+    Returns:
+        List of active collective actions
+    """
+    return await get_records(
+        "collective_actions",
+        filters=[{"column": "status", "value": "active"}],
+        order=[{"column": "created_at", "ascending": False}]
+    )
+
+
+@db_retry
+async def get_collective_action(action_id: str) -> Optional[Dict[str, Any]]:
+    """
+    Get a collective action by ID.
+
+    Args:
+        action_id: Collective action ID
+
+    Returns:
+        Collective action record
+    """
+    return await get_record("collective_actions", "collective_action_id", action_id)
+
+
+# ===== Admin functions =====
+
+@db_retry
+async def admin_process_actions(telegram_id: str) -> Optional[Dict[str, Any]]:
+    """
+    Process all pending actions (admin only).
+
+    Args:
+        telegram_id: Admin's Telegram ID
+
+    Returns:
+        Process result information
+    """
+    params = {"p_telegram_id": telegram_id}
+    return await execute_rpc("api_admin_process_actions", params)
+
+
+@db_retry
+async def admin_generate_international_effects(telegram_id: str, count: int = 2) -> Optional[Dict[str, Any]]:
+    """
+    Generate international effects (admin only).
+
+    Args:
+        telegram_id: Admin's Telegram ID
+        count: Number of effects to generate
+
+    Returns:
+        Generation result information
+    """
+    params = {
+        "p_telegram_id": telegram_id,
+        "p_count": count
+    }
+    return await execute_rpc("api_admin_generate_international_effects", params)

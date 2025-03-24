@@ -153,3 +153,8 @@ def get_user_context(telegram_id: str) -> Dict[str, Any]:
 def set_user_context(telegram_id: str, data: Dict[str, Any]) -> None:
     """Legacy alias for set_user_data for backward compatibility."""
     context_manager.set_all(telegram_id, data)
+
+
+def clear_user_context(telegram_id: str) -> None:
+    """Legacy alias for clear_user_data for backward compatibility."""
+    context_manager.clear(telegram_id)

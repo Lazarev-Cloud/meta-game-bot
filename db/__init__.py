@@ -5,7 +5,7 @@
 Database module for the Meta Game.
 
 This module provides a unified API for database operations, consolidating
-functionality from supabase_client.py and queries.py to eliminate duplication.
+functionality from supabase_client.py and db_client.py to eliminate duplication.
 """
 
 # Import core database functions from supabase_client
