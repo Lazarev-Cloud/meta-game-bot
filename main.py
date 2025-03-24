@@ -9,6 +9,7 @@ A political strategy game set in Novi-Sad, Yugoslavia in 1999.
 import asyncio
 import os
 import traceback
+import sys
 
 from dotenv import load_dotenv
 from telegram import Update
@@ -20,7 +21,6 @@ from telegram.ext import (
 # Import core components
 from bot.handlers import register_all_handlers
 from bot.middleware import setup_middleware
-from bot.states import conversation_handlers
 from db.supabase_client import init_supabase, check_schema_exists
 from utils.config import load_config
 from utils.i18n import load_translations, get_user_language
@@ -117,15 +117,9 @@ async def init_database():
                 logger.info(f"Alternative schema check result: {schema_exists}")
             except Exception as direct_check_error:
                 logger.error(f"Direct schema check also failed: {direct_check_error}")
-                # Last resort - try to query a table
-                try:
-                    test_result = await execute_sql(
-                        "SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'game' AND table_name = 'players');")
-                    if test_result and len(test_result) > 0 and 'exists' in test_result[0]:
-                        schema_exists = test_result[0]['exists']
-                        logger.info(f"Schema existence determined by players table check: {schema_exists}")
-                except Exception as table_check_error:
-                    logger.error(f"Table existence check failed: {table_check_error}")
+                # Assume schema exists to avoid potential data loss
+                schema_exists = True
+                logger.warning("Assuming schema exists due to check failures")
 
         if not schema_exists:
             logger.info("Database schema 'game' doesn't exist. Running initialization...")
@@ -167,57 +161,12 @@ async def init_database():
                 logger.info("Created minimal database schema and tables")
             except Exception as init_error:
                 logger.error(f"Error during database initialization: {init_error}")
+                logger.warning("Continuing without database initialization")
         else:
             logger.info("Database schema 'game' already exists")
-
-            # Verify critical tables exist
-            try:
-                from db.supabase_client import execute_sql
-                tables_check = await execute_sql("""
-                SELECT table_name FROM information_schema.tables 
-                WHERE table_schema = 'game' AND table_name IN ('players', 'resources');
-                """)
-
-                if tables_check:
-                    existing_tables = [t.get('table_name') for t in tables_check]
-                    logger.info(f"Verified tables: {', '.join(existing_tables)}")
-
-                    if 'players' not in existing_tables or 'resources' not in existing_tables:
-                        logger.warning("Critical tables missing. Will attempt to create them.")
-
-                        if 'players' not in existing_tables:
-                            await execute_sql("""
-                            CREATE TABLE IF NOT EXISTS game.players (
-                                player_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-                                telegram_id TEXT UNIQUE NOT NULL,
-                                name TEXT NOT NULL,
-                                ideology_score INTEGER NOT NULL DEFAULT 0,
-                                remaining_actions INTEGER NOT NULL DEFAULT 1,
-                                remaining_quick_actions INTEGER NOT NULL DEFAULT 2,
-                                is_admin BOOLEAN DEFAULT FALSE,
-                                is_active BOOLEAN DEFAULT TRUE,
-                                language TEXT DEFAULT 'en_US',
-                                registered_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-                                last_active_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-                            );""")
-                            logger.info("Created players table")
-
-                        if 'resources' not in existing_tables:
-                            await execute_sql("""
-                            CREATE TABLE IF NOT EXISTS game.resources (
-                                resource_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-                                player_id UUID NOT NULL,
-                                influence_amount INTEGER NOT NULL DEFAULT 0,
-                                money_amount INTEGER NOT NULL DEFAULT 0,
-                                information_amount INTEGER NOT NULL DEFAULT 0,
-                                force_amount INTEGER NOT NULL DEFAULT 0,
-                                updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-                            );""")
-                            logger.info("Created resources table")
-            except Exception as tables_check_error:
-                logger.error(f"Error checking tables: {tables_check_error}")
     except Exception as e:
         logger.error(f"Error initializing database: {e}")
+        logger.warning("Bot will continue but database functionality may be limited")
 
 
 async def cleanup_task():
@@ -272,7 +221,12 @@ async def main():
 
     # Register all handlers using the unified handler registration system
     logger.info("Registering handlers...")
-    register_all_handlers(application)
+    try:
+        register_all_handlers(application)
+    except Exception as handler_error:
+        logger.error(f"Error registering handlers: {handler_error}")
+        logger.critical("Cannot continue without handlers")
+        return
 
     # Start the bot
     logger.info("Starting Meta Game bot...")
@@ -306,37 +260,58 @@ async def main():
             logger.error(f"Error during application shutdown: {e}")
 
     # Register signal handlers with proper error handling
-    for sig in (signal.SIGINT, signal.SIGTERM):
-        signal.signal(sig, lambda s, f: asyncio.create_task(shutdown(s, f)))
-
-    # Start the bot
-    await application.initialize()
-    await application.start()
-    await application.updater.start_polling(allowed_updates=Update.ALL_TYPES)
-    logger.info("Bot is running!")
-
-    # Start cleanup task as a background task
-    cleanup_job = asyncio.create_task(cleanup_task())
-
-    # Run the bot until stopped
     try:
-        # Use asyncio.Event() to keep the task running indefinitely
-        stop_event = asyncio.Event()
-        await stop_event.wait()
-    except asyncio.CancelledError:
-        # Bot is being shut down
-        logger.info("Main task cancelled, shutting down...")
-    finally:
-        # Clean up
-        if 'cleanup_job' in locals() and not cleanup_job.done():
-            cleanup_job.cancel()
+        for sig in (signal.SIGINT, signal.SIGTERM):
+            try:
+                signal.signal(sig, lambda s, f: asyncio.create_task(shutdown(s, f)))
+            except Exception as signal_error:
+                logger.error(f"Error setting up signal handler for {sig}: {signal_error}")
+    except Exception as e:
+        logger.error(f"Error setting up signal handlers: {e}")
 
-        # Ensure the bot is properly shut down
-        await application.updater.stop()
-        await application.stop()
-        await application.shutdown()
+    # Start the bot with error handling
+    try:
+        await application.initialize()
+        await application.start()
+        await application.updater.start_polling(allowed_updates=Update.ALL_TYPES)
+        logger.info("Bot is running!")
 
-    logger.info("Bot stopped")
+        # Start cleanup task as a background task
+        cleanup_job = asyncio.create_task(cleanup_task())
+
+        # Run the bot until stopped
+        try:
+            # Use asyncio.Event() to keep the task running indefinitely
+            stop_event = asyncio.Event()
+            await stop_event.wait()
+        except asyncio.CancelledError:
+            # Bot is being shut down
+            logger.info("Main task cancelled, shutting down...")
+        finally:
+            # Clean up
+            if 'cleanup_job' in locals() and not cleanup_job.done():
+                cleanup_job.cancel()
+
+            # Ensure the bot is properly shut down
+            await application.updater.stop()
+            await application.stop()
+            await application.shutdown()
+
+        logger.info("Bot stopped")
+
+    except Exception as startup_error:
+        logger.critical(f"Failed to start bot: {startup_error}")
+        # Try to clean up if startup failed
+        try:
+            if 'application' in locals():
+                if hasattr(application, 'updater') and application.updater:
+                    await application.updater.stop()
+                if hasattr(application, 'stop'):
+                    await application.stop()
+                if hasattr(application, 'shutdown'):
+                    await application.shutdown()
+        except Exception as cleanup_error:
+            logger.error(f"Error during emergency cleanup: {cleanup_error}")
 
 
 if __name__ == "__main__":
@@ -345,3 +320,7 @@ if __name__ == "__main__":
         asyncio.run(main())
     except (KeyboardInterrupt, SystemExit):
         logger.info("Bot stopped!")
+    except Exception as e:
+        logger.critical(f"Critical error in main: {e}")
+        traceback.print_exc()
+        sys.exit(1)

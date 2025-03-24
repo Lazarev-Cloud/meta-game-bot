@@ -51,7 +51,7 @@ class HandlerRegistry:
         # Track commands that are entry points in this conversation
         for entry_point in conversation_handler.entry_points:
             if isinstance(entry_point, CommandHandler):
-                for cmd in entry_point.command:
+                for cmd in entry_point.commands:  # Fixed attribute name
                     self._added_commands.add(cmd)
 
     def register_message_handler(self, message_handler: MessageHandler) -> None:

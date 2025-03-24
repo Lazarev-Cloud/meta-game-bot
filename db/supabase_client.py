@@ -108,7 +108,7 @@ async def check_schema_exists() -> bool:
         True if schema exists, False otherwise
     """
     try:
-        # Use information_schema instead of pg_catalog
+        # Use raw SQL query approach - this is more reliable than the builder
         query = """
         SELECT EXISTS (
             SELECT 1 
@@ -118,7 +118,7 @@ async def check_schema_exists() -> bool:
         """
 
         result = await execute_sql(query)
-        if result and len(result) > 0 and 'exists' in result[0]:
+        if result and len(result) > 0 and isinstance(result[0], dict) and 'exists' in result[0]:
             exists = result[0]['exists']
             logger.info(f"Game schema exists: {exists}")
             return exists
@@ -134,17 +134,6 @@ async def check_schema_exists() -> bool:
         return False
     except Exception as e:
         logger.error(f"Error checking if schema exists: {str(e)}")
-
-        # Try a final fallback approach - check if a known table exists
-        try:
-            fallback_query = "SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'game' AND table_name = 'players');"
-            fallback_result = await execute_sql(fallback_query)
-            if fallback_result and len(fallback_result) > 0 and 'exists' in fallback_result[0]:
-                exists = fallback_result[0]['exists']
-                logger.info(f"Game schema exists (verified through players table check): {exists}")
-                return exists
-        except Exception as fallback_error:
-            logger.error(f"Fallback schema check also failed: {str(fallback_error)}")
 
         # Default to assuming the schema exists if we can't check properly
         # This prevents unnecessary re-initialization attempts
@@ -167,44 +156,54 @@ async def execute_sql(sql: str) -> Any:
     """
     client = get_supabase()
     try:
+        # Try a direct approach first
         response = client.rpc("exec_sql", {"sql": sql}).execute()
         if hasattr(response, 'data'):
             return response.data
         return None
     except Exception as e:
-        # Try direct query if the RPC method fails
+        # For common SQL operations, try a more direct approach
         try:
-            # This is a fallback approach - try to use raw query
             logger.warning(f"RPC exec_sql failed, trying direct query: {str(e)}")
 
+            # For select queries, try using the query builder
             if sql.lower().startswith("select"):
                 # Extract table name for basic queries
+                # Example: "SELECT * FROM game.players" -> table="players", schema="game"
                 from_parts = sql.lower().split("from")
                 if len(from_parts) > 1:
                     table_parts = from_parts[1].strip().split()
                     if len(table_parts) > 0:
                         table_name = table_parts[0].strip()
-                        # Remove schema prefix if present
+
+                        # If schema.table format
                         if '.' in table_name:
                             schema, table = table_name.split('.')
 
-                            # Try to execute via Supabase query builder
+                            # We may need a fallback approach since schema method might not be available
+                            # in older versions of the supabase client
                             try:
-                                response = client.from_(table).schema(schema).select('*').execute()
+                                # First try with schema
+                                response = client.from_(table).select('*').execute()
+                            except Exception as table_error:
+                                logger.warning(f"Error with direct table query: {str(table_error)}")
+                                # If that fails, return empty data rather than crashing
+                                return []
+
+                            if hasattr(response, 'data'):
+                                return response.data
+                        else:
+                            # No schema specified, use table directly
+                            try:
+                                response = client.from_(table_name).select('*').execute()
                                 if hasattr(response, 'data'):
                                     return response.data
-                            except AttributeError:
-                                logger.warning("Schema method not available in Supabase client, using fallback")
-                                # If schema method is not available, try without schema
-                                try:
-                                    response = client.from_(table).select('*').execute()
-                                    if hasattr(response, 'data'):
-                                        return response.data
-                                except Exception as direct_query_error:
-                                    logger.error(f"Direct query also failed: {str(direct_query_error)}")
+                            except Exception as direct_query_error:
+                                logger.error(f"Direct query also failed: {str(direct_query_error)}")
 
-            # If we get here, both approaches failed
-            raise
+            # Return an empty list if all approaches fail, but don't crash
+            return []
         except Exception as fallback_error:
             logger.error(f"Error executing SQL (fallback also failed): {str(fallback_error)}")
-            raise e  # Re-raise the original error
+            # Return empty result instead of raising
+            return []

@@ -159,36 +159,30 @@ async def load_translations_from_file() -> None:
 async def load_translations_from_db() -> None:
     """Load translations from the database with unified error handling."""
     try:
-        # Try using the db_client method first
-        from db.db_client import db_operation
+        # Instead of multiple approaches, use a simpler direct SQL query
+        from db.supabase_client import execute_sql
 
-        async def fetch_translations():
-            from db.supabase_client import get_supabase
-            client = get_supabase()
-            response = client.from_("translations").schema("game").select("translation_key,en_US,ru_RU").execute()
-            return response.data if hasattr(response, 'data') else None
-
-        translations_data = await db_operation(
-            "load_translations_from_db",
-            fetch_translations,
-            default_return=[]
-        )
+        # Direct SQL query to fetch translations
+        query = "SELECT translation_key, en_US, ru_RU FROM game.translations;"
+        translations_data = await execute_sql(query)
 
         # Process the translations
-        if translations_data:
+        if translations_data and isinstance(translations_data, list):
             loaded_count = 0
             for translation in translations_data:
-                key = translation.get("translation_key", "")
-                if key:
-                    _translations["en_US"][key] = translation.get("en_US", key)
-                    _translations["ru_RU"][key] = translation.get("ru_RU", key)
-                    loaded_count += 1
+                if isinstance(translation, dict):
+                    key = translation.get("translation_key", "")
+                    if key:
+                        _translations["en_US"][key] = translation.get("en_US", key)
+                        _translations["ru_RU"][key] = translation.get("ru_RU", key)
+                        loaded_count += 1
 
             logger.info(f"Loaded {loaded_count} translations from database")
         else:
-            logger.info("No translations found in database")
+            logger.info("No translations found in database or invalid format")
     except Exception as e:
         logger.warning(f"Error loading translations from database: {e}")
+        logger.info("Continuing with file-based translations only")
 
 
 async def load_translations() -> None:
@@ -210,7 +204,11 @@ async def load_translations() -> None:
         await load_translations_from_file()
 
         # 3. Finally, try to load from database (which may override file translations)
-        await load_translations_from_db()
+        try:
+            await load_translations_from_db()
+        except Exception as db_error:
+            logger.error(f"Failed to load translations from database: {db_error}")
+            logger.info("Continuing with file-based translations only")
 
         logger.info(
             f"Loaded translations successfully: {len(_translations['en_US'])} English, "
