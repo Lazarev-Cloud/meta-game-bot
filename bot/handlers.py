@@ -31,6 +31,7 @@ class HandlerRegistry:
         self.conversation_handlers: List[ConversationHandler] = []
         self.message_handlers: List[MessageHandler] = []
         self.other_handlers: List[Any] = []
+        self._added_commands = set()  # Track commands already added via conversations
 
     def register_command(self, command: str, handler: Callable) -> None:
         """Register a command handler."""
@@ -58,18 +59,25 @@ class HandlerRegistry:
         logger.debug(f"Registered other handler: {type(handler).__name__}")
 
     def apply_handlers(self, application: Application) -> None:
-        """Apply all registered handlers to the application."""
-        # Add command handlers
+        """Apply all registered handlers to the application in correct order."""
+        # Apply conversation handlers first (highest priority)
+        for handler in self.conversation_handlers:
+            application.add_handler(handler)
+
+            # Track commands that are entry points in conversations
+            for entry_point in handler.entry_points:
+                if isinstance(entry_point, CommandHandler):
+                    for cmd in entry_point.command:
+                        self._added_commands.add(cmd)
+
+        # Add command handlers that aren't part of conversations
         for command, handler in self.command_handlers.items():
-            application.add_handler(CommandHandler(command, handler))
+            if command not in self._added_commands:
+                application.add_handler(CommandHandler(command, handler))
 
         # Add callback handlers
         for pattern, handler in self.callback_handlers.items():
             application.add_handler(CallbackQueryHandler(handler, pattern=pattern))
-
-        # Add conversation handlers
-        for handler in self.conversation_handlers:
-            application.add_handler(handler)
 
         # Add message handlers
         for handler in self.message_handlers:

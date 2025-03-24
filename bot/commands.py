@@ -6,7 +6,6 @@ Complete command handlers implementation for the Meta Game bot.
 """
 
 import logging
-from typing import Optional
 
 from telegram import Update
 from telegram.ext import ContextTypes, CommandHandler
@@ -21,7 +20,6 @@ from bot.keyboards import (
     get_districts_keyboard,
     get_resources_keyboard,
     get_politicians_keyboard,
-    get_politician_interaction_keyboard,
     get_back_keyboard
 )
 from bot.states import NAME_ENTRY
@@ -57,7 +55,7 @@ from utils.context_manager import get_user_data, set_user_data, clear_user_data
 logger = logging.getLogger(__name__)
 
 
-async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Optional[int]:
+async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle the /start command - register new player or welcome existing one."""
     user = update.effective_user
     telegram_id = str(user.id)
@@ -818,6 +816,7 @@ async def politician_status_command(update: Update, context: ContextTypes.DEFAUL
         politician_text = await format_politician_info(politician_data, language)
 
         # Send politician info
+        from bot.keyboards import get_politician_interaction_keyboard
         await send_message(
             update,
             politician_text,
@@ -972,30 +971,26 @@ async def admin_generate_effects_command(update: Update, context: ContextTypes.D
         )
 
 
-def register_commands(application) -> None:
+def register_commands(registry) -> None:
     """Register all command handlers."""
-    application.add_handler(CommandHandler("help", help_command))
-    application.add_handler(CommandHandler("status", status_command))
-    application.add_handler(CommandHandler("map", map_command))
-    application.add_handler(CommandHandler("time", time_command))
-    application.add_handler(CommandHandler("news", news_command))
-    application.add_handler(CommandHandler("action", action_command))
-    application.add_handler(CommandHandler("quick_action", quick_action_command))
-    application.add_handler(CommandHandler("cancel_action", cancel_action_command))
-    application.add_handler(CommandHandler("actions_left", actions_left_command))
-    application.add_handler(CommandHandler("view_district", view_district_command))
-    application.add_handler(CommandHandler("resources", resources_command))
-    application.add_handler(CommandHandler("convert_resource", convert_resource_command))
-    application.add_handler(CommandHandler("check_income", check_income_command))
-    application.add_handler(CommandHandler("politicians", politicians_command))
-    application.add_handler(CommandHandler("politician_status", politician_status_command))
-    application.add_handler(CommandHandler("international", international_command))
-
-    # Add the active collective actions command
-    application.add_handler(CommandHandler("active_actions", active_collective_actions_command))
-
-    # Note: "collective" and "join" commands are handled by conversation handlers in bot.states
-
-    # Admin commands
-    application.add_handler(CommandHandler("admin_process", admin_process_actions_command))
-    application.add_handler(CommandHandler("admin_generate", admin_generate_effects_command))
+    registry.register_command("help", help_command)
+    registry.register_command("status", status_command)
+    registry.register_command("map", map_command)
+    registry.register_command("time", time_command)
+    registry.register_command("news", news_command)
+    registry.register_command("action", action_command)
+    registry.register_command("quick_action", quick_action_command)
+    registry.register_command("cancel_action", cancel_action_command)
+    registry.register_command("actions_left", actions_left_command)
+    registry.register_command("view_district", view_district_command)
+    registry.register_command("resources", resources_command)
+    registry.register_command("convert_resource", convert_resource_command)
+    registry.register_command("check_income", check_income_command)
+    registry.register_command("politicians", politicians_command)
+    registry.register_command("politician_status", politician_status_command)
+    registry.register_command("international", international_command)
+    registry.register_command("active_actions", active_collective_actions_command)
+    registry.register_command("collective", collective_command)
+    registry.register_command("join", join_command)
+    registry.register_command("admin_process", admin_process_actions_command)
+    registry.register_command("admin_generate", admin_generate_effects_command)

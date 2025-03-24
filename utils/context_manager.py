@@ -16,6 +16,7 @@ logger = logging.getLogger(__name__)
 
 # Timeout for user context (30 minutes)
 USER_CONTEXT_TIMEOUT = 1800  # seconds
+MAX_CONTEXTS = 1000
 
 
 class ContextManager:
@@ -91,6 +92,10 @@ class ContextManager:
         """Get the number of user contexts in storage."""
         return len(self._storage)
 
+    def check_cleanup_needed(self) -> bool:
+        """Check if cleanup is needed due to large context size."""
+        return len(self._storage) >= MAX_CONTEXTS
+
 
 # Global context manager instance
 context_manager = ContextManager()
@@ -102,6 +107,10 @@ def get_user_data(telegram_id: str, context: Optional[ContextTypes.DEFAULT_TYPE]
     Get user data, combining PTB context (if provided) with our custom context.
     Always returns a copy to prevent unintended modifications.
     """
+    # Check if cleanup is needed
+    if context_manager.check_cleanup_needed():
+        context_manager.cleanup_expired()
+
     # Get data from our custom context
     data = context_manager.get_all(telegram_id)
 
@@ -133,3 +142,14 @@ def clear_user_data(telegram_id: str, context: Optional[ContextTypes.DEFAULT_TYP
     # Also clear PTB context if provided
     if context and hasattr(context, 'user_data'):
         context.user_data.clear()
+
+
+# Legacy aliases for backward compatibility
+def get_user_context(telegram_id: str) -> Dict[str, Any]:
+    """Legacy alias for get_user_data for backward compatibility."""
+    return context_manager.get_all(telegram_id)
+
+
+def set_user_context(telegram_id: str, data: Dict[str, Any]) -> None:
+    """Legacy alias for set_user_data for backward compatibility."""
+    context_manager.set_all(telegram_id, data)

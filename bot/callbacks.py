@@ -1303,46 +1303,49 @@ def register_additional_callbacks(application) -> None:
     application.add_handler(CallbackQueryHandler(language_menu_callback, pattern=r"^settings:language$"))
     application.add_handler(CallbackQueryHandler(language_setting_callback, pattern=r"^language:"))
 
-
-def register_callbacks(application) -> None:
+def register_callbacks(registry) -> None:
     """Register all callback query handlers."""
     # Main menu callbacks
-    application.add_handler(CallbackQueryHandler(status_callback, pattern=r"^status$"))
-    application.add_handler(CallbackQueryHandler(map_callback, pattern=r"^map$"))
-    application.add_handler(CallbackQueryHandler(news_callback, pattern=r"^news$"))
-    application.add_handler(CallbackQueryHandler(resources_callback, pattern=r"^resources$"))
-    application.add_handler(CallbackQueryHandler(action_button_callback, pattern=r"^action$"))
-    application.add_handler(CallbackQueryHandler(quick_action_button_callback, pattern=r"^quick_action$"))
-    application.add_handler(CallbackQueryHandler(politicians_button_callback, pattern=r"^politicians$"))
+    registry.register_callback("^status$", status_callback)
+    registry.register_callback("^map$", map_callback)
+    registry.register_callback("^news$", news_callback)
+    registry.register_callback("^resources$", resources_callback)
+    registry.register_callback("^action$", action_button_callback)
+    registry.register_callback("^quick_action$", quick_action_button_callback)
+    registry.register_callback("^politicians$", politicians_button_callback)
 
     # Secondary menu callbacks
-    application.add_handler(CallbackQueryHandler(actions_left_callback, pattern=r"^actions_left$"))
-    application.add_handler(CallbackQueryHandler(controlled_districts_callback, pattern=r"^controlled_districts$"))
-    application.add_handler(CallbackQueryHandler(check_income_callback, pattern=r"^check_income$"))
-    application.add_handler(CallbackQueryHandler(select_district_callback, pattern=r"^select_district$"))
-    application.add_handler(
-        CallbackQueryHandler(view_collective_actions_callback, pattern=r"^view_collective_actions$"))
+    registry.register_callback("^actions_left$", actions_left_callback)
+    registry.register_callback("^controlled_districts$", controlled_districts_callback)
+    registry.register_callback("^check_income$", check_income_callback)
+    registry.register_callback("^select_district$", select_district_callback)
+    registry.register_callback("^view_collective_actions$", view_collective_actions_callback)
 
     # Information callbacks
-    application.add_handler(CallbackQueryHandler(district_info_callback, pattern=r"^district:"))
-    application.add_handler(CallbackQueryHandler(back_to_politicians_callback, pattern=r"^back_to_politicians$"))
-    application.add_handler(CallbackQueryHandler(politicians_type_callback, pattern=r"^politicians:"))
-    application.add_handler(CallbackQueryHandler(politician_info_callback, pattern=r"^politician:"))
+    registry.register_callback("^district:", district_info_callback)
+    registry.register_callback("^back_to_politicians$", back_to_politicians_callback)
+    registry.register_callback("^politicians:", politicians_type_callback)
+    registry.register_callback("^politician:", politician_info_callback)
 
     # Action callbacks
-    application.add_handler(CallbackQueryHandler(exchange_resources_callback, pattern=r"^exchange_resources$"))
-    application.add_handler(CallbackQueryHandler(politician_action_handler, pattern=r"^politician_action:"))
-    application.add_handler(CallbackQueryHandler(join_collective_action_callback, pattern=r"^join_collective_action:"))
-    application.add_handler(CallbackQueryHandler(cancel_selection_callback, pattern=r"^cancel_selection$"))
+    registry.register_callback("^exchange_resources$", exchange_resources_callback)
+    registry.register_callback("^politician_action:", politician_action_handler)
+    registry.register_callback("^join_collective_action:", join_collective_action_callback)
+    registry.register_callback("^cancel_selection$", cancel_selection_callback)
 
     # Help callbacks
-    application.add_handler(CallbackQueryHandler(help_section_callback, pattern=r"^help:"))
+    registry.register_callback("^help:", help_section_callback)
 
     # Navigation callbacks
-    application.add_handler(CallbackQueryHandler(general_callback, pattern=r"^(back_to_menu|help)$"))
+    registry.register_callback("^(back_to_menu|help)$", general_callback)
 
-    # Additional callbacks
-    register_additional_callbacks(application)
+    # News pagination
+    registry.register_callback("^news_page:", news_page_callback)
+
+    # Settings and language
+    registry.register_callback("^settings$", settings_menu_callback)
+    registry.register_callback("^settings:language$", language_menu_callback)
+    registry.register_callback("^language:", language_setting_callback)
 
     # Register catch-all handler for any remaining patterns
-    application.add_handler(CallbackQueryHandler(general_callback))
+    registry.register_other_handler(CallbackQueryHandler(general_callback))

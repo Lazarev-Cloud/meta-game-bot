@@ -2,22 +2,18 @@
 # -*- coding: utf-8 -*-
 
 """
-Consolidated database client for Meta Game.
+Unified database operations for Meta Game.
 
-This module serves as the primary interface for all database operations,
-providing a clean, consistent API.
+This module consolidates database operations into a set of generic
+functions that handle errors, retries, and common patterns.
 """
 
 import asyncio
 import logging
-from typing import Dict, Any, Optional, List, TypeVar, Callable
+from typing import Dict, Any, Optional, List, TypeVar, Callable, Awaitable, Union, Tuple
 
 from db.error_handling import db_retry, DatabaseError
-from db.supabase_client import (
-    get_supabase,
-    execute_function,
-    execute_sql
-)
+from db.supabase_client import get_supabase, execute_function, execute_sql
 
 # Initialize logger
 logger = logging.getLogger(__name__)
@@ -26,7 +22,6 @@ logger = logging.getLogger(__name__)
 T = TypeVar('T')
 
 
-# Standardized database operation wrapper
 async def db_operation(operation_name: str,
                        func: Callable,
                        *args,
@@ -55,7 +50,12 @@ async def db_operation(operation_name: str,
 
     while retries < max_retries:
         try:
-            return await func(*args, **kwargs)
+            result = await func(*args, **kwargs)
+            # Handle cases where result is a number that could be mistaken for an error
+            # (e.g., 0 is a valid result but might be treated as falsey)
+            if result is not None or isinstance(result, (int, float, bool)):
+                return result
+            return default_return
         except Exception as e:
             last_exception = e
             retries += 1
@@ -76,426 +76,324 @@ async def db_operation(operation_name: str,
     return default_return
 
 
-# ---------------------------
-# Player-related functions
-# ---------------------------
+async def execute_rpc(
+        function_name: str,
+        params: Dict[str, Any],
+        schema_prefix: bool = True,
+        operation_name: Optional[str] = None
+) -> Any:
+    """
+    Execute an RPC function with proper error handling.
 
-async def player_exists(telegram_id: str) -> bool:
-    """Check if a player exists by Telegram ID."""
-    try:
+    Args:
+        function_name: Name of the function to call
+        params: Parameters to pass to the function
+        schema_prefix: Whether to add "game." prefix to function name
+        operation_name: Name for logging (defaults to function_name)
+
+    Returns:
+        Result of the RPC call or None on error
+    """
+    op_name = operation_name or function_name
+    prefixed_name = f"game.{function_name}" if schema_prefix and not function_name.startswith(
+        "game.") else function_name
+
+    return await db_operation(
+        op_name,
+        execute_function,
+        prefixed_name,
+        params
+    )
+
+
+async def execute_query(
+        query: str,
+        operation_name: str,
+        params: Optional[Dict[str, Any]] = None,
+        table: str = "",
+        schema: str = "game",
+) -> Any:
+    """
+    Execute a database query with proper error handling.
+
+    Args:
+        query: SQL query or query type like "select", "insert", etc.
+        operation_name: Name for logging
+        params: Query parameters
+        table: Table name for Supabase operations
+        schema: Schema name
+
+    Returns:
+        Query results or None on error
+    """
+
+    async def run_query():
         client = get_supabase()
 
-        # First try using the explicit schema prefix
-        try:
-            response = client.rpc("game.player_exists", {"p_telegram_id": telegram_id}).execute()
+        # Handle raw SQL queries
+        if query.lower().startswith(("select", "insert", "update", "delete")):
+            return await execute_sql(query)
+
+        # Handle Supabase query builder operations
+        if table:
+            builder = client.from_(table).schema(schema)
+
+            if query == "select":
+                columns = params.get("columns", "*") if params else "*"
+                builder = builder.select(columns)
+            elif query == "insert":
+                builder = builder.insert(params)
+            elif query == "update":
+                builder = builder.update(params)
+            elif query == "delete":
+                builder = builder.delete()
+
+            # Apply filters if provided
+            if params and "filters" in params:
+                for filter_item in params["filters"]:
+                    column = filter_item.get("column")
+                    operator = filter_item.get("operator", "eq")
+                    value = filter_item.get("value")
+
+                    if column and value is not None:
+                        if operator == "eq":
+                            builder = builder.eq(column, value)
+                        elif operator == "gt":
+                            builder = builder.gt(column, value)
+                        elif operator == "lt":
+                            builder = builder.lt(column, value)
+                        elif operator == "gte":
+                            builder = builder.gte(column, value)
+                        elif operator == "lte":
+                            builder = builder.lte(column, value)
+                        elif operator == "neq":
+                            builder = builder.neq(column, value)
+                        elif operator == "in":
+                            builder = builder.in_(column, value)
+                        elif operator == "like":
+                            builder = builder.like(column, value)
+
+            # Apply order if provided
+            if params and "order" in params:
+                for order_item in params["order"]:
+                    column = order_item.get("column")
+                    ascending = order_item.get("ascending", True)
+
+                    if column:
+                        builder = builder.order(column, ascending=ascending)
+
+            # Apply limit and offset if provided
+            if params and "limit" in params:
+                builder = builder.limit(params["limit"])
+
+            if params and "offset" in params:
+                builder = builder.offset(params["offset"])
+
+            response = builder.execute()
+
             if hasattr(response, 'data'):
                 return response.data
-        except Exception:
-            pass
 
-        # Fallback to direct query with proper schema handling
-        response = client.from_("players").schema("game").select("player_id").eq("telegram_id", telegram_id).execute()
-        return hasattr(response, 'data') and len(response.data) > 0
-    except Exception as e:
-        logger.error(f"Error checking if player exists: {str(e)}")
-        return False
-
-
-@db_retry
-async def get_player(telegram_id: str) -> Optional[Dict[str, Any]]:
-    """Get comprehensive player information including resources, actions, etc."""
-    return await db_operation(
-        "get_player",
-        execute_function,
-        "api_get_player_status",
-        {"p_telegram_id": telegram_id}
-    )
-
-
-async def get_player_by_telegram_id(telegram_id: str) -> Optional[Dict[str, Any]]:
-    """Get basic player record by Telegram ID."""
-    async def fetch_player():
-        client = get_supabase()
-        response = client.from_("players").schema("game").select("*").eq("telegram_id", telegram_id).execute()
-        if hasattr(response, 'data') and response.data:
-            return response.data[0]
         return None
 
-    return await db_operation("get_player_by_telegram_id", fetch_player)
+    return await db_operation(operation_name, run_query)
 
 
-@db_retry
-async def register_player(telegram_id: str, name: str, ideology_score: int = 0) -> Dict[str, Any]:
-    """Register a new player."""
-    return await db_operation(
-        "register_player",
-        execute_function,
-        "api_register_player",
-        {
-            "p_telegram_id": telegram_id,
-            "p_name": name,
-            "p_ideology_score": ideology_score
-        },
-        log_error=True
-    )
+async def get_record(
+        table: str,
+        column: str,
+        value: Any,
+        schema: str = "game",
+        operation_name: Optional[str] = None
+) -> Optional[Dict[str, Any]]:
+    """
+    Get a single record by column value.
+
+    Args:
+        table: Table name
+        column: Column name to filter on
+        value: Value to filter by
+        schema: Schema name
+        operation_name: Name for logging
+
+    Returns:
+        Record as dictionary or None if not found
+    """
+    op_name = operation_name or f"get_{table}_by_{column}"
+
+    params = {
+        "filters": [
+            {"column": column, "value": value}
+        ],
+        "limit": 1
+    }
+
+    result = await execute_query("select", op_name, params, table, schema)
+
+    if result and len(result) > 0:
+        return result[0]
+    return None
 
 
-# ---------------------------
-# Language & Preferences
-# ---------------------------
+async def get_records(
+        table: str,
+        filters: Optional[List[Dict[str, Any]]] = None,
+        order: Optional[List[Dict[str, str]]] = None,
+        limit: Optional[int] = None,
+        offset: Optional[int] = None,
+        columns: str = "*",
+        schema: str = "game",
+        operation_name: Optional[str] = None
+) -> List[Dict[str, Any]]:
+    """
+    Get records with flexible filtering.
 
-async def get_player_language(telegram_id: str) -> str:
-    """Get a player's preferred language."""
+    Args:
+        table: Table name
+        filters: List of filter conditions
+        order: List of order specifications
+        limit: Maximum number of records to return
+        offset: Number of records to skip
+        columns: Columns to select
+        schema: Schema name
+        operation_name: Name for logging
 
-    async def fetch_language():
-        client = get_supabase()
-        response = client.from_("players").schema("game").select("language").eq("telegram_id", telegram_id).execute()
-        if hasattr(response, 'data') and response.data and response.data[0].get("language"):
-            return response.data[0]["language"]
-        return "en_US"
+    Returns:
+        List of records as dictionaries
+    """
+    op_name = operation_name or f"get_{table}_records"
 
-    result = await db_operation("get_player_language", fetch_language, default_return="en_US")
-    return result
+    params = {
+        "columns": columns
+    }
+
+    if filters:
+        params["filters"] = filters
+
+    if order:
+        params["order"] = order
+
+    if limit is not None:
+        params["limit"] = limit
+
+    if offset is not None:
+        params["offset"] = offset
+
+    result = await execute_query("select", op_name, params, table, schema)
+
+    if result:
+        return result
+    return []
 
 
-async def set_player_language(telegram_id: str, language: str) -> bool:
-    """Set user's preferred language."""
+async def create_record(
+        table: str,
+        data: Dict[str, Any],
+        schema: str = "game",
+        operation_name: Optional[str] = None
+) -> Optional[Dict[str, Any]]:
+    """
+    Create a new record.
 
-    async def update_language():
-        client = get_supabase()
-        player_response = client.from_("players").schema("game").select("player_id").eq("telegram_id", telegram_id).execute()
-        if hasattr(player_response, 'data') and player_response.data:
-            client.from_("players").schema("game").update({"language": language}).eq("telegram_id", telegram_id).execute()
+    Args:
+        table: Table name
+        data: Record data to insert
+        schema: Schema name
+        operation_name: Name for logging
+
+    Returns:
+        Created record or None on error
+    """
+    op_name = operation_name or f"create_{table}_record"
+
+    result = await execute_query("insert", op_name, data, table, schema)
+
+    if result and len(result) > 0:
+        return result[0]
+    return None
+
+
+async def update_record(
+        table: str,
+        column: str,
+        value: Any,
+        data: Dict[str, Any],
+        schema: str = "game",
+        operation_name: Optional[str] = None
+) -> Optional[Dict[str, Any]]:
+    """
+    Update a record by column value.
+
+    Args:
+        table: Table name
+        column: Column name to filter on
+        value: Value to filter by
+        data: Record data to update
+        schema: Schema name
+        operation_name: Name for logging
+
+    Returns:
+        Updated record or None on error
+    """
+    op_name = operation_name or f"update_{table}_record"
+
+    params = data.copy()
+    params["filters"] = [
+        {"column": column, "value": value}
+    ]
+
+    result = await execute_query("update", op_name, params, table, schema)
+
+    if result and len(result) > 0:
+        return result[0]
+    return None
+
+
+async def delete_record(
+        table: str,
+        column: str,
+        value: Any,
+        schema: str = "game",
+        operation_name: Optional[str] = None
+) -> bool:
+    """
+    Delete a record by column value.
+
+    Args:
+        table: Table name
+        column: Column name to filter on
+        value: Value to filter by
+        schema: Schema name
+        operation_name: Name for logging
+
+    Returns:
+        True if successful, False otherwise
+    """
+    op_name = operation_name or f"delete_{table}_record"
+
+    params = {
+        "filters": [
+            {"column": column, "value": value}
+        ]
+    }
+
+    result = await execute_query("delete", op_name, params, table, schema)
+
+    if result is not None:
         return True
-
-    return await db_operation("set_player_language", update_language, default_return=False)
-
-
-# ---------------------------
-# Game cycle and actions
-# ---------------------------
-
-async def get_cycle_info(language: str = "en_US") -> Dict[str, Any]:
-    """Get information about the current game cycle."""
-    return await db_operation(
-        "get_cycle_info",
-        execute_function,
-        "api_get_cycle_info",
-        {"p_language": language},
-        default_return={}
-    )
+    return False
 
 
-async def is_submission_open() -> bool:
-    """Check if submissions are open for the current cycle."""
+# Helper function to build RPC parameters
+def build_params(params_dict: Dict[str, Any], param_prefix: str = "p_") -> Dict[str, Any]:
+    """
+    Build parameters for RPC calls with proper prefixing.
 
-    async def check_submission():
-        client = get_supabase()
-        response = client.rpc("game.is_submission_open").execute()
-        if hasattr(response, 'data'):
-            return response.data
-        return False
+    Args:
+        params_dict: Dictionary of parameters
+        param_prefix: Prefix to add to parameter names
 
-    return await db_operation("is_submission_open", check_submission, default_return=False)
-
-
-@db_retry
-async def submit_action(
-        telegram_id: str,
-        action_type: str,
-        is_quick_action: bool,
-        district_name: Optional[str] = None,
-        target_player_name: Optional[str] = None,
-        target_politician_name: Optional[str] = None,
-        resource_type: Optional[str] = None,
-        resource_amount: Optional[int] = None,
-        physical_presence: bool = False,
-        expected_outcome: Optional[str] = None,
-        language: str = "en_US"
-) -> Dict[str, Any]:
-    """Submit a player action."""
-    params = {
-        "p_telegram_id": telegram_id,
-        "p_action_type": action_type,
-        "p_is_quick_action": is_quick_action,
-        "p_district_name": district_name,
-        "p_target_player_name": target_player_name,
-        "p_target_politician_name": target_politician_name,
-        "p_resource_type": resource_type,
-        "p_resource_amount": resource_amount,
-        "p_physical_presence": physical_presence,
-        "p_expected_outcome": expected_outcome,
-        "p_language": language
-    }
-
-    return await db_operation("submit_action", execute_function, "api_submit_action", params)
-
-
-@db_retry
-async def cancel_latest_action(telegram_id: str, language: str = "en_US") -> Dict[str, Any]:
-    """Cancel the latest action submitted by a player."""
-    return await db_operation(
-        "cancel_latest_action",
-        execute_function,
-        "api_cancel_latest_action",
-        {
-            "p_telegram_id": telegram_id,
-            "p_language": language
-        }
-    )
-
-
-# ---------------------------
-# Districts and map
-# ---------------------------
-
-async def get_districts() -> List[Dict[str, Any]]:
-    """Get all districts."""
-    async def fetch_districts():
-        client = get_supabase()
-        response = client.from_("districts").schema("game").select("*").execute()
-        if hasattr(response, 'data'):
-            return response.data
-        return []
-
-    districts = await db_operation("get_districts", fetch_districts, default_return=[])
-
-    # If primary method fails, try fallback with raw SQL
-    if not districts:
-        try:
-            return await execute_sql("SELECT * FROM game.districts;") or []
-        except Exception as e:
-            logger.error(f"Fallback query for districts failed: {str(e)}")
-            return []
-
-    return districts
-
-
-async def get_district_info(telegram_id: str, district_name: str, language: str = "en_US") -> Dict[str, Any]:
-    """Get detailed information about a district."""
-    return await db_operation(
-        "get_district_info",
-        execute_function,
-        "api_get_district_info",
-        {
-            "p_telegram_id": telegram_id,
-            "p_district_name": district_name,
-            "p_language": language
-        },
-        default_return={}
-    )
-
-
-async def get_map_data(language: str = "en_US") -> Dict[str, Any]:
-    """Get the current map data showing district control."""
-    return await db_operation(
-        "get_map_data",
-        execute_function,
-        "api_get_map_data",
-        {"p_language": language},
-        default_return={}
-    )
-
-
-# ---------------------------
-# Resources and Economy
-# ---------------------------
-
-@db_retry
-async def exchange_resources(
-        telegram_id: str,
-        from_resource: str,
-        to_resource: str,
-        amount: int,
-        language: str = "en_US"
-) -> Dict[str, Any]:
-    """Exchange resources between types."""
-    params = {
-        "p_telegram_id": telegram_id,
-        "p_from_resource": from_resource,
-        "p_to_resource": to_resource,
-        "p_amount": amount,
-        "p_language": language
-    }
-
-    return await db_operation("exchange_resources", execute_function, "api_exchange_resources", params)
-
-
-async def check_income(telegram_id: str, language: str = "en_US") -> Dict[str, Any]:
-    """Check expected resource income."""
-    return await db_operation(
-        "check_income",
-        execute_function,
-        "api_check_income",
-        {
-            "p_telegram_id": telegram_id,
-            "p_language": language
-        },
-        default_return={}
-    )
-
-
-# ---------------------------
-# News and Information
-# ---------------------------
-
-async def get_latest_news(telegram_id: str, count: int = 5, language: str = "en_US") -> Dict[str, Any]:
-    """Get the latest news for a player."""
-    params = {
-        "p_telegram_id": telegram_id,
-        "p_count": count,
-        "p_language": language
-    }
-
-    result = await db_operation(
-        "get_latest_news",
-        execute_function,
-        "api_get_latest_news",
-        params,
-        default_return={"public": [], "faction": []}
-    )
-
-    return result
-
-
-# ---------------------------
-# Politicians
-# ---------------------------
-
-async def get_politicians(telegram_id: str, type: str = "local", language: str = "en_US") -> Dict[str, Any]:
-    """Get politicians of specified type."""
-    params = {
-        "p_telegram_id": telegram_id,
-        "p_type": type,
-        "p_language": language
-    }
-
-    return await db_operation(
-        "get_politicians",
-        execute_function,
-        "api_get_politicians",
-        params,
-        default_return={"politicians": []}
-    )
-
-
-async def get_politician_status(telegram_id: str, politician_name: str, language: str = "en_US") -> Dict[str, Any]:
-    """Get detailed information about a politician."""
-    params = {
-        "p_telegram_id": telegram_id,
-        "p_politician_name": politician_name,
-        "p_language": language
-    }
-
-    return await db_operation(
-        "get_politician_status",
-        execute_function,
-        "api_get_politician_status",
-        params,
-        default_return={}
-    )
-
-
-# ---------------------------
-# Collective Actions
-# ---------------------------
-
-@db_retry
-async def initiate_collective_action(
-        telegram_id: str,
-        action_type: str,
-        district_name: str,
-        target_player_name: Optional[str] = None,
-        resource_type: str = "influence",
-        resource_amount: int = 1,
-        physical_presence: bool = False,
-        language: str = "en_US"
-) -> Dict[str, Any]:
-    """Initiate a collective action."""
-    params = {
-        "p_telegram_id": telegram_id,
-        "p_action_type": action_type,
-        "p_district_name": district_name,
-        "p_target_player_name": target_player_name,
-        "p_resource_type": resource_type,
-        "p_resource_amount": resource_amount,
-        "p_physical_presence": physical_presence,
-        "p_language": language
-    }
-
-    return await db_operation("initiate_collective_action", execute_function, "api_initiate_collective_action", params)
-
-
-@db_retry
-async def join_collective_action(
-        telegram_id: str,
-        collective_action_id: str,
-        resource_type: str,
-        resource_amount: int,
-        physical_presence: bool = False,
-        language: str = "en_US"
-) -> Dict[str, Any]:
-    """Join a collective action."""
-    params = {
-        "p_telegram_id": telegram_id,
-        "p_collective_action_id": collective_action_id,
-        "p_resource_type": resource_type,
-        "p_resource_amount": resource_amount,
-        "p_physical_presence": physical_presence,
-        "p_language": language
-    }
-
-    return await db_operation("join_collective_action", execute_function, "api_join_collective_action", params)
-
-
-async def get_active_collective_actions() -> List[Dict[str, Any]]:
-    """Get all active collective actions."""
-    async def fetch_actions():
-        client = get_supabase()
-        response = client.from_("collective_actions").schema("game").select("*").eq("status", "active").execute()
-        if hasattr(response, 'data'):
-            return response.data
-        return []
-
-    return await db_operation("get_active_collective_actions", fetch_actions, default_return=[])
-
-
-async def get_collective_action(action_id: str) -> Optional[Dict[str, Any]]:
-    """Get details of a specific collective action."""
-    async def fetch_action():
-        client = get_supabase()
-        response = client.from_("collective_actions").schema("game").select("*").eq("collective_action_id", action_id).execute()
-        if hasattr(response, 'data') and response.data:
-            return response.data[0]
-        return None
-
-    return await db_operation("get_collective_action", fetch_action)
-
-
-# ---------------------------
-# Admin Functions
-# ---------------------------
-
-@db_retry
-async def admin_process_actions(telegram_id: str) -> Dict[str, Any]:
-    """Process all pending actions (admin only)."""
-    return await db_operation(
-        "admin_process_actions",
-        execute_function,
-        "api_admin_process_actions",
-        {"p_telegram_id": telegram_id}
-    )
-
-
-@db_retry
-async def admin_generate_international_effects(telegram_id: str, count: int = 2) -> Dict[str, Any]:
-    """Generate international effects (admin only)."""
-    return await db_operation(
-        "admin_generate_international_effects",
-        execute_function,
-        "api_admin_generate_international_effects",
-        {
-            "p_telegram_id": telegram_id,
-            "p_count": count
-        }
-    )
+    Returns:
+        Dictionary with prefixed parameter names
+    """
+    return {f"{param_prefix}{k}": v for k, v in params_dict.items()}
