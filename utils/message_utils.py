@@ -9,7 +9,8 @@ import logging
 import re
 from typing import Optional, Dict, Any, List, Union, Tuple
 
-from telegram import Update, InlineKeyboardMarkup, Message, InlineKeyboardButton, ReplyMarkup, ParseMode, Bot
+from telegram import Update, InlineKeyboardMarkup, Message, InlineKeyboardButton, Bot
+from telegram._utils.types import ReplyMarkup
 from telegram.ext import ContextTypes
 from telegram.error import BadRequest, TimedOut, TelegramError
 
