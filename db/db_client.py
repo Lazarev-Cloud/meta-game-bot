@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 """
-Unified database operations for Meta Game.
+Unified database operations for Meta 
 
 This module provides robust database operations with multiple fallback approaches,
 comprehensive error handling, and detailed logging for troubleshooting.
@@ -136,7 +136,7 @@ async def player_exists(telegram_id: str) -> bool:
     try:
         # Try first with direct SQL query as it's most reliable
         result = await execute_sql(
-            f"SELECT EXISTS (SELECT 1 FROM game.players WHERE telegram_id = '{telegram_id}');"
+            f"SELECT EXISTS (SELECT 1 FROM players WHERE telegram_id = '{telegram_id}');"
         )
         if result and isinstance(result, list) and len(result) > 0:
             return bool(result[0].get('exists', False))
@@ -150,7 +150,7 @@ async def player_exists(telegram_id: str) -> bool:
             result = await execute_function("player_exists", params, schema_prefix=False)
         except Exception:
             # Then try with explicit function path
-            result = await execute_sql("SELECT game.player_exists($1)", [telegram_id])
+            result = await execute_sql("SELECT player_exists($1)", [telegram_id])
 
         if isinstance(result, bool):
             return result
@@ -220,7 +220,7 @@ async def register_player(telegram_id: str, name: str, ideology_score: int, lang
         player_response = client.table("players").insert(player_data).execute()
         if not hasattr(player_response, 'data') or not player_response.data:
             # Try with schema prefix
-            player_response = client.table("game.players").insert(player_data).execute()
+            player_response = client.table("players").insert(player_data).execute()
 
         player_result = None
         if hasattr(player_response, 'data') and player_response.data:
@@ -240,7 +240,7 @@ async def register_player(telegram_id: str, name: str, ideology_score: int, lang
                 resource_response = client.table("resources").insert(resource_data).execute()
                 if not hasattr(resource_response, 'data') or not resource_response.data:
                     # Try with schema prefix
-                    client.table("game.resources").insert(resource_data).execute()
+                    client.table("resources").insert(resource_data).execute()
             except Exception as resource_error:
                 logger.warning(f"Error creating initial resources: {resource_error}")
 
@@ -271,7 +271,7 @@ async def set_player_language(telegram_id: str, language: str) -> bool:
 
     try:
         # Direct SQL update as it's most reliable
-        sql = f"UPDATE game.players SET language = '{language}' WHERE telegram_id = '{telegram_id}';"
+        sql = f"UPDATE players SET language = '{language}' WHERE telegram_id = '{telegram_id}';"
         await execute_sql(sql)
         return True
     except Exception as e:
@@ -284,7 +284,7 @@ async def set_player_language(telegram_id: str, language: str) -> bool:
 
         if not (hasattr(response, 'data') and response.data):
             # Try with schema prefix
-            response = client.table("game.players").update({"language": language}).eq("telegram_id",
+            response = client.table("players").update({"language": language}).eq("telegram_id",
                                                                                       telegram_id).execute()
 
         return hasattr(response, 'data') and response.data

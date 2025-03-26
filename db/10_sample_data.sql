@@ -2,7 +2,7 @@
 -- Sample data for testing the game
 
 -- Create test admin user
-INSERT INTO game.players (
+INSERT INTO players (
     telegram_id,
     name,
     ideology_score,
@@ -19,7 +19,7 @@ INSERT INTO game.players (
 );
 
 -- Create sample players (different ideologies)
-INSERT INTO game.players (
+INSERT INTO players (
     telegram_id,
     name,
     ideology_score,
@@ -34,7 +34,7 @@ INSERT INTO game.players (
 ('user6', 'Moderate Journalist', -1, 1, 2);
 
 -- Assign resources to players
-INSERT INTO game.resources (
+INSERT INTO resources (
     player_id,
     influence_amount,
     money_amount,
@@ -42,116 +42,116 @@ INSERT INTO game.resources (
     force_amount
 ) VALUES
 -- Admin
-((SELECT player_id FROM game.players WHERE telegram_id = 'admin123'),
+((SELECT player_id FROM players WHERE telegram_id = 'admin123'),
  10, 20, 10, 10),
 -- Reformist Leader
-((SELECT player_id FROM game.players WHERE telegram_id = 'user1'),
+((SELECT player_id FROM players WHERE telegram_id = 'user1'),
  8, 5, 10, 4),
 -- Conservative General
-((SELECT player_id FROM game.players WHERE telegram_id = 'user2'),
+((SELECT player_id FROM players WHERE telegram_id = 'user2'),
  6, 8, 4, 12),
 -- Pragmatic Businessman
-((SELECT player_id FROM game.players WHERE telegram_id = 'user3'),
+((SELECT player_id FROM players WHERE telegram_id = 'user3'),
  5, 15, 7, 2),
 -- Student Activist
-((SELECT player_id FROM game.players WHERE telegram_id = 'user4'),
+((SELECT player_id FROM players WHERE telegram_id = 'user4'),
  10, 3, 8, 5),
 -- Religious Leader
-((SELECT player_id FROM game.players WHERE telegram_id = 'user5'),
+((SELECT player_id FROM players WHERE telegram_id = 'user5'),
  8, 7, 4, 3),
 -- Moderate Journalist
-((SELECT player_id FROM game.players WHERE telegram_id = 'user6'),
+((SELECT player_id FROM players WHERE telegram_id = 'user6'),
  6, 6, 12, 2);
 
 -- Create initial district control for players
-INSERT INTO game.district_control (
+INSERT INTO district_control (
     district_id,
     player_id,
     control_points
 ) VALUES
 -- Reformist controls Liman (university district) with strong control
-((SELECT district_id FROM game.districts WHERE name = 'Liman'),
- (SELECT player_id FROM game.players WHERE telegram_id = 'user1'),
+((SELECT district_id FROM districts WHERE name = 'Liman'),
+ (SELECT player_id FROM players WHERE telegram_id = 'user1'),
  78),
  
 -- Conservative controls Adamovicevo (military district) with strong control
-((SELECT district_id FROM game.districts WHERE name = 'Adamovicevo'),
- (SELECT player_id FROM game.players WHERE telegram_id = 'user2'),
+((SELECT district_id FROM districts WHERE name = 'Adamovicevo'),
+ (SELECT player_id FROM players WHERE telegram_id = 'user2'),
  85),
  
 -- Businessman controls Satelit (new economic district) with medium control
-((SELECT district_id FROM game.districts WHERE name = 'Satelit'),
- (SELECT player_id FROM game.players WHERE telegram_id = 'user3'),
+((SELECT district_id FROM districts WHERE name = 'Satelit'),
+ (SELECT player_id FROM players WHERE telegram_id = 'user3'),
  65),
  
 -- Student Activist has some presence in Liman but not controlling
-((SELECT district_id FROM game.districts WHERE name = 'Liman'),
- (SELECT player_id FROM game.players WHERE telegram_id = 'user4'),
+((SELECT district_id FROM districts WHERE name = 'Liman'),
+ (SELECT player_id FROM players WHERE telegram_id = 'user4'),
  40),
  
 -- Religious Leader controls Petrovaradin (cultural heritage) with medium control
-((SELECT district_id FROM game.districts WHERE name = 'Petrovaradin'),
- (SELECT player_id FROM game.players WHERE telegram_id = 'user5'),
+((SELECT district_id FROM districts WHERE name = 'Petrovaradin'),
+ (SELECT player_id FROM players WHERE telegram_id = 'user5'),
  68),
  
 -- Journalist has some presence in Stari Grad (administrative center)
-((SELECT district_id FROM game.districts WHERE name = 'Stari Grad'),
- (SELECT player_id FROM game.players WHERE telegram_id = 'user6'),
+((SELECT district_id FROM districts WHERE name = 'Stari Grad'),
+ (SELECT player_id FROM players WHERE telegram_id = 'user6'),
  35),
  
 -- Conservative also has some presence in Stari Grad, competing with Journalist
-((SELECT district_id FROM game.districts WHERE name = 'Stari Grad'),
- (SELECT player_id FROM game.players WHERE telegram_id = 'user2'),
+((SELECT district_id FROM districts WHERE name = 'Stari Grad'),
+ (SELECT player_id FROM players WHERE telegram_id = 'user2'),
  40),
  
 -- Criminal control in Sremska Kamenica
-((SELECT district_id FROM game.districts WHERE name = 'Sremska Kamenica'),
- (SELECT player_id FROM game.players WHERE telegram_id = 'user3'),
+((SELECT district_id FROM districts WHERE name = 'Sremska Kamenica'),
+ (SELECT player_id FROM players WHERE telegram_id = 'user3'),
  25);
 
 -- Create some player-politician relations
-INSERT INTO game.player_politician_relations (
+INSERT INTO player_politician_relations (
     player_id,
     politician_id,
     friendliness_level
 ) VALUES
 -- Reformist is friendly with Professor Jovic
-((SELECT player_id FROM game.players WHERE telegram_id = 'user1'),
- (SELECT politician_id FROM game.politicians WHERE name = 'Professor Dragan Jovic'),
+((SELECT player_id FROM players WHERE telegram_id = 'user1'),
+ (SELECT politician_id FROM politicians WHERE name = 'Professor Dragan Jovic'),
  85),
  
 -- Conservative is friendly with Colonel Petrovic
-((SELECT player_id FROM game.players WHERE telegram_id = 'user2'),
- (SELECT politician_id FROM game.politicians WHERE name = 'Colonel Branko Petrovic'),
+((SELECT player_id FROM players WHERE telegram_id = 'user2'),
+ (SELECT politician_id FROM politicians WHERE name = 'Colonel Branko Petrovic'),
  90),
  
 -- Businessman has connections with Zoki (criminal leader)
-((SELECT player_id FROM game.players WHERE telegram_id = 'user3'),
- (SELECT politician_id FROM game.politicians WHERE name = 'Zoran "Zoki" Novakovic'),
+((SELECT player_id FROM players WHERE telegram_id = 'user3'),
+ (SELECT politician_id FROM politicians WHERE name = 'Zoran "Zoki" Novakovic'),
  75),
  
 -- Student Activist is friendly with Maria Kovac
-((SELECT player_id FROM game.players WHERE telegram_id = 'user4'),
- (SELECT politician_id FROM game.politicians WHERE name = 'Maria Kovac'),
+((SELECT player_id FROM players WHERE telegram_id = 'user4'),
+ (SELECT politician_id FROM politicians WHERE name = 'Maria Kovac'),
  88),
  
 -- Religious Leader is friendly with Bishop
-((SELECT player_id FROM game.players WHERE telegram_id = 'user5'),
- (SELECT politician_id FROM game.politicians WHERE name = 'Bishop Irinej'),
+((SELECT player_id FROM players WHERE telegram_id = 'user5'),
+ (SELECT politician_id FROM politicians WHERE name = 'Bishop Irinej'),
  92),
  
 -- Conservative is hostile to student leader
-((SELECT player_id FROM game.players WHERE telegram_id = 'user2'),
- (SELECT politician_id FROM game.politicians WHERE name = 'Maria Kovac'),
+((SELECT player_id FROM players WHERE telegram_id = 'user2'),
+ (SELECT politician_id FROM politicians WHERE name = 'Maria Kovac'),
  15),
  
 -- Reformist is hostile to city administration
-((SELECT player_id FROM game.players WHERE telegram_id = 'user1'),
- (SELECT politician_id FROM game.politicians WHERE name = 'Nemanja Kovacevic'),
+((SELECT player_id FROM players WHERE telegram_id = 'user1'),
+ (SELECT politician_id FROM politicians WHERE name = 'Nemanja Kovacevic'),
  20);
 
 -- Create some news items
-INSERT INTO game.news (
+INSERT INTO news (
     cycle_id,
     title,
     content,
@@ -159,42 +159,42 @@ INSERT INTO game.news (
     related_district_id
 ) VALUES
 -- Public news
-((SELECT cycle_id FROM game.cycles WHERE is_active = TRUE),
+((SELECT cycle_id FROM cycles WHERE is_active = TRUE),
  'Tensions Rise in Novi-Sad',
  'Political tensions continue to rise across the city as various factions compete for influence. The university district has seen increased student protests.',
  'public',
- (SELECT district_id FROM game.districts WHERE name = 'Liman')),
+ (SELECT district_id FROM districts WHERE name = 'Liman')),
  
-((SELECT cycle_id FROM game.cycles WHERE is_active = TRUE),
+((SELECT cycle_id FROM cycles WHERE is_active = TRUE),
  'Economic Growth in Satelit District',
  'The Satelit district has seen significant economic development with new investments pouring in from various sources.',
  'public',
- (SELECT district_id FROM game.districts WHERE name = 'Satelit')),
+ (SELECT district_id FROM districts WHERE name = 'Satelit')),
  
-((SELECT cycle_id FROM game.cycles WHERE is_active = TRUE),
+((SELECT cycle_id FROM cycles WHERE is_active = TRUE),
  'International Pressure Increases',
  'Western countries are increasing diplomatic pressure on the Yugoslav government, with potential sanctions looming.',
  'public',
  NULL),
  
 -- Faction news for Reformist
-((SELECT cycle_id FROM game.cycles WHERE is_active = TRUE),
+((SELECT cycle_id FROM cycles WHERE is_active = TRUE),
  'Student Support Growing',
  'Your influence among students is growing stronger. Professor Jovic has indicated his support for your initiatives.',
  'faction',
- (SELECT district_id FROM game.districts WHERE name = 'Liman'),
- (SELECT player_id FROM game.players WHERE telegram_id = 'user1')),
+ (SELECT district_id FROM districts WHERE name = 'Liman'),
+ (SELECT player_id FROM players WHERE telegram_id = 'user1')),
  
 -- Faction news for Conservative
-((SELECT cycle_id FROM game.cycles WHERE is_active = TRUE),
+((SELECT cycle_id FROM cycles WHERE is_active = TRUE),
  'Military Support Secured',
  'Colonel Petrovic has pledged his support for maintaining order in the city, strengthening your position in Adamovicevo.',
  'faction',
- (SELECT district_id FROM game.districts WHERE name = 'Adamovicevo'),
- (SELECT player_id FROM game.players WHERE telegram_id = 'user2'));
+ (SELECT district_id FROM districts WHERE name = 'Adamovicevo'),
+ (SELECT player_id FROM players WHERE telegram_id = 'user2'));
 
 -- Create some sample actions (already completed)
-INSERT INTO game.actions (
+INSERT INTO actions (
     player_id,
     cycle_id,
     action_type,
@@ -209,11 +209,11 @@ INSERT INTO game.actions (
     processed_at
 ) VALUES
 -- Reformist influence action in Liman
-((SELECT player_id FROM game.players WHERE telegram_id = 'user1'),
- (SELECT cycle_id FROM game.cycles WHERE is_active = TRUE),
+((SELECT player_id FROM players WHERE telegram_id = 'user1'),
+ (SELECT cycle_id FROM cycles WHERE is_active = TRUE),
  'influence',
  FALSE,
- (SELECT district_id FROM game.districts WHERE name = 'Liman'),
+ (SELECT district_id FROM districts WHERE name = 'Liman'),
  'influence',
  2,
  TRUE,
@@ -223,11 +223,11 @@ INSERT INTO game.actions (
  NOW() - INTERVAL '1 hour'),
  
 -- Conservative defense action in Adamovicevo
-((SELECT player_id FROM game.players WHERE telegram_id = 'user2'),
- (SELECT cycle_id FROM game.cycles WHERE is_active = TRUE),
+((SELECT player_id FROM players WHERE telegram_id = 'user2'),
+ (SELECT cycle_id FROM cycles WHERE is_active = TRUE),
  'defense',
  FALSE,
- (SELECT district_id FROM game.districts WHERE name = 'Adamovicevo'),
+ (SELECT district_id FROM districts WHERE name = 'Adamovicevo'),
  'force',
  2,
  FALSE,
@@ -237,11 +237,11 @@ INSERT INTO game.actions (
  NOW() - INTERVAL '1 hour'),
  
 -- Businessman reconnaissance action in Stari Grad
-((SELECT player_id FROM game.players WHERE telegram_id = 'user3'),
- (SELECT cycle_id FROM game.cycles WHERE is_active = TRUE),
+((SELECT player_id FROM players WHERE telegram_id = 'user3'),
+ (SELECT cycle_id FROM cycles WHERE is_active = TRUE),
  'reconnaissance',
  TRUE,
- (SELECT district_id FROM game.districts WHERE name = 'Stari Grad'),
+ (SELECT district_id FROM districts WHERE name = 'Stari Grad'),
  'information',
  1,
  FALSE,
@@ -251,7 +251,7 @@ INSERT INTO game.actions (
  NOW() - INTERVAL '1 hour');
 
 -- Create sample collective action
-INSERT INTO game.collective_actions (
+INSERT INTO collective_actions (
     initiator_player_id,
     action_type,
     district_id,
@@ -260,15 +260,15 @@ INSERT INTO game.collective_actions (
     target_player_id
 ) VALUES
 -- Reformist initiates collective attack on Conservative's position in Stari Grad
-((SELECT player_id FROM game.players WHERE telegram_id = 'user1'),
+((SELECT player_id FROM players WHERE telegram_id = 'user1'),
  'attack',
- (SELECT district_id FROM game.districts WHERE name = 'Stari Grad'),
- (SELECT cycle_id FROM game.cycles WHERE is_active = TRUE),
+ (SELECT district_id FROM districts WHERE name = 'Stari Grad'),
+ (SELECT cycle_id FROM cycles WHERE is_active = TRUE),
  'active',
- (SELECT player_id FROM game.players WHERE telegram_id = 'user2'));
+ (SELECT player_id FROM players WHERE telegram_id = 'user2'));
 
 -- Add participants to collective action
-INSERT INTO game.collective_action_participants (
+INSERT INTO collective_action_participants (
     collective_action_id,
     player_id,
     resource_type,
@@ -276,28 +276,28 @@ INSERT INTO game.collective_action_participants (
     physical_presence
 ) VALUES
 -- Reformist (initiator)
-((SELECT collective_action_id FROM game.collective_actions LIMIT 1),
- (SELECT player_id FROM game.players WHERE telegram_id = 'user1'),
+((SELECT collective_action_id FROM collective_actions LIMIT 1),
+ (SELECT player_id FROM players WHERE telegram_id = 'user1'),
  'influence',
  2,
  FALSE),
  
 -- Student Activist joins
-((SELECT collective_action_id FROM game.collective_actions LIMIT 1),
- (SELECT player_id FROM game.players WHERE telegram_id = 'user4'),
+((SELECT collective_action_id FROM collective_actions LIMIT 1),
+ (SELECT player_id FROM players WHERE telegram_id = 'user4'),
  'force',
  1,
  TRUE),
  
 -- Journalist joins
-((SELECT collective_action_id FROM game.collective_actions LIMIT 1),
- (SELECT player_id FROM game.players WHERE telegram_id = 'user6'),
+((SELECT collective_action_id FROM collective_actions LIMIT 1),
+ (SELECT player_id FROM players WHERE telegram_id = 'user6'),
  'information',
  2,
  FALSE);
 
 -- Create some international effects
-INSERT INTO game.international_effects (
+INSERT INTO international_effects (
     politician_id,
     cycle_id,
     effect_type,
@@ -310,8 +310,8 @@ INSERT INTO game.international_effects (
     expires_at
 ) VALUES
 -- US sanctions (Clinton) targeting conservatives
-((SELECT politician_id FROM game.politicians WHERE name = 'Bill Clinton'),
- (SELECT cycle_id FROM game.cycles WHERE is_active = TRUE),
+((SELECT politician_id FROM politicians WHERE name = 'Bill Clinton'),
+ (SELECT cycle_id FROM cycles WHERE is_active = TRUE),
  'sanctions',
  5,
  NULL,
@@ -322,11 +322,11 @@ INSERT INTO game.international_effects (
  NOW() + INTERVAL '1 day'),
  
 -- Russian support (Primakov) for government forces
-((SELECT politician_id FROM game.politicians WHERE name = 'Yevgeny Primakov'),
- (SELECT cycle_id FROM game.cycles WHERE is_active = TRUE),
+((SELECT politician_id FROM politicians WHERE name = 'Yevgeny Primakov'),
+ (SELECT cycle_id FROM cycles WHERE is_active = TRUE),
  'support',
  5,
- (SELECT district_id FROM game.districts WHERE name = 'Stari Grad'),
+ (SELECT district_id FROM districts WHERE name = 'Stari Grad'),
  5,
  'influence',
  2,
@@ -334,7 +334,7 @@ INSERT INTO game.international_effects (
  NOW() + INTERVAL '1 day');
 
 -- Create resource history for players
-INSERT INTO game.resource_history (
+INSERT INTO resource_history (
     player_id,
     cycle_id,
     change_type,
@@ -345,8 +345,8 @@ INSERT INTO game.resource_history (
     reason
 ) VALUES
 -- Reformist gets district income
-((SELECT player_id FROM game.players WHERE telegram_id = 'user1'),
- (SELECT cycle_id FROM game.cycles WHERE is_active = TRUE),
+((SELECT player_id FROM players WHERE telegram_id = 'user1'),
+ (SELECT cycle_id FROM cycles WHERE is_active = TRUE),
  'district_income',
  2,
  0,
@@ -355,8 +355,8 @@ INSERT INTO game.resource_history (
  'Income from Liman district'),
  
 -- Conservative gets district income
-((SELECT player_id FROM game.players WHERE telegram_id = 'user2'),
- (SELECT cycle_id FROM game.cycles WHERE is_active = TRUE),
+((SELECT player_id FROM players WHERE telegram_id = 'user2'),
+ (SELECT cycle_id FROM cycles WHERE is_active = TRUE),
  'district_income',
  1,
  0,
@@ -365,8 +365,8 @@ INSERT INTO game.resource_history (
  'Income from Adamovicevo district'),
  
 -- Businessman gets district income
-((SELECT player_id FROM game.players WHERE telegram_id = 'user3'),
- (SELECT cycle_id FROM game.cycles WHERE is_active = TRUE),
+((SELECT player_id FROM players WHERE telegram_id = 'user3'),
+ (SELECT cycle_id FROM cycles WHERE is_active = TRUE),
  'district_income',
  1,
  3,
@@ -375,8 +375,8 @@ INSERT INTO game.resource_history (
  'Income from Satelit district'),
  
 -- Action costs for Reformist
-((SELECT player_id FROM game.players WHERE telegram_id = 'user1'),
- (SELECT cycle_id FROM game.cycles WHERE is_active = TRUE),
+((SELECT player_id FROM players WHERE telegram_id = 'user1'),
+ (SELECT cycle_id FROM cycles WHERE is_active = TRUE),
  'action_deduction',
  -2,
  0,

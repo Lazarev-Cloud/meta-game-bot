@@ -1,10 +1,10 @@
 -- Create function for player_exists both in game schema and public schema
 -- First in game schema for proper organization
-CREATE OR REPLACE FUNCTION game.player_exists(p_telegram_id TEXT)
+CREATE OR REPLACE FUNCTION player_exists(p_telegram_id TEXT)
 RETURNS BOOLEAN AS $$
 BEGIN
     RETURN EXISTS (
-        SELECT 1 FROM game.players WHERE telegram_id = p_telegram_id
+        SELECT 1 FROM players WHERE telegram_id = p_telegram_id
     );
 END;
 $$ LANGUAGE plpgsql;
@@ -14,7 +14,7 @@ CREATE OR REPLACE FUNCTION public.player_exists(p_telegram_id TEXT)
 RETURNS BOOLEAN AS $$
 BEGIN
     -- Call the original function in the game schema
-    RETURN game.player_exists(p_telegram_id);
+    RETURN player_exists(p_telegram_id);
 END;
 $$ LANGUAGE plpgsql;
 
@@ -27,11 +27,11 @@ CREATE OR REPLACE FUNCTION public.api_register_player(
 )
 RETURNS json AS $$
 DECLARE
-    new_player game.players;
+    new_player players;
     response json;
 BEGIN
     -- Check if player already exists
-    IF game.player_exists(p_telegram_id) THEN
+    IF player_exists(p_telegram_id) THEN
         RAISE EXCEPTION 'Player with this Telegram ID already exists';
     END IF;
 
@@ -41,7 +41,7 @@ BEGIN
     END IF;
 
     -- Create player record
-    INSERT INTO game.players (
+    INSERT INTO players (
         telegram_id,
         name,
         ideology_score,
@@ -58,7 +58,7 @@ BEGIN
     ) RETURNING * INTO new_player;
 
     -- Create initial resources for player
-    INSERT INTO game.resources (
+    INSERT INTO resources (
         player_id,
         influence_amount,
         money_amount,
@@ -97,20 +97,20 @@ CREATE OR REPLACE FUNCTION public.api_get_player_status(
 )
 RETURNS json AS $$
 DECLARE
-    player_rec game.players;
-    resources_rec game.resources;
+    player_rec players;
+    resources_rec resources;
     controlled_districts json;
     response json;
 BEGIN
     -- Get player data
-    SELECT * INTO player_rec FROM game.players WHERE telegram_id = p_telegram_id;
+    SELECT * INTO player_rec FROM players WHERE telegram_id = p_telegram_id;
 
     IF player_rec IS NULL THEN
         RAISE EXCEPTION 'Player not found';
     END IF;
 
     -- Get player resources
-    SELECT * INTO resources_rec FROM game.resources WHERE player_id = player_rec.player_id;
+    SELECT * INTO resources_rec FROM resources WHERE player_id = player_rec.player_id;
 
     -- Build response with minimal data needed to start
     response := json_build_object(

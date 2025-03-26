@@ -68,7 +68,7 @@ async def check_and_create_schema():
             RETURNS BOOLEAN AS $$
             BEGIN
                 RETURN EXISTS (
-                    SELECT 1 FROM game.players WHERE telegram_id = p_telegram_id
+                    SELECT 1 FROM players WHERE telegram_id = p_telegram_id
                 );
             END;
             $$ LANGUAGE plpgsql SECURITY DEFINER;
@@ -84,7 +84,7 @@ async def check_and_create_schema():
             DECLARE
                 player_rec RECORD;
             BEGIN
-                SELECT * INTO player_rec FROM game.players WHERE telegram_id = p_telegram_id;
+                SELECT * INTO player_rec FROM players WHERE telegram_id = p_telegram_id;
 
                 IF player_rec IS NULL THEN
                     RETURN NULL;
@@ -97,10 +97,10 @@ async def check_and_create_schema():
             await execute_sql(sql)
             logger.info("get_player_by_telegram_id function created successfully.")
 
-            # Make sure the game.players table exists
+            # Make sure the players table exists
             logger.info("Creating players table if it doesn't exist...")
             sql = """
-            CREATE TABLE IF NOT EXISTS game.players (
+            CREATE TABLE IF NOT EXISTS players (
                 player_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
                 telegram_id TEXT UNIQUE NOT NULL,
                 name TEXT NOT NULL,
@@ -120,7 +120,7 @@ async def check_and_create_schema():
             # Make sure districts table exists
             logger.info("Creating districts table if it doesn't exist...")
             sql = """
-            CREATE TABLE IF NOT EXISTS game.districts (
+            CREATE TABLE IF NOT EXISTS districts (
                 district_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
                 name TEXT NOT NULL UNIQUE,
                 description TEXT,
@@ -143,7 +143,7 @@ async def check_and_create_schema():
             # Create sample district data
             logger.info("Creating sample district data...")
             sql = """
-            INSERT INTO game.districts (name, description, influence_resource, money_resource, information_resource, force_resource)
+            INSERT INTO districts (name, description, influence_resource, money_resource, information_resource, force_resource)
             VALUES 
             ('Stari Grad', 'Historical and administrative center of Novi-Sad', 2, 0, 2, 0),
             ('Liman', 'University and scientific center', 2, 0, 2, 0),
@@ -172,12 +172,12 @@ async def check_and_create_schema():
                 resources_rec RECORD;
             BEGIN
                 -- Check if player already exists
-                IF EXISTS (SELECT 1 FROM game.players WHERE telegram_id = p_telegram_id) THEN
+                IF EXISTS (SELECT 1 FROM players WHERE telegram_id = p_telegram_id) THEN
                     RETURN jsonb_build_object('success', false, 'message', 'Player already exists');
                 END IF;
 
                 -- Create player record
-                INSERT INTO game.players (
+                INSERT INTO players (
                     telegram_id,
                     name,
                     ideology_score
@@ -188,7 +188,7 @@ async def check_and_create_schema():
                 ) RETURNING player_id INTO new_player_id;
 
                 -- Create initial resources for player
-                INSERT INTO game.resources (
+                INSERT INTO resources (
                     player_id,
                     influence_amount,
                     money_amount,
@@ -225,9 +225,9 @@ async def check_and_create_schema():
             # Create resources table if needed
             logger.info("Creating resources table if it doesn't exist...")
             sql = """
-            CREATE TABLE IF NOT EXISTS game.resources (
+            CREATE TABLE IF NOT EXISTS resources (
                 resource_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                player_id UUID NOT NULL REFERENCES game.players(player_id) ON DELETE CASCADE,
+                player_id UUID NOT NULL REFERENCES players(player_id) ON DELETE CASCADE,
                 influence_amount INTEGER NOT NULL DEFAULT 0 CHECK (influence_amount >= 0),
                 money_amount INTEGER NOT NULL DEFAULT 0 CHECK (money_amount >= 0),
                 information_amount INTEGER NOT NULL DEFAULT 0 CHECK (information_amount >= 0),

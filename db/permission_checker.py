@@ -26,7 +26,7 @@ async def check_database_permissions():
     try:
         logger.info("Testing basic database connectivity...")
         client = get_supabase()
-        response = client.table("game.players").select("count", "exact").limit(1).execute()
+        response = client.table("players").select("count", "exact").limit(1).execute()
         logger.info("✓ Basic connectivity test passed")
     except Exception as e:
         logger.error(f"✗ Basic connectivity test failed: {e}")
@@ -56,7 +56,7 @@ async def check_database_permissions():
     # Test 3: Table access
     try:
         logger.info("Testing access to players table...")
-        result = await execute_sql("SELECT COUNT(*) FROM game.players;")
+        result = await execute_sql("SELECT COUNT(*) FROM players;")
         if result:
             logger.info(f"✓ Players table access successful: {result}")
         else:

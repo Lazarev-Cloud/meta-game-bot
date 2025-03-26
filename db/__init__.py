@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 """
-Database module for the Meta Game.
+Database module for the Meta 
 
 This module provides a unified API for database operations, consolidating
 functionality from supabase_client.py and db_client.py to eliminate duplication.

@@ -18,7 +18,7 @@ DEFAULT_CONFIG = {
     "logging": {
         "level": "INFO",
         "format": "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-        "file": "meta_game.log"
+        "file": "meta_log"
     },
     "game": {
         "cycle_duration_hours": 6,

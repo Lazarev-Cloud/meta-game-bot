@@ -2,17 +2,17 @@
 -- API functions for integration with Telegram bot or other frontends
 
 -- Register a new player
-CREATE OR REPLACE FUNCTION game.api_register_player(
+CREATE OR REPLACE FUNCTION api_register_player(
     p_telegram_id TEXT,
     p_name TEXT,
     p_ideology_score INTEGER DEFAULT 0
 )
-RETURNS game.players AS $$
+RETURNS players AS $$
 DECLARE
-    new_player game.players;
+    new_player players;
 BEGIN
     -- Check if player already exists
-    IF game.player_exists(p_telegram_id) THEN
+    IF player_exists(p_telegram_id) THEN
         RAISE EXCEPTION 'Player with this Telegram ID already exists';
     END IF;
     
@@ -22,7 +22,7 @@ BEGIN
     END IF;
     
     -- Create player record
-    INSERT INTO game.players (
+    INSERT INTO players (
         telegram_id,
         name,
         ideology_score,
@@ -37,7 +37,7 @@ BEGIN
     ) RETURNING * INTO new_player;
     
     -- Create initial resources for player
-    INSERT INTO game.resources (
+    INSERT INTO resources (
         player_id,
         influence_amount,
         money_amount,
@@ -52,7 +52,7 @@ BEGIN
     );
     
     -- Log the initial resources
-    INSERT INTO game.resource_history (
+    INSERT INTO resource_history (
         player_id,
         cycle_id,
         change_type,
@@ -63,7 +63,7 @@ BEGIN
         reason
     ) VALUES (
         new_player.player_id,
-        (SELECT cycle_id FROM game.get_current_cycle()),
+        (SELECT cycle_id FROM get_current_cycle()),
         'initial_grant',
         5,
         10,
@@ -73,16 +73,16 @@ BEGIN
     );
     
     -- Create welcome news for player
-    INSERT INTO game.news (
+    INSERT INTO news (
         cycle_id,
         title,
         content,
         news_type,
         target_player_id
     ) VALUES (
-        (SELECT cycle_id FROM game.get_current_cycle()),
+        (SELECT cycle_id FROM get_current_cycle()),
         'Welcome to Novi-Sad',
-        'Welcome, ' || new_player.name || '! You have joined the game. Use your initial resources wisely to gain control of districts.',
+        'Welcome, ' || new_player.name || '! You have joined the  Use your initial resources wisely to gain control of districts.',
         'faction',
         new_player.player_id
     );
@@ -92,26 +92,26 @@ END;
 $$ LANGUAGE plpgsql;
 
 -- Get player status with resources and controlled districts
-CREATE OR REPLACE FUNCTION game.api_get_player_status(
+CREATE OR REPLACE FUNCTION api_get_player_status(
     p_telegram_id TEXT,
     p_language TEXT DEFAULT 'en_US'
 )
 RETURNS JSON AS $$
 DECLARE
-    player_rec game.players;
-    resources_rec game.resources;
+    player_rec players;
+    resources_rec resources;
     controlled_districts JSON;
     translatable_text TEXT;
 BEGIN
     -- Get player data
-    SELECT * INTO player_rec FROM game.get_player_by_telegram_id(p_telegram_id);
+    SELECT * INTO player_rec FROM get_player_by_telegram_id(p_telegram_id);
     
     IF player_rec IS NULL THEN
         RAISE EXCEPTION 'Player not found';
     END IF;
     
     -- Get player resources
-    SELECT * INTO resources_rec FROM game.get_player_resources(player_rec.player_id);
+    SELECT * INTO resources_rec FROM get_player_resources(player_rec.player_id);
     
     -- Get controlled districts (with control points >= 60)
     SELECT json_agg(
@@ -124,8 +124,8 @@ BEGIN
             'resource_force', d.force_resource
         )
     ) INTO controlled_districts
-    FROM game.districts d
-    JOIN game.district_control dc ON d.district_id = dc.district_id
+    FROM districts d
+    JOIN district_control dc ON d.district_id = dc.district_id
     WHERE dc.player_id = player_rec.player_id AND dc.control_points >= 60;
     
     -- Handle case when no districts are controlled
@@ -134,7 +134,7 @@ BEGIN
     END IF;
     
     -- Translate resource names
-    translatable_text := game.get_translation('resources.influence', p_language);
+    translatable_text := get_translation('resources.influence', p_language);
     
     -- Return status as JSON
     RETURN json_build_object(
@@ -147,14 +147,14 @@ BEGIN
             'force', resources_rec.force_amount
         ),
         'controlled_districts', controlled_districts,
-        'actions_remaining', (SELECT remaining_actions FROM game.get_player_actions_remaining(player_rec.player_id)),
-        'quick_actions_remaining', (SELECT remaining_quick_actions FROM game.get_player_actions_remaining(player_rec.player_id))
+        'actions_remaining', (SELECT remaining_actions FROM get_player_actions_remaining(player_rec.player_id)),
+        'quick_actions_remaining', (SELECT remaining_quick_actions FROM get_player_actions_remaining(player_rec.player_id))
     );
 END;
 $$ LANGUAGE plpgsql;
 
 -- Submit a new action
-CREATE OR REPLACE FUNCTION game.api_submit_action(
+CREATE OR REPLACE FUNCTION api_submit_action(
     p_telegram_id TEXT,
     p_action_type TEXT,
     p_is_quick_action BOOLEAN,
@@ -169,35 +169,35 @@ CREATE OR REPLACE FUNCTION game.api_submit_action(
 )
 RETURNS JSON AS $$
 DECLARE
-    player_rec game.players;
-    district_rec game.districts;
-    target_player_rec game.players;
-    target_politician_rec game.politicians;
+    player_rec players;
+    district_rec districts;
+    target_player_rec players;
+    target_politician_rec politicians;
     remaining_actions INTEGER;
     remaining_quick_actions INTEGER;
     current_cycle UUID;
-    new_action game.actions;
+    new_action actions;
     action_response TEXT;
     response_title TEXT;
 BEGIN
     -- Check if submissions are open
-    IF NOT game.is_submission_open() THEN
+    IF NOT is_submission_open() THEN
         RAISE EXCEPTION 'Submissions are closed for the current cycle';
     END IF;
     
     -- Get player data
-    SELECT * INTO player_rec FROM game.get_player_by_telegram_id(p_telegram_id);
+    SELECT * INTO player_rec FROM get_player_by_telegram_id(p_telegram_id);
     
     IF player_rec IS NULL THEN
         RAISE EXCEPTION 'Player not found';
     END IF;
     
     -- Get current cycle
-    SELECT cycle_id INTO current_cycle FROM game.get_current_cycle();
+    SELECT cycle_id INTO current_cycle FROM get_current_cycle();
     
     -- Get district if specified
     IF p_district_name IS NOT NULL THEN
-        SELECT * INTO district_rec FROM game.get_district_by_name(p_district_name);
+        SELECT * INTO district_rec FROM get_district_by_name(p_district_name);
         
         IF district_rec IS NULL THEN
             RAISE EXCEPTION 'District not found: %', p_district_name;
@@ -207,7 +207,7 @@ BEGIN
     -- Get target player if specified
     IF p_target_player_name IS NOT NULL THEN
         SELECT * INTO target_player_rec 
-        FROM game.players
+        FROM players
         WHERE LOWER(name) = LOWER(p_target_player_name);
         
         IF target_player_rec IS NULL THEN
@@ -217,7 +217,7 @@ BEGIN
     
     -- Get target politician if specified
     IF p_target_politician_name IS NOT NULL THEN
-        SELECT * INTO target_politician_rec FROM game.get_politician_by_name(p_target_politician_name);
+        SELECT * INTO target_politician_rec FROM get_politician_by_name(p_target_politician_name);
         
         IF target_politician_rec IS NULL THEN
             RAISE EXCEPTION 'Politician not found: %', p_target_politician_name;
@@ -226,7 +226,7 @@ BEGIN
     
     -- Check if player has enough actions remaining
     SELECT * INTO remaining_actions, remaining_quick_actions 
-    FROM game.get_player_actions_remaining(player_rec.player_id);
+    FROM get_player_actions_remaining(player_rec.player_id);
     
     IF p_is_quick_action AND remaining_quick_actions <= 0 THEN
         RAISE EXCEPTION 'No quick actions remaining for this cycle';
@@ -235,7 +235,7 @@ BEGIN
     END IF;
     
     -- Create action record
-    INSERT INTO game.actions (
+    INSERT INTO actions (
         player_id,
         cycle_id,
         action_type,
@@ -264,11 +264,11 @@ BEGIN
     ) RETURNING * INTO new_action;
     
     -- Translate response based on language
-    response_title := game.get_translation('action.submitted', p_language);
-    action_response := game.get_translation('action.confirmation.' || p_action_type, p_language);
+    response_title := get_translation('action.submitted', p_language);
+    action_response := get_translation('action.confirmation.' || p_action_type, p_language);
     
     IF action_response IS NULL OR action_response = 'action.confirmation.' || p_action_type THEN
-        action_response := game.get_translation('action.confirmation.generic', p_language);
+        action_response := get_translation('action.confirmation.generic', p_language);
     END IF;
     
     -- Return confirmation
@@ -292,30 +292,30 @@ END;
 $$ LANGUAGE plpgsql;
 
 -- Cancel the latest action
-CREATE OR REPLACE FUNCTION game.api_cancel_latest_action(
+CREATE OR REPLACE FUNCTION api_cancel_latest_action(
     p_telegram_id TEXT,
     p_language TEXT DEFAULT 'en_US'
 )
 RETURNS JSON AS $$
 DECLARE
-    player_rec game.players;
-    latest_action game.actions;
+    player_rec players;
+    latest_action actions;
     cancel_message TEXT;
 BEGIN
     -- Check if submissions are open
-    IF NOT game.is_submission_open() THEN
+    IF NOT is_submission_open() THEN
         RAISE EXCEPTION 'Submissions are closed for the current cycle';
     END IF;
     
     -- Get player data
-    SELECT * INTO player_rec FROM game.get_player_by_telegram_id(p_telegram_id);
+    SELECT * INTO player_rec FROM get_player_by_telegram_id(p_telegram_id);
     
     IF player_rec IS NULL THEN
         RAISE EXCEPTION 'Player not found';
     END IF;
     
     -- Get the latest action for this player
-    SELECT * INTO latest_action FROM game.get_latest_player_action(player_rec.player_id);
+    SELECT * INTO latest_action FROM get_latest_player_action(player_rec.player_id);
     
     IF latest_action IS NULL THEN
         RAISE EXCEPTION 'No actions found to cancel';
@@ -327,12 +327,12 @@ BEGIN
     END IF;
     
     -- Cancel the action
-    UPDATE game.actions
+    UPDATE actions
     SET status = 'cancelled'
     WHERE action_id = latest_action.action_id;
     
     -- Get translated message
-    cancel_message := game.get_translation('action.cancelled', p_language);
+    cancel_message := get_translation('action.cancelled', p_language);
     
     -- Return confirmation
     RETURN json_build_object(
@@ -349,31 +349,31 @@ END;
 $$ LANGUAGE plpgsql;
 
 -- Get district information
-CREATE OR REPLACE FUNCTION game.api_get_district_info(
+CREATE OR REPLACE FUNCTION api_get_district_info(
     p_telegram_id TEXT,
     p_district_name TEXT,
     p_language TEXT DEFAULT 'en_US'
 )
 RETURNS JSON AS $$
 DECLARE
-    player_rec game.players;
-    district_rec game.districts;
-    controlling_player game.players;
-    player_control game.district_control;
+    player_rec players;
+    district_rec districts;
+    controlling_player players;
+    player_control district_control;
     politicians_json JSON;
     control_info JSON;
     use_info_resource BOOLEAN := FALSE;
     translation_prefix TEXT;
 BEGIN
     -- Get player data
-    SELECT * INTO player_rec FROM game.get_player_by_telegram_id(p_telegram_id);
+    SELECT * INTO player_rec FROM get_player_by_telegram_id(p_telegram_id);
     
     IF player_rec IS NULL THEN
         RAISE EXCEPTION 'Player not found';
     END IF;
     
     -- Get district data
-    SELECT * INTO district_rec FROM game.get_district_by_name(p_district_name);
+    SELECT * INTO district_rec FROM get_district_by_name(p_district_name);
     
     IF district_rec IS NULL THEN
         RAISE EXCEPTION 'District not found: %', p_district_name;
@@ -388,23 +388,23 @@ BEGIN
     -- Check if player has used information resource for this district recently
     -- For this example, we'll just check if they have any info resources
     SELECT * INTO player_control 
-    FROM game.district_control
+    FROM district_control
     WHERE player_id = player_rec.player_id AND district_id = district_rec.district_id;
     
     IF player_control IS NOT NULL AND player_control.control_points >= 20 THEN
         use_info_resource := TRUE;
     ELSE
         -- Check if player has information resources
-        IF (SELECT information_amount FROM game.resources WHERE player_id = player_rec.player_id) > 0 THEN
+        IF (SELECT information_amount FROM resources WHERE player_id = player_rec.player_id) > 0 THEN
             use_info_resource := TRUE;
             
             -- Deduct one information resource
-            UPDATE game.resources
+            UPDATE resources
             SET information_amount = information_amount - 1
             WHERE player_id = player_rec.player_id;
             
             -- Log the resource use
-            INSERT INTO game.resource_history (
+            INSERT INTO resource_history (
                 player_id,
                 cycle_id,
                 change_type,
@@ -412,7 +412,7 @@ BEGIN
                 reason
             ) VALUES (
                 player_rec.player_id,
-                (SELECT cycle_id FROM game.get_current_cycle()),
+                (SELECT cycle_id FROM get_current_cycle()),
                 'view_district',
                 -1,
                 'Used to view ' || district_rec.name || ' district'
@@ -429,12 +429,12 @@ BEGIN
             'influence_in_district', p.influence_in_district,
             'friendliness', COALESCE((
                 SELECT friendliness_level 
-                FROM game.player_politician_relations 
+                FROM player_politician_relations
                 WHERE player_id = player_rec.player_id AND politician_id = p.politician_id
             ), 50)
         )
     ) INTO politicians_json
-    FROM game.politicians p
+    FROM politicians p
     WHERE p.district_id = district_rec.district_id;
     
     -- If no politicians, return empty array
@@ -452,13 +452,13 @@ BEGIN
                 'last_active', dc.last_action_cycle_id IS NOT NULL
             )
         ) INTO control_info
-        FROM game.district_control dc
-        JOIN game.players p ON dc.player_id = p.player_id
+        FROM district_control dc
+        JOIN players p ON dc.player_id = p.player_id
         WHERE dc.district_id = district_rec.district_id AND dc.control_points > 0
         ORDER BY dc.control_points DESC;
         
         -- Get controlling player if any
-        SELECT * INTO controlling_player FROM game.get_district_controller(district_rec.district_id);
+        SELECT * INTO controlling_player FROM get_district_controller(district_rec.district_id);
     ELSE
         -- Limited information without using resources
         SELECT json_agg(
@@ -472,8 +472,8 @@ BEGIN
                 END
             )
         ) INTO control_info
-        FROM game.district_control dc
-        JOIN game.players p ON dc.player_id = p.player_id
+        FROM district_control dc
+        JOIN players p ON dc.player_id = p.player_id
         WHERE dc.district_id = district_rec.district_id AND dc.control_points > 0
         ORDER BY dc.control_points DESC;
     END IF;
@@ -486,7 +486,7 @@ BEGIN
     -- Return district information
     RETURN json_build_object(
         'name', district_rec.name,
-        'description', game.get_translation(translation_prefix || '.description', p_language),
+        'description', get_translation(translation_prefix || '.description', p_language),
         'resources', json_build_object(
             'influence', district_rec.influence_resource,
             'money', district_rec.money_resource,
@@ -509,7 +509,7 @@ END;
 $$ LANGUAGE plpgsql;
 
 -- Initiate a collective action
-CREATE OR REPLACE FUNCTION game.api_initiate_collective_action(
+CREATE OR REPLACE FUNCTION api_initiate_collective_action(
     p_telegram_id TEXT,
     p_action_type TEXT,
     p_district_name TEXT,
@@ -520,14 +520,14 @@ CREATE OR REPLACE FUNCTION game.api_initiate_collective_action(
     p_language TEXT DEFAULT 'en_US'
 ) RETURNS JSON AS $$
 DECLARE
-    player_rec game.players;
-    district_rec game.districts;
-    target_player_rec game.players;
+    player_rec players;
+    district_rec districts;
+    target_player_rec players;
     current_cycle UUID;
-    new_collective_action game.collective_actions;
+    new_collective_action collective_actions;
 BEGIN
     -- Check if submissions are open
-    IF NOT game.is_submission_open() THEN
+    IF NOT is_submission_open() THEN
         RAISE EXCEPTION 'Submissions are closed for the current cycle';
     END IF;
 
@@ -537,17 +537,17 @@ BEGIN
     END IF;
 
     -- Get player data
-    SELECT * INTO player_rec FROM game.get_player_by_telegram_id(p_telegram_id);
+    SELECT * INTO player_rec FROM get_player_by_telegram_id(p_telegram_id);
 
     IF player_rec IS NULL THEN
         RAISE EXCEPTION 'Player not found';
     END IF;
 
     -- Get current cycle
-    SELECT cycle_id INTO current_cycle FROM game.get_current_cycle();
+    SELECT cycle_id INTO current_cycle FROM get_current_cycle();
 
     -- Get district
-    SELECT * INTO district_rec FROM game.get_district_by_name(p_district_name);
+    SELECT * INTO district_rec FROM get_district_by_name(p_district_name);
 
     IF district_rec IS NULL THEN
         RAISE EXCEPTION 'District not found: %', p_district_name;
@@ -556,7 +556,7 @@ BEGIN
     -- Get target player if specified
     IF p_target_player_name IS NOT NULL THEN
         SELECT * INTO target_player_rec
-        FROM game.players
+        FROM players
         WHERE LOWER(name) = LOWER(p_target_player_name);
 
         IF target_player_rec IS NULL THEN
@@ -565,7 +565,7 @@ BEGIN
     END IF;
 
     -- Create collective action record
-    INSERT INTO game.collective_actions (
+    INSERT INTO collective_actions (
         initiator_player_id,
         action_type,
         district_id,
@@ -582,7 +582,7 @@ BEGIN
     ) RETURNING * INTO new_collective_action;
 
     -- Add initiator as first participant
-    INSERT INTO game.collective_action_participants (
+    INSERT INTO collective_action_participants (
         collective_action_id,
         player_id,
         resource_type,
@@ -597,7 +597,7 @@ BEGIN
     );
 
     -- Create news about collective action initiation
-    INSERT INTO game.news (
+    INSERT INTO news (
         cycle_id,
         title,
         content,
@@ -616,7 +616,7 @@ BEGIN
     -- Return success
     RETURN json_build_object(
         'success', TRUE,
-        'message', game.get_translation('collective_action.initiated', p_language),
+        'message', get_translation('collective_action.initiated', p_language),
         'collective_action_id', new_collective_action.collective_action_id,
         'action_type', p_action_type,
         'district', district_rec.name,
@@ -626,7 +626,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 -- Join a collective action
-CREATE OR REPLACE FUNCTION game.api_join_collective_action(
+CREATE OR REPLACE FUNCTION api_join_collective_action(
     p_telegram_id TEXT,
     p_collective_action_id UUID,
     p_resource_type TEXT,
@@ -636,18 +636,18 @@ CREATE OR REPLACE FUNCTION game.api_join_collective_action(
 )
 RETURNS JSON AS $$
 DECLARE
-    player_rec game.players;
-    collective_action_rec game.collective_actions;
-    district_rec game.districts;
+    player_rec players;
+    collective_action_rec collective_actions;
+    district_rec districts;
     existing_participant BOOLEAN;
 BEGIN
     -- Check if submissions are open
-    IF NOT game.is_submission_open() THEN
+    IF NOT is_submission_open() THEN
         RAISE EXCEPTION 'Submissions are closed for the current cycle';
     END IF;
 
     -- Get player data
-    SELECT * INTO player_rec FROM game.get_player_by_telegram_id(p_telegram_id);
+    SELECT * INTO player_rec FROM get_player_by_telegram_id(p_telegram_id);
 
     IF player_rec IS NULL THEN
         RAISE EXCEPTION 'Player not found';
@@ -655,7 +655,7 @@ BEGIN
 
     -- Get collective action
     SELECT * INTO collective_action_rec
-    FROM game.collective_actions
+    FROM collective_actions
     WHERE collective_action_id = p_collective_action_id;
 
     IF collective_action_rec IS NULL THEN
@@ -670,7 +670,7 @@ BEGIN
     -- Check if player is already participating
     SELECT EXISTS(
         SELECT 1
-        FROM game.collective_action_participants
+        FROM collective_action_participants
         WHERE collective_action_id = p_collective_action_id AND player_id = player_rec.player_id
     ) INTO existing_participant;
 
@@ -680,11 +680,11 @@ BEGIN
 
     -- Get district information
     SELECT * INTO district_rec
-    FROM game.districts
+    FROM districts
     WHERE district_id = collective_action_rec.district_id;
 
     -- Add player as participant
-    INSERT INTO game.collective_action_participants (
+    INSERT INTO collective_action_participants (
         collective_action_id,
         player_id,
         resource_type,
@@ -699,7 +699,7 @@ BEGIN
     );
 
     -- Create news for the initiator
-    INSERT INTO game.news (
+    INSERT INTO news (
         cycle_id,
         title,
         content,
@@ -719,7 +719,7 @@ BEGIN
     -- Return success
     RETURN json_build_object(
         'success', TRUE,
-        'message', game.get_translation('collective_action.joined', p_language),
+        'message', get_translation('collective_action.joined', p_language),
         'collective_action_id', p_collective_action_id,
         'action_type', collective_action_rec.action_type,
         'district', district_rec.name,
@@ -733,29 +733,29 @@ END;
 $$ LANGUAGE plpgsql;
 
 -- Get game cycle information
-CREATE OR REPLACE FUNCTION game.api_get_cycle_info(
+CREATE OR REPLACE FUNCTION api_get_cycle_info(
     p_language TEXT DEFAULT 'en_US'
 )
 RETURNS JSON AS $$
 DECLARE
-    current_cycle game.cycles;
+    current_cycle cycles;
     time_to_deadline INTERVAL;
     time_to_results INTERVAL;
     cycle_type_translated TEXT;
 BEGIN
     -- Get current cycle
-    SELECT * INTO current_cycle FROM game.get_current_cycle();
+    SELECT * INTO current_cycle FROM get_current_cycle();
 
     IF current_cycle IS NULL THEN
         RAISE EXCEPTION 'No active game cycle found';
     END IF;
 
     -- Calculate time remaining
-    time_to_deadline := game.time_until_deadline();
-    time_to_results := game.time_until_results();
+    time_to_deadline := time_until_deadline();
+    time_to_results := time_until_results();
 
     -- Translate cycle type
-    cycle_type_translated := game.get_translation('cycle.' || current_cycle.cycle_type, p_language);
+    cycle_type_translated := get_translation('cycle.' || current_cycle.cycle_type, p_language);
 
     -- Return cycle information
     RETURN json_build_object(
@@ -767,25 +767,25 @@ BEGIN
         'time_to_deadline', time_to_deadline,
         'time_to_results', time_to_results,
         'is_active', current_cycle.is_active,
-        'is_accepting_submissions', game.is_submission_open()
+        'is_accepting_submissions', is_submission_open()
     );
 END;
 $$ LANGUAGE plpgsql;
 
 -- Get latest news
-CREATE OR REPLACE FUNCTION game.api_get_latest_news(
+CREATE OR REPLACE FUNCTION api_get_latest_news(
     p_telegram_id TEXT,
     p_count INTEGER DEFAULT 5,
     p_language TEXT DEFAULT 'en_US'
 )
 RETURNS JSON AS $$
 DECLARE
-    player_rec game.players;
+    player_rec players;
     public_news JSON;
     faction_news JSON;
 BEGIN
     -- Get player data
-    SELECT * INTO player_rec FROM game.get_player_by_telegram_id(p_telegram_id);
+    SELECT * INTO player_rec FROM get_player_by_telegram_id(p_telegram_id);
 
     IF player_rec IS NULL THEN
         RAISE EXCEPTION 'Player not found';
@@ -797,18 +797,18 @@ BEGIN
             'title', title,
             'content', content,
             'cycle_type', (
-                SELECT cycle_type FROM game.cycles WHERE cycle_id = n.cycle_id
+                SELECT cycle_type FROM cycles WHERE cycle_id = n.cycle_id
             ),
             'cycle_date', (
-                SELECT cycle_date FROM game.cycles WHERE cycle_id = n.cycle_id
+                SELECT cycle_date FROM cycles WHERE cycle_id = n.cycle_id
             ),
             'district', (
-                SELECT name FROM game.districts WHERE district_id = n.related_district_id
+                SELECT name FROM districts WHERE district_id = n.related_district_id
             ),
             'created_at', n.created_at
         )
     ) INTO public_news
-    FROM game.news n
+    FROM news n
     WHERE news_type = 'public'
     ORDER BY created_at DESC
     LIMIT p_count;
@@ -819,18 +819,18 @@ BEGIN
             'title', title,
             'content', content,
             'cycle_type', (
-                SELECT cycle_type FROM game.cycles WHERE cycle_id = n.cycle_id
+                SELECT cycle_type FROM cycles WHERE cycle_id = n.cycle_id
             ),
             'cycle_date', (
-                SELECT cycle_date FROM game.cycles WHERE cycle_id = n.cycle_id
+                SELECT cycle_date FROM cycles WHERE cycle_id = n.cycle_id
             ),
             'district', (
-                SELECT name FROM game.districts WHERE district_id = n.related_district_id
+                SELECT name FROM districts WHERE district_id = n.related_district_id
             ),
             'created_at', n.created_at
         )
     ) INTO faction_news
-    FROM game.news n
+    FROM news n
     WHERE news_type = 'faction' AND target_player_id = player_rec.player_id
     ORDER BY created_at DESC
     LIMIT p_count;
@@ -853,7 +853,7 @@ END;
 $$ LANGUAGE plpgsql;
 
 -- Get map data (simplified version, full one would be done in the app)
-CREATE OR REPLACE FUNCTION game.api_get_map_data(
+CREATE OR REPLACE FUNCTION api_get_map_data(
     p_language TEXT DEFAULT 'en_US'
 )
 RETURNS JSON AS $$
@@ -867,8 +867,8 @@ BEGIN
             'name', d.name,
             'controlling_player', (
                 SELECT p.name
-                FROM game.players p
-                JOIN game.district_control dc ON p.player_id = dc.player_id
+                FROM players p
+                JOIN district_control dc ON p.player_id = dc.player_id
                 WHERE dc.district_id = d.district_id AND dc.control_points >= 60
                 ORDER BY dc.control_points DESC
                 LIMIT 1
@@ -881,24 +881,24 @@ BEGIN
                         WHEN MAX(dc.control_points) >= 30 THEN 'contested'
                         ELSE 'neutral'
                     END
-                FROM game.district_control dc
+                FROM district_control dc
                 WHERE dc.district_id = d.district_id
             )
         )
     ) INTO districts_data
-    FROM game.districts d;
+    FROM districts d;
 
     -- Return map data
     RETURN json_build_object(
         'districts', districts_data,
-        'game_date', (SELECT cycle_date FROM game.get_current_cycle()),
-        'cycle', (SELECT cycle_type FROM game.get_current_cycle())
+        'game_date', (SELECT cycle_date FROM get_current_cycle()),
+        'cycle', (SELECT cycle_type FROM get_current_cycle())
     );
 END;
 $$ LANGUAGE plpgsql;
 
 -- Exchange resources
-CREATE OR REPLACE FUNCTION game.api_exchange_resources(
+CREATE OR REPLACE FUNCTION api_exchange_resources(
     p_telegram_id TEXT,
     p_from_resource TEXT,
     p_to_resource TEXT,
@@ -907,13 +907,13 @@ CREATE OR REPLACE FUNCTION game.api_exchange_resources(
 )
 RETURNS JSON AS $$
 DECLARE
-    player_rec game.players;
+    player_rec players;
     success BOOLEAN;
     from_resource_translated TEXT;
     to_resource_translated TEXT;
 BEGIN
     -- Get player data
-    SELECT * INTO player_rec FROM game.get_player_by_telegram_id(p_telegram_id);
+    SELECT * INTO player_rec FROM get_player_by_telegram_id(p_telegram_id);
 
     IF player_rec IS NULL THEN
         RAISE EXCEPTION 'Player not found';
@@ -934,7 +934,7 @@ BEGIN
     END IF;
 
     -- Perform the exchange
-    success := game.exchange_resource(
+    success := exchange_resource(
         player_rec.player_id,
         p_from_resource,
         p_to_resource,
@@ -946,13 +946,13 @@ BEGIN
     END IF;
 
     -- Get translated resource names
-    from_resource_translated := game.get_translation('resources.' || p_from_resource, p_language);
-    to_resource_translated := game.get_translation('resources.' || p_to_resource, p_language);
+    from_resource_translated := get_translation('resources.' || p_from_resource, p_language);
+    to_resource_translated := get_translation('resources.' || p_to_resource, p_language);
 
     -- Return success
     RETURN json_build_object(
         'success', TRUE,
-        'message', game.get_translation('resource.exchange.success', p_language),
+        'message', get_translation('resource.exchange.success', p_language),
         'from_resource', json_build_object(
             'type', p_from_resource,
             'name', from_resource_translated,
@@ -971,7 +971,7 @@ BEGIN
                 'information', information_amount,
                 'force', force_amount
             )
-            FROM game.resources
+            FROM resources
             WHERE player_id = player_rec.player_id
         )
     );
@@ -979,13 +979,13 @@ END;
 $$ LANGUAGE plpgsql;
 
 -- Get information about expected resource income
-CREATE OR REPLACE FUNCTION game.api_check_income(
+CREATE OR REPLACE FUNCTION api_check_income(
     p_telegram_id TEXT,
     p_language TEXT DEFAULT 'en_US'
 )
 RETURNS JSON AS $$
 DECLARE
-    player_rec game.players;
+    player_rec players;
     district_rec RECORD;
     income_data JSON;
     total_influence INTEGER := 0;
@@ -994,7 +994,7 @@ DECLARE
     total_force INTEGER := 0;
 BEGIN
     -- Get player data
-    SELECT * INTO player_rec FROM game.get_player_by_telegram_id(p_telegram_id);
+    SELECT * INTO player_rec FROM get_player_by_telegram_id(p_telegram_id);
 
     IF player_rec IS NULL THEN
         RAISE EXCEPTION 'Player not found';
@@ -1020,19 +1020,19 @@ BEGIN
                     'information', information_gain,
                     'force', force_gain
                 )
-                FROM game.calculate_district_resources(player_rec.player_id, d.district_id)
+                FROM calculate_district_resources(player_rec.player_id, d.district_id)
             )
         )
     ) INTO income_data
-    FROM game.districts d
-    JOIN game.district_control dc ON d.district_id = dc.district_id
+    FROM districts d
+    JOIN district_control dc ON d.district_id = dc.district_id
     WHERE dc.player_id = player_rec.player_id;
 
     -- Calculate totals
     FOR district_rec IN (
         SELECT d.district_id
-        FROM game.districts d
-        JOIN game.district_control dc ON d.district_id = dc.district_id
+        FROM districts d
+        JOIN district_control dc ON d.district_id = dc.district_id
         WHERE dc.player_id = player_rec.player_id
     ) LOOP
         -- Get resources from this district
@@ -1043,7 +1043,7 @@ BEGIN
             district_rec.money_gain,
             district_rec.information_gain,
             district_rec.force_gain
-        FROM game.calculate_district_resources(player_rec.player_id, district_rec.district_id);
+        FROM calculate_district_resources(player_rec.player_id, district_rec.district_id);
 
         -- Add to totals
         total_influence := total_influence + district_rec.influence_gain;
@@ -1067,27 +1067,27 @@ BEGIN
             'force', total_force
         ),
         'next_cycle', json_build_object(
-            'type', (SELECT cycle_type FROM game.get_current_cycle()),
-            'date', (SELECT cycle_date FROM game.get_current_cycle())
+            'type', (SELECT cycle_type FROM get_current_cycle()),
+            'date', (SELECT cycle_date FROM get_current_cycle())
         )
     );
 END;
 $$ LANGUAGE plpgsql;
 
 -- Get information about politicians
-CREATE OR REPLACE FUNCTION game.api_get_politicians(
+CREATE OR REPLACE FUNCTION api_get_politicians(
     p_telegram_id TEXT,
     p_type TEXT DEFAULT 'local', -- 'local', 'international', or 'all'
     p_language TEXT DEFAULT 'en_US'
 )
 RETURNS JSON AS $$
 DECLARE
-    player_rec game.players;
+    player_rec players;
     politicians_data JSON;
     type_filter TEXT;
 BEGIN
     -- Get player data
-    SELECT * INTO player_rec FROM game.get_player_by_telegram_id(p_telegram_id);
+    SELECT * INTO player_rec FROM get_player_by_telegram_id(p_telegram_id);
 
     IF player_rec IS NULL THEN
         RAISE EXCEPTION 'Player not found';
@@ -1110,19 +1110,19 @@ BEGIN
             'country', p.country,
             'district', (
                 SELECT name
-                FROM game.districts
+                FROM districts
                 WHERE district_id = p.district_id
             ),
             'influence_in_district', p.influence_in_district,
             'friendliness', COALESCE((
                 SELECT friendliness_level
-                FROM game.player_politician_relations
+                FROM player_politician_relations
                 WHERE player_id = player_rec.player_id AND politician_id = p.politician_id
             ), 50),
-            'ideology_compatibility', game.calculate_ideology_compatibility(player_rec.player_id, p.politician_id)
+            'ideology_compatibility', calculate_ideology_compatibility(player_rec.player_id, p.politician_id)
         )
     ) INTO politicians_data
-    FROM game.politicians p
+    FROM politicians p
     WHERE type_filter IS NULL OR p.type = type_filter
     ORDER BY p.name;
 
@@ -1141,28 +1141,28 @@ END;
 $$ LANGUAGE plpgsql;
 
 -- Get detailed information about a specific politician
-CREATE OR REPLACE FUNCTION game.api_get_politician_status(
+CREATE OR REPLACE FUNCTION api_get_politician_status(
     p_telegram_id TEXT,
     p_politician_name TEXT,
     p_language TEXT DEFAULT 'en_US'
 )
 RETURNS JSON AS $$
 DECLARE
-    player_rec game.players;
-    politician_rec game.politicians;
-    relation_rec game.player_politician_relations;
+    player_rec players;
+    politician_rec politicians;
+    relation_rec player_politician_relations;
     ideology_compatibility INTEGER;
     active_effects_json JSON;
 BEGIN
     -- Get player data
-    SELECT * INTO player_rec FROM game.get_player_by_telegram_id(p_telegram_id);
+    SELECT * INTO player_rec FROM get_player_by_telegram_id(p_telegram_id);
 
     IF player_rec IS NULL THEN
         RAISE EXCEPTION 'Player not found';
     END IF;
 
     -- Get politician data
-    SELECT * INTO politician_rec FROM game.get_politician_by_name(p_politician_name);
+    SELECT * INTO politician_rec FROM get_politician_by_name(p_politician_name);
 
     IF politician_rec IS NULL THEN
         RAISE EXCEPTION 'Politician not found: %', p_politician_name;
@@ -1170,10 +1170,10 @@ BEGIN
 
     -- Get relation data
     SELECT * INTO relation_rec
-    FROM game.get_player_politician_relation(player_rec.player_id, politician_rec.politician_id);
+    FROM get_player_politician_relation(player_rec.player_id, politician_rec.politician_id);
 
     -- Calculate ideology compatibility
-    ideology_compatibility := game.calculate_ideology_compatibility(player_rec.player_id, politician_rec.politician_id);
+    ideology_compatibility := calculate_ideology_compatibility(player_rec.player_id, politician_rec.politician_id);
 
     -- Get active effects for international politicians
     IF politician_rec.type = 'international' THEN
@@ -1183,7 +1183,7 @@ BEGIN
                 'description', description,
                 'target_district', (
                     SELECT name
-                    FROM game.districts
+                    FROM districts
                     WHERE district_id = target_district_id
                 ),
                 'control_points_effect', control_points_effect,
@@ -1192,7 +1192,7 @@ BEGIN
                 'expires_at', expires_at
             )
         ) INTO active_effects_json
-        FROM game.international_effects
+        FROM international_effects
         WHERE politician_id = politician_rec.politician_id AND expires_at > NOW();
     END IF;
 
@@ -1210,7 +1210,7 @@ BEGIN
         'country', politician_rec.country,
         'district', (
             SELECT name
-            FROM game.districts
+            FROM districts
             WHERE district_id = politician_rec.district_id
         ),
         'influence_in_district', politician_rec.influence_in_district,
@@ -1235,37 +1235,37 @@ END;
 $$ LANGUAGE plpgsql;
 
 -- Admin function to process all pending actions
-CREATE OR REPLACE FUNCTION game.api_admin_process_actions(
+CREATE OR REPLACE FUNCTION api_admin_process_actions(
     p_telegram_id TEXT
 )
 RETURNS JSON AS $$
 DECLARE
-    player_rec game.players;
+    player_rec players;
     current_cycle UUID;
     processed_count INTEGER;
     collective_processed_count INTEGER;
 BEGIN
     -- Get player data
-    SELECT * INTO player_rec FROM game.get_player_by_telegram_id(p_telegram_id);
+    SELECT * INTO player_rec FROM get_player_by_telegram_id(p_telegram_id);
 
     IF player_rec IS NULL OR NOT player_rec.is_admin THEN
         RAISE EXCEPTION 'Unauthorized: Admin privileges required';
     END IF;
 
     -- Get current cycle
-    SELECT cycle_id INTO current_cycle FROM game.get_current_cycle();
+    SELECT cycle_id INTO current_cycle FROM get_current_cycle();
 
     -- Process collective actions first
-    collective_processed_count := game.process_all_collective_actions(current_cycle);
+    collective_processed_count := process_all_collective_actions(current_cycle);
 
     -- Process all pending actions
-    processed_count := game.process_all_pending_actions(current_cycle);
+    processed_count := process_all_pending_actions(current_cycle);
 
     -- Apply international effects
-    PERFORM game.apply_international_effects();
+    PERFORM apply_international_effects();
 
     -- Process end of cycle and distribute resources
-    PERFORM game.process_end_of_cycle();
+    PERFORM process_end_of_cycle();
 
     -- Return results
     RETURN json_build_object(
@@ -1273,29 +1273,29 @@ BEGIN
         'actions_processed', processed_count,
         'collective_actions_processed', collective_processed_count,
         'new_cycle', json_build_object(
-            'type', (SELECT cycle_type FROM game.get_current_cycle()),
-            'date', (SELECT cycle_date FROM game.get_current_cycle()),
-            'submission_deadline', (SELECT submission_deadline FROM game.get_current_cycle()),
-            'results_time', (SELECT results_time FROM game.get_current_cycle())
+            'type', (SELECT cycle_type FROM get_current_cycle()),
+            'date', (SELECT cycle_date FROM get_current_cycle()),
+            'submission_deadline', (SELECT submission_deadline FROM get_current_cycle()),
+            'results_time', (SELECT results_time FROM get_current_cycle())
         )
     );
 END;
 $$ LANGUAGE plpgsql;
 
 -- Admin function to generate international effects
-CREATE OR REPLACE FUNCTION game.api_admin_generate_international_effects(
+CREATE OR REPLACE FUNCTION api_admin_generate_international_effects(
     p_telegram_id TEXT,
     p_count INTEGER DEFAULT 2
 )
 RETURNS JSON AS $$
 DECLARE
-    player_rec game.players;
+    player_rec players;
     politician_rec RECORD;
     i INTEGER;
     generated_effects JSON;
 BEGIN
     -- Get player data
-    SELECT * INTO player_rec FROM game.get_player_by_telegram_id(p_telegram_id);
+    SELECT * INTO player_rec FROM get_player_by_telegram_id(p_telegram_id);
 
     IF player_rec IS NULL OR NOT player_rec.is_admin THEN
         RAISE EXCEPTION 'Unauthorized: Admin privileges required';
@@ -1308,7 +1308,7 @@ BEGIN
     FOR i IN 1..p_count LOOP
         -- Select a random international politician
         SELECT * INTO politician_rec
-        FROM game.politicians
+        FROM politicians
         WHERE type = 'international'
         ORDER BY RANDOM()
         LIMIT 1;
@@ -1316,9 +1316,9 @@ BEGIN
         IF politician_rec IS NOT NULL THEN
             -- Generate effect using the politician
             DECLARE
-                new_effect game.international_effects;
+                new_effect international_effects;
             BEGIN
-                new_effect := game.generate_international_effect(politician_rec.politician_id);
+                new_effect := generate_international_effect(politician_rec.politician_id);
 
                 -- Append to the effects array
                 generated_effects := generated_effects || json_build_object(

@@ -2,7 +2,7 @@
 -- Triggers and constraints for data validation and integrity
 
 -- Function to update the 'updated_at' field for various tables
-CREATE OR REPLACE FUNCTION game.update_timestamp()
+CREATE OR REPLACE FUNCTION update_timestamp()
 RETURNS TRIGGER AS $$
 BEGIN
     NEW.updated_at = NOW();
@@ -12,30 +12,30 @@ $$ LANGUAGE plpgsql;
 
 -- Apply the updated_at trigger to relevant tables
 CREATE TRIGGER trg_resources_updated
-BEFORE UPDATE ON game.resources
-FOR EACH ROW EXECUTE FUNCTION game.update_timestamp();
+BEFORE UPDATE ON resources
+FOR EACH ROW EXECUTE FUNCTION update_timestamp();
 
 CREATE TRIGGER trg_district_control_updated
-BEFORE UPDATE ON game.district_control
-FOR EACH ROW EXECUTE FUNCTION game.update_timestamp();
+BEFORE UPDATE ON district_control
+FOR EACH ROW EXECUTE FUNCTION update_timestamp();
 
 CREATE TRIGGER trg_player_politician_relations_updated
-BEFORE UPDATE ON game.player_politician_relations
-FOR EACH ROW EXECUTE FUNCTION game.update_timestamp();
+BEFORE UPDATE ON player_politician_relations
+FOR EACH ROW EXECUTE FUNCTION update_timestamp();
 
 CREATE TRIGGER trg_translations_updated
-BEFORE UPDATE ON game.translations
-FOR EACH ROW EXECUTE FUNCTION game.update_timestamp();
+BEFORE UPDATE ON translations
+FOR EACH ROW EXECUTE FUNCTION update_timestamp();
 
 -- Function to validate player resources when submitting an action
-CREATE OR REPLACE FUNCTION game.validate_action_resources()
+CREATE OR REPLACE FUNCTION validate_action_resources()
 RETURNS TRIGGER AS $$
 DECLARE
-    player_resources game.resources;
+    player_resources resources;
 BEGIN
     -- Get the player's current resources
     SELECT * INTO player_resources 
-    FROM game.resources
+    FROM resources
     WHERE player_id = NEW.player_id;
     
     -- Check if player has enough resources for the action
@@ -55,31 +55,31 @@ $$ LANGUAGE plpgsql;
 
 -- Apply resource validation trigger to actions
 CREATE TRIGGER trg_validate_action_resources
-BEFORE INSERT ON game.actions
-FOR EACH ROW EXECUTE FUNCTION game.validate_action_resources();
+BEFORE INSERT ON actions
+FOR EACH ROW EXECUTE FUNCTION validate_action_resources();
 
 -- Apply resource validation trigger to collective action participants
 CREATE TRIGGER trg_validate_collective_action_resources
-BEFORE INSERT ON game.collective_action_participants
-FOR EACH ROW EXECUTE FUNCTION game.validate_action_resources();
+BEFORE INSERT ON collective_action_participants
+FOR EACH ROW EXECUTE FUNCTION validate_action_resources();
 
 -- Function to validate player's remaining actions per cycle
-CREATE OR REPLACE FUNCTION game.validate_player_actions_limit()
+CREATE OR REPLACE FUNCTION validate_player_actions_limit()
 RETURNS TRIGGER AS $$
 DECLARE
     action_count INTEGER;
     quick_action_count INTEGER;
-    player_data game.players;
+    player_data players;
 BEGIN
     -- Get player data
     SELECT * INTO player_data
-    FROM game.players
+    FROM players
     WHERE player_id = NEW.player_id;
     
     -- Count existing actions for this player in this cycle
     IF NOT NEW.is_quick_action THEN
         SELECT COUNT(*) INTO action_count
-        FROM game.actions
+        FROM actions
         WHERE 
             player_id = NEW.player_id 
             AND cycle_id = NEW.cycle_id 
@@ -91,7 +91,7 @@ BEGIN
         END IF;
     ELSE
         SELECT COUNT(*) INTO quick_action_count
-        FROM game.actions
+        FROM actions
         WHERE 
             player_id = NEW.player_id 
             AND cycle_id = NEW.cycle_id 
@@ -109,11 +109,11 @@ $$ LANGUAGE plpgsql;
 
 -- Apply action limit validation trigger
 CREATE TRIGGER trg_validate_player_actions_limit
-BEFORE INSERT ON game.actions
-FOR EACH ROW EXECUTE FUNCTION game.validate_player_actions_limit();
+BEFORE INSERT ON actions
+FOR EACH ROW EXECUTE FUNCTION validate_player_actions_limit();
 
 -- Function to validate and update district control status
-CREATE OR REPLACE FUNCTION game.update_district_control_status()
+CREATE OR REPLACE FUNCTION update_district_control_status()
 RETURNS TRIGGER AS $$
 DECLARE
     old_controlling_player UUID;
@@ -125,7 +125,7 @@ BEGIN
         
         -- Get current controlling player for this district
         SELECT player_id INTO old_controlling_player
-        FROM game.district_control
+        FROM district_control
         WHERE 
             district_id = NEW.district_id 
             AND player_id != NEW.player_id
@@ -133,12 +133,12 @@ BEGIN
             
         -- If there was a different controlling player, reduce their control
         IF old_controlling_player IS NOT NULL THEN
-            UPDATE game.district_control
+            UPDATE district_control
             SET control_points = control_points - 10
             WHERE player_id = old_controlling_player AND district_id = NEW.district_id;
             
             -- Generate news about district control change
-            INSERT INTO game.news (
+            INSERT INTO news (
                 cycle_id,
                 title,
                 content,
@@ -146,8 +146,8 @@ BEGIN
                 related_district_id
             )
             VALUES (
-                (SELECT cycle_id FROM game.cycles WHERE is_active = TRUE LIMIT 1),
-                'Control Change in ' || (SELECT name FROM game.districts WHERE district_id = NEW.district_id),
+                (SELECT cycle_id FROM cycles WHERE is_active = TRUE LIMIT 1),
+                'Control Change in ' || (SELECT name FROM districts WHERE district_id = NEW.district_id),
                 'Control of the district has changed to a new faction.',
                 'public',
                 NEW.district_id
@@ -161,34 +161,34 @@ $$ LANGUAGE plpgsql;
 
 -- Apply district control status trigger
 CREATE TRIGGER trg_update_district_control_status
-AFTER UPDATE ON game.district_control
-FOR EACH ROW EXECUTE FUNCTION game.update_district_control_status();
+AFTER UPDATE ON district_control
+FOR EACH ROW EXECUTE FUNCTION update_district_control_status();
 
 -- Function to handle resource deduction when action is submitted
-CREATE OR REPLACE FUNCTION game.deduct_action_resources()
+CREATE OR REPLACE FUNCTION deduct_action_resources()
 RETURNS TRIGGER AS $$
 BEGIN
     -- Deduct resources based on action type
     IF NEW.resource_type = 'influence' THEN
-        UPDATE game.resources
+        UPDATE resources
         SET influence_amount = influence_amount - NEW.resource_amount
         WHERE player_id = NEW.player_id;
     ELSIF NEW.resource_type = 'money' THEN
-        UPDATE game.resources
+        UPDATE resources
         SET money_amount = money_amount - NEW.resource_amount
         WHERE player_id = NEW.player_id;
     ELSIF NEW.resource_type = 'information' THEN
-        UPDATE game.resources
+        UPDATE resources
         SET information_amount = information_amount - NEW.resource_amount
         WHERE player_id = NEW.player_id;
     ELSIF NEW.resource_type = 'force' THEN
-        UPDATE game.resources
+        UPDATE resources
         SET force_amount = force_amount - NEW.resource_amount
         WHERE player_id = NEW.player_id;
     END IF;
     
     -- Log the resource change in history
-    INSERT INTO game.resource_history (
+    INSERT INTO resource_history (
         player_id,
         cycle_id,
         change_type,
@@ -215,16 +215,16 @@ $$ LANGUAGE plpgsql;
 
 -- Apply resource deduction trigger
 CREATE TRIGGER trg_deduct_action_resources
-AFTER INSERT ON game.actions
-FOR EACH ROW EXECUTE FUNCTION game.deduct_action_resources();
+AFTER INSERT ON actions
+FOR EACH ROW EXECUTE FUNCTION deduct_action_resources();
 
 -- Similar trigger for collective action participants
 CREATE TRIGGER trg_deduct_collective_action_resources
-AFTER INSERT ON game.collective_action_participants
-FOR EACH ROW EXECUTE FUNCTION game.deduct_action_resources();
+AFTER INSERT ON collective_action_participants
+FOR EACH ROW EXECUTE FUNCTION deduct_action_resources();
 
 -- Function to validate politician ideological leaning changes
-CREATE OR REPLACE FUNCTION game.validate_politician_ideology_change()
+CREATE OR REPLACE FUNCTION validate_politician_ideology_change()
 RETURNS TRIGGER AS $$
 BEGIN
     -- Ensure ideology stays within the -5 to +5 range
@@ -240,35 +240,35 @@ $$ LANGUAGE plpgsql;
 
 -- Apply politician ideology validation trigger
 CREATE TRIGGER trg_validate_politician_ideology
-BEFORE UPDATE ON game.politicians
-FOR EACH ROW EXECUTE FUNCTION game.validate_politician_ideology_change();
+BEFORE UPDATE ON politicians
+FOR EACH ROW EXECUTE FUNCTION validate_politician_ideology_change();
 
 -- Function to handle action cancellation and refund resources
-CREATE OR REPLACE FUNCTION game.handle_action_cancellation()
+CREATE OR REPLACE FUNCTION handle_action_cancellation()
 RETURNS TRIGGER AS $$
 BEGIN
     IF NEW.status = 'cancelled' AND OLD.status != 'cancelled' THEN
         -- Refund resources to the player
         IF NEW.resource_type = 'influence' THEN
-            UPDATE game.resources
+            UPDATE resources
             SET influence_amount = influence_amount + NEW.resource_amount
             WHERE player_id = NEW.player_id;
         ELSIF NEW.resource_type = 'money' THEN
-            UPDATE game.resources
+            UPDATE resources
             SET money_amount = money_amount + NEW.resource_amount
             WHERE player_id = NEW.player_id;
         ELSIF NEW.resource_type = 'information' THEN
-            UPDATE game.resources
+            UPDATE resources
             SET information_amount = information_amount + NEW.resource_amount
             WHERE player_id = NEW.player_id;
         ELSIF NEW.resource_type = 'force' THEN
-            UPDATE game.resources
+            UPDATE resources
             SET force_amount = force_amount + NEW.resource_amount
             WHERE player_id = NEW.player_id;
         END IF;
         
         -- Log the refund in history
-        INSERT INTO game.resource_history (
+        INSERT INTO resource_history (
             player_id,
             cycle_id,
             change_type,
@@ -296,13 +296,13 @@ $$ LANGUAGE plpgsql;
 
 -- Apply action cancellation trigger
 CREATE TRIGGER trg_handle_action_cancellation
-AFTER UPDATE ON game.actions
+AFTER UPDATE ON actions
 FOR EACH ROW
 WHEN (NEW.status = 'cancelled' AND OLD.status != 'cancelled')
-EXECUTE FUNCTION game.handle_action_cancellation();
+EXECUTE FUNCTION handle_action_cancellation();
 
 -- Function to validate player ideology score changes
-CREATE OR REPLACE FUNCTION game.validate_player_ideology()
+CREATE OR REPLACE FUNCTION validate_player_ideology()
 RETURNS TRIGGER AS $$
 BEGIN
     -- Ensure ideology stays within the -5 to +5 range
@@ -318,11 +318,11 @@ $$ LANGUAGE plpgsql;
 
 -- Apply player ideology validation trigger
 CREATE TRIGGER trg_validate_player_ideology
-BEFORE UPDATE ON game.players
-FOR EACH ROW EXECUTE FUNCTION game.validate_player_ideology();
+BEFORE UPDATE ON players
+FOR EACH ROW EXECUTE FUNCTION validate_player_ideology();
 
 -- Function to validate player-politician friendliness level
-CREATE OR REPLACE FUNCTION game.validate_friendliness_level()
+CREATE OR REPLACE FUNCTION validate_friendliness_level()
 RETURNS TRIGGER AS $$
 BEGIN
     -- Ensure friendliness stays within the 0 to 100 range
@@ -338,5 +338,5 @@ $$ LANGUAGE plpgsql;
 
 -- Apply friendliness validation trigger
 CREATE TRIGGER trg_validate_friendliness_level
-BEFORE UPDATE ON game.player_politician_relations
-FOR EACH ROW EXECUTE FUNCTION game.validate_friendliness_level();
+BEFORE UPDATE ON player_politician_relations
+FOR EACH ROW EXECUTE FUNCTION validate_friendliness_level();

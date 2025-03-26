@@ -57,12 +57,8 @@ def init_supabase() -> Client:
 
 def get_supabase() -> Client:
     client = init_supabase()
-    # Set schema to 'game' instead of default 'public'
-    try:
-        # Add this line to explicitly set schema
-        client.postgrest.schema('game')
-    except Exception as e:
-        logger.warning(f"Could not set schema: {e}")
+    # Remove the line that sets schema to 'game'
+    # client.postgrest.schema('game')
     return client
 
 
@@ -110,7 +106,7 @@ async def execute_function(function_name: str, params: Dict[str, Any], schema_pr
             if function_name == "player_exists":
                 # Direct SQL fallback for player_exists
                 result = await execute_sql(
-                    f"SELECT EXISTS (SELECT 1 FROM game.players WHERE telegram_id = '{params.get('p_telegram_id', '')}');"
+                    f"SELECT EXISTS (SELECT 1 FROM players WHERE telegram_id = '{params.get('p_telegram_id', '')}');"
                 )
                 if result and isinstance(result, list) and len(result) > 0:
                     return result[0].get('exists', False)
@@ -138,9 +134,9 @@ async def execute_sql(sql: str) -> Any:
             if sql.lower().startswith("select"):
                 # For select queries, try direct SQL via REST API
                 table_match = None
-                if "from game." in sql.lower():
+                if "from " in sql.lower():
                     # Extract table name from SQL
-                    parts = sql.lower().split("from game.")
+                    parts = sql.lower().split("from ")
                     if len(parts) > 1:
                         table_parts = parts[1].split()
                         if table_parts:
@@ -149,7 +145,7 @@ async def execute_sql(sql: str) -> Any:
                 if table_match:
                     try:
                         # Try to query the table directly
-                        response = client.table(f"game.{table_match}").select("*").execute()
+                        response = client.table(f"{table_match}").select("*").execute()
                         if hasattr(response, 'data'):
                             return response.data
                     except Exception as table_error:
@@ -175,15 +171,15 @@ async def check_schema_exists() -> bool:
     try:
         # Use a simple information schema query
         result = await execute_sql(
-            "SELECT EXISTS (SELECT 1 FROM information_schema.schemata WHERE schema_name = 'game');"
+            "SELECT EXISTS (SELECT 1 FROM information_schema.schemata WHERE schema_name = 'public');"
         )
 
         if result and isinstance(result, list) and len(result) > 0:
             exists = result[0].get('exists', False)
-            logger.info(f"Game schema exists: {exists}")
+            logger.info(f"Public schema exists: {exists}")
             return exists
 
-        logger.info("Could not verify game schema existence")
+        logger.info("Could not verify public schema existence")
         return False
     except Exception as e:
         logger.error(f"Error checking schema existence: {str(e)}")

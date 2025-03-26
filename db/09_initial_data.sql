@@ -2,7 +2,7 @@
 -- Initial data required for the game to function
 
 -- Initialize districts (from document)
-INSERT INTO game.districts (name, description, influence_resource, money_resource, information_resource, force_resource) VALUES
+INSERT INTO districts (name, description, influence_resource, money_resource, information_resource, force_resource) VALUES
 ('Stari Grad', 'Historical and administrative center of Novi-Sad', 2, 0, 2, 0),
 ('Liman', 'University and scientific center', 2, 0, 2, 0),
 ('Petrovaradin', 'Cultural heritage and tourism area', 2, 1, 0, 0),
@@ -13,28 +13,28 @@ INSERT INTO game.districts (name, description, influence_resource, money_resourc
 ('Sremska Kamenica', 'Suburb with shadow economy', 0, 0, 1, 3);
 
 -- Initialize local politicians (from document)
-INSERT INTO game.politicians (name, type, description, ideological_leaning, district_id, influence_in_district) VALUES
+INSERT INTO politicians (name, type, description, ideological_leaning, district_id, influence_in_district) VALUES
 ('Nemanja Kovacevic', 'local', 'Head of city administration, loyal to Milosevic regime', 5, 
-    (SELECT district_id FROM game.districts WHERE name = 'Stari Grad'), 6),
+    (SELECT district_id FROM districts WHERE name = 'Stari Grad'), 6),
 ('Miroslav Vasilevic', 'local', 'Deputy head of administration', 3, 
-    (SELECT district_id FROM game.districts WHERE name = 'Stari Grad'), 4),
+    (SELECT district_id FROM districts WHERE name = 'Stari Grad'), 4),
 ('Professor Dragan Jovic', 'local', 'University rector, supporter of democratization', -5, 
-    (SELECT district_id FROM game.districts WHERE name = 'Liman'), 7),
+    (SELECT district_id FROM districts WHERE name = 'Liman'), 7),
 ('Zoran "Zoki" Novakovic', 'local', 'Leader of local criminal group', 2, 
-    (SELECT district_id FROM game.districts WHERE name = 'Sremska Kamenica'), 5),
+    (SELECT district_id FROM districts WHERE name = 'Sremska Kamenica'), 5),
 ('Jovan Miric', 'local', 'Diplomat with international connections', 3, 
-    (SELECT district_id FROM game.districts WHERE name = 'Petrovaradin'), 4),
+    (SELECT district_id FROM districts WHERE name = 'Petrovaradin'), 4),
 ('Colonel Branko Petrovic', 'local', 'Commander of military garrison', 4, 
-    (SELECT district_id FROM game.districts WHERE name = 'Adamovicevo'), 6),
+    (SELECT district_id FROM districts WHERE name = 'Adamovicevo'), 6),
 ('Goran Radic', 'local', 'Leader of machinery workers union', -2, 
-    (SELECT district_id FROM game.districts WHERE name = 'Podbara'), 4),
+    (SELECT district_id FROM districts WHERE name = 'Podbara'), 4),
 ('Maria Kovac', 'local', 'Leader of student movement "Otpor"', -4, 
-    (SELECT district_id FROM game.districts WHERE name = 'Liman'), 5),
+    (SELECT district_id FROM districts WHERE name = 'Liman'), 5),
 ('Bishop Irinej', 'local', 'Head of Orthodox Church in Novi-Sad', 1, 
-    (SELECT district_id FROM game.districts WHERE name = 'Petrovaradin'), 5);
+    (SELECT district_id FROM districts WHERE name = 'Petrovaradin'), 5);
 
 -- Initialize international politicians (from document)
-INSERT INTO game.politicians (name, type, description, ideological_leaning, activity_percentage, country) VALUES
+INSERT INTO politicians (name, type, description, ideological_leaning, activity_percentage, country) VALUES
 ('Bill Clinton', 'international', 'US President, strong supporter of democratic reform', -5, 80, 'USA'),
 ('Tony Blair', 'international', 'British Prime Minister, proponent of economic reforms', -4, 60, 'United Kingdom'),
 ('Jacques Chirac', 'international', 'French President, diplomatic approach', -3, 50, 'France'),
@@ -47,7 +47,7 @@ INSERT INTO game.politicians (name, type, description, ideological_leaning, acti
 ('Madeleine Albright', 'international', 'US Secretary of State, sanctions supporter', -4, 70, 'USA');
 
 -- Initialize translations for English
-INSERT INTO game.translations (translation_key, en_US, ru_RU) VALUES
+INSERT INTO translations (translation_key, en_US, ru_RU) VALUES
 -- Resource names
 ('resources.influence', 'Influence', 'Влияние'),
 ('resources.money', 'Money', 'Деньги'),
@@ -137,7 +137,7 @@ BEGIN
     END IF;
 
     -- Create cycle
-    INSERT INTO game.cycles (
+    INSERT INTO cycles (
         cycle_type,
         cycle_date,
         submission_deadline,

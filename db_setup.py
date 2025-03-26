@@ -106,7 +106,7 @@ async def setup_database():
 
         # Create players table
         await execute_sql("""
-        CREATE TABLE IF NOT EXISTS game.players (
+        CREATE TABLE IF NOT EXISTS players (
             player_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
             telegram_id TEXT UNIQUE NOT NULL,
             name TEXT NOT NULL,
@@ -123,7 +123,7 @@ async def setup_database():
 
         # Create districts table
         await execute_sql("""
-        CREATE TABLE IF NOT EXISTS game.districts (
+        CREATE TABLE IF NOT EXISTS districts (
             district_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
             name TEXT NOT NULL UNIQUE,
             description TEXT,
@@ -137,9 +137,9 @@ async def setup_database():
 
         # Create resources table
         await execute_sql("""
-        CREATE TABLE IF NOT EXISTS game.resources (
+        CREATE TABLE IF NOT EXISTS resources (
             resource_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-            player_id UUID NOT NULL REFERENCES game.players(player_id) ON DELETE CASCADE,
+            player_id UUID NOT NULL REFERENCES players(player_id) ON DELETE CASCADE,
             influence_amount INTEGER NOT NULL DEFAULT 0 CHECK (influence_amount >= 0),
             money_amount INTEGER NOT NULL DEFAULT 0 CHECK (money_amount >= 0),
             information_amount INTEGER NOT NULL DEFAULT 0 CHECK (information_amount >= 0),
@@ -151,7 +151,7 @@ async def setup_database():
 
         # Create translations table
         await execute_sql("""
-        CREATE TABLE IF NOT EXISTS game.translations (
+        CREATE TABLE IF NOT EXISTS translations (
             translation_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
             translation_key TEXT NOT NULL UNIQUE,
             en_US TEXT NOT NULL,
@@ -163,11 +163,11 @@ async def setup_database():
 
         # Create a function to check if a player exists
         await execute_sql("""
-        CREATE OR REPLACE FUNCTION game.player_exists(p_telegram_id TEXT)
+        CREATE OR REPLACE FUNCTION player_exists(p_telegram_id TEXT)
         RETURNS BOOLEAN AS $$
         BEGIN
             RETURN EXISTS (
-                SELECT 1 FROM game.players WHERE telegram_id = p_telegram_id
+                SELECT 1 FROM players WHERE telegram_id = p_telegram_id
             );
         END;
         $$ LANGUAGE plpgsql;
@@ -176,7 +176,7 @@ async def setup_database():
         # Create sample data - districts
         logger.info("Creating sample data...")
         await execute_sql("""
-        INSERT INTO game.districts (name, description, influence_resource, money_resource, information_resource, force_resource)
+        INSERT INTO districts (name, description, influence_resource, money_resource, information_resource, force_resource)
         VALUES 
         ('Stari Grad', 'Historical and administrative center of Novi-Sad', 2, 0, 2, 0),
         ('Liman', 'University and scientific center', 2, 0, 2, 0),
@@ -191,7 +191,7 @@ async def setup_database():
 
         # Create a minimal player registration function
         await execute_sql("""
-        CREATE OR REPLACE FUNCTION game.api_register_player(
+        CREATE OR REPLACE FUNCTION api_register_player(
             p_telegram_id TEXT,
             p_name TEXT,
             p_ideology_score INTEGER DEFAULT 0
@@ -201,12 +201,12 @@ async def setup_database():
             new_player_id UUID;
         BEGIN
             -- Check if player already exists
-            IF EXISTS (SELECT 1 FROM game.players WHERE telegram_id = p_telegram_id) THEN
+            IF EXISTS (SELECT 1 FROM players WHERE telegram_id = p_telegram_id) THEN
                 RETURN jsonb_build_object('success', false, 'message', 'Player already exists');
             END IF;
 
             -- Create player record
-            INSERT INTO game.players (
+            INSERT INTO players (
                 telegram_id,
                 name,
                 ideology_score
@@ -217,7 +217,7 @@ async def setup_database():
             ) RETURNING player_id INTO new_player_id;
 
             -- Create initial resources for player
-            INSERT INTO game.resources (
+            INSERT INTO resources (
                 player_id,
                 influence_amount,
                 money_amount,
@@ -242,7 +242,7 @@ async def setup_database():
 
         # Create a basic function to get player status
         await execute_sql("""
-        CREATE OR REPLACE FUNCTION game.api_get_player_status(
+        CREATE OR REPLACE FUNCTION api_get_player_status(
             p_telegram_id TEXT,
             p_language TEXT DEFAULT 'en_US'
         )
@@ -252,14 +252,14 @@ async def setup_database():
             resources_rec RECORD;
         BEGIN
             -- Get player data
-            SELECT * INTO player_rec FROM game.players WHERE telegram_id = p_telegram_id;
+            SELECT * INTO player_rec FROM players WHERE telegram_id = p_telegram_id;
 
             IF player_rec IS NULL THEN
                 RETURN jsonb_build_object('success', false, 'message', 'Player not found');
             END IF;
 
             -- Get player resources
-            SELECT * INTO resources_rec FROM game.resources WHERE player_id = player_rec.player_id;
+            SELECT * INTO resources_rec FROM resources WHERE player_id = player_rec.player_id;
 
             -- Return player status
             RETURN jsonb_build_object(

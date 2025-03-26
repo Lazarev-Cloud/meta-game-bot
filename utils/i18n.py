@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 """
-Enhanced internationalization module for the Meta Game.
+Enhanced internationalization module for the Meta 
 """
 
 import json
@@ -318,7 +318,7 @@ async def load_translations_from_db() -> None:
         from db.supabase_client import execute_sql
 
         # Direct SQL query to fetch translations
-        query = "SELECT translation_key, en_US, ru_RU FROM game.translations;"
+        query = "SELECT translation_key, en_US, ru_RU FROM translations;"
         translations_data = await execute_sql(query)
 
         # Process the translations

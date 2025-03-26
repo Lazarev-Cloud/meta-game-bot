@@ -79,11 +79,11 @@ async def apply_fixes():
         # Apply critical function fixes
         await execute_sql("""
         -- Create function for player_exists both in game schema and public schema
-        CREATE OR REPLACE FUNCTION game.player_exists(p_telegram_id TEXT)
+        CREATE OR REPLACE FUNCTION player_exists(p_telegram_id TEXT)
         RETURNS BOOLEAN AS $$
         BEGIN
             RETURN EXISTS (
-                SELECT 1 FROM game.players WHERE telegram_id = p_telegram_id
+                SELECT 1 FROM players WHERE telegram_id = p_telegram_id
             );
         END;
         $$ LANGUAGE plpgsql;
@@ -95,7 +95,7 @@ async def apply_fixes():
         RETURNS BOOLEAN AS $$
         BEGIN
             -- Call the original function in the game schema
-            RETURN game.player_exists(p_telegram_id);
+            RETURN player_exists(p_telegram_id);
         END;
         $$ LANGUAGE plpgsql;
         """)

@@ -36,7 +36,7 @@ load_dotenv()
 os.makedirs("logs", exist_ok=True)
 
 # Setup logging
-logger = setup_logger(name="meta_game", level="INFO", log_file="logs/meta_game.log")
+logger = setup_logger(name="meta_game", level="INFO", log_file="logs/meta_log")
 configure_telegram_logger()
 configure_supabase_logger()
 
@@ -97,7 +97,7 @@ async def init_database_with_retry(max_attempts=3):
 
                 # Create minimal tables needed for operation
                 await execute_sql("""
-                CREATE TABLE IF NOT EXISTS game.players (
+                CREATE TABLE IF NOT EXISTS players (
                     player_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
                     telegram_id TEXT UNIQUE NOT NULL,
                     name TEXT NOT NULL,
@@ -112,7 +112,7 @@ async def init_database_with_retry(max_attempts=3):
                 );""")
 
                 await execute_sql("""
-                CREATE TABLE IF NOT EXISTS game.resources (
+                CREATE TABLE IF NOT EXISTS resources (
                     resource_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
                     player_id UUID NOT NULL,
                     influence_amount INTEGER NOT NULL DEFAULT 0,
@@ -130,7 +130,7 @@ async def init_database_with_retry(max_attempts=3):
                 RETURNS BOOLEAN AS $$
                 BEGIN
                     RETURN EXISTS (
-                        SELECT 1 FROM game.players WHERE telegram_id = p_telegram_id
+                        SELECT 1 FROM players WHERE telegram_id = p_telegram_id
                     );
                 END;
                 $$ LANGUAGE plpgsql;
