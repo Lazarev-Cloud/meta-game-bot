@@ -6,9 +6,10 @@ Unified error handling utilities for the Meta Game bot.
 """
 
 import asyncio
-import logging
 import functools
-from typing import Callable, TypeVar, Optional, Dict, Any, Awaitable, Union
+import logging
+import traceback
+from typing import Callable, TypeVar, Optional, Any, Awaitable
 
 from telegram import Update
 
@@ -18,29 +19,45 @@ logger = logging.getLogger(__name__)
 # Type variables for better typing
 T = TypeVar('T')
 
-# Configuration for retry mechanism
+# Configuration for retry mechanism - centralized
 MAX_RETRIES = 3
 RETRY_DELAY = 1.5  # seconds
 
 
+# Error type classification
 class DatabaseError(Exception):
     """Base class for database-related errors."""
     pass
 
 
 class ConnectionError(DatabaseError):
-    """Error related to database connection issues."""
+    """Database connection issues."""
+    pass
+
+
+class PermissionError(DatabaseError):
+    """Database permission issues."""
     pass
 
 
 class QueryError(DatabaseError):
-    """Error related to database query issues."""
+    """Database query issues."""
     pass
 
 
-class AuthenticationError(DatabaseError):
-    """Error related to database authentication issues."""
-    pass
+# Error handling utilities
+def classify_error(error: Exception) -> type:
+    """Classify an error by type for appropriate handling."""
+    error_text = str(error).lower()
+
+    if "permission denied" in error_text or "not authorized" in error_text:
+        return PermissionError
+    elif "connection" in error_text or "timeout" in error_text or "network" in error_text:
+        return ConnectionError
+    elif "database" in error_text or "query" in error_text or "sql" in error_text:
+        return QueryError
+    else:
+        return type(error)
 
 
 async def db_operation(
@@ -54,38 +71,20 @@ async def db_operation(
         raise_error: bool = False,
         **kwargs
 ) -> T:
-    """
-    Execute a database operation with automatic retries and standardized error handling.
-
-    Args:
-        operation_name: Name of the operation for logging
-        func: Async function to execute
-        *args: Arguments to pass to the function
-        default_return: Value to return on failure
-        max_retries: Maximum number of retry attempts
-        retry_delay: Base delay between retries in seconds
-        log_error: Whether to log errors
-        raise_error: Whether to raise errors after all retries fail
-        **kwargs: Keyword arguments to pass to the function
-
-    Returns:
-        The result of the function call or default_return on failure
-
-    Raises:
-        DatabaseError: If raise_error is True and all retries fail
-    """
+    """Execute a database operation with automatic retries and error handling."""
     retries = 0
     last_exception = None
 
     while retries < max_retries:
         try:
             result = await func(*args, **kwargs)
-            # Handle cases where result is a number or boolean that could be mistaken for an error
+            # Handle cases where result is a primitive type
             if result is not None or isinstance(result, (int, float, bool)):
                 return result
             return default_return
         except Exception as e:
             last_exception = e
+            error_class = classify_error(e)
             retries += 1
 
             if log_error:
@@ -93,21 +92,29 @@ async def db_operation(
                     f"Operation '{operation_name}' failed (attempt {retries}/{max_retries}): {str(e)}"
                 )
 
+            # Don't retry permission errors - they won't resolve without intervention
+            if issubclass(error_class, PermissionError):
+                logger.error(f"Permission error in operation '{operation_name}': {str(e)}")
+                break
+
             if retries < max_retries:
-                # Wait before retrying with exponential backoff
-                await asyncio.sleep(retry_delay * retries)
+                # Exponential backoff with jitter for retries
+                delay = retry_delay * (2 ** (retries - 1)) * (0.9 + 0.2 * random.random())
+                await asyncio.sleep(delay)
             elif log_error:
                 logger.error(f"Operation '{operation_name}' failed after {max_retries} attempts: {str(e)}")
 
     # Handle failure after all retries
     if raise_error and last_exception:
-        # Convert to appropriate database error type
-        if "connection" in str(last_exception).lower():
-            raise ConnectionError(f"Unable to connect to database: {str(last_exception)}")
-        elif "permission" in str(last_exception).lower() or "access" in str(last_exception).lower():
-            raise AuthenticationError(f"Authentication error: {str(last_exception)}")
+        error_class = classify_error(last_exception)
+        if issubclass(error_class, ConnectionError):
+            raise ConnectionError(f"Connection error: {str(last_exception)}")
+        elif issubclass(error_class, PermissionError):
+            raise PermissionError(f"Permission error: {str(last_exception)}")
+        elif issubclass(error_class, QueryError):
+            raise QueryError(f"Query error: {str(last_exception)}")
         else:
-            raise QueryError(f"Database query error: {str(last_exception)}")
+            raise DatabaseError(f"Database error: {str(last_exception)}")
 
     # Return default value on complete failure
     return default_return
@@ -136,53 +143,47 @@ async def handle_error(
         operation: str,
         custom_message: Optional[str] = None
 ) -> None:
-    """
-    Unified error handler for both commands and callbacks.
-
-    Args:
-        update: The update object
-        language: User's language code
-        error: The exception that occurred
-        operation: Name of the operation where the error occurred
-        custom_message: Optional custom error message to show the user
-    """
+    """Unified error handler for both commands and callbacks."""
     logger.error(f"Error in {operation}: {str(error)}")
+
+    # Get traceback for better debugging
+    tb = traceback.format_exception(type(error), error, error.__traceback__)
+    logger.debug(f"Traceback for {operation}:\n{''.join(tb)}")
 
     # Import translation function here to avoid circular imports
     from utils.i18n import _
 
     # Default message
-    message = custom_message or _("Database connection error. Please try again later.", language)
+    message = custom_message or _("An error occurred. Please try again later.", language)
 
     # Customize message based on error type
     error_text = str(error).lower()
-    if isinstance(error, DatabaseError):
-        if isinstance(error, ConnectionError):
-            message = _("Database connection error. Please try again later.", language)
-        elif isinstance(error, AuthenticationError):
-            message = _("You don't have permission to perform this action.", language)
-        elif isinstance(error, QueryError):
-            message = _("Error retrieving data. Please try again later.", language)
-    elif "resource" in error_text:
-        message = _("You don't have enough resources for this action.", language)
-    elif "permission" in error_text:
+    error_class = classify_error(error)
+
+    if issubclass(error_class, PermissionError):
         message = _("You don't have permission to perform this action.", language)
+    elif issubclass(error_class, ConnectionError):
+        message = _("Connection error. Please try again later.", language)
+    elif issubclass(error_class, QueryError):
+        message = _("Error retrieving data. Please try again later.", language)
+    elif "resource" in error_text or "not enough" in error_text:
+        message = _("You don't have enough resources for this action.", language)
     elif "not found" in error_text:
         message = _("The requested item was not found.", language)
-    elif "deadline" in error_text:
+    elif "deadline" in error_text or "closed" in error_text:
         message = _("The submission deadline for this cycle has passed.", language)
 
     try:
-        # Handle different update types
+        # Deliver error message based on update type
         if update.callback_query:
             # For callback queries
             query = update.callback_query
-            # Callback answers have character limit
+            # Callback answers have length limit
             await query.answer(message[:200])
             try:
                 await query.edit_message_text(message)
             except Exception:
-                # Message might be unchanged or too old
+                # Message might be unchanged
                 pass
         elif update.message:
             # For regular messages
@@ -195,17 +196,7 @@ async def handle_error(
 
 
 async def require_registration(update: Update, language: str) -> bool:
-    """
-    Check if player is registered and send error message if not.
-    Works with both messages and callback queries.
-
-    Args:
-        update: The update object
-        language: User's language code
-
-    Returns:
-        True if registered, False otherwise
-    """
+    """Check if player is registered and send error message if not."""
     from db import player_exists
     from utils.i18n import _
 
@@ -237,39 +228,5 @@ async def require_registration(update: Update, language: str) -> bool:
     return True
 
 
-def async_error_handler(
-        operation_name: str,
-        default_return: Any = None,
-        max_retries: int = MAX_RETRIES,
-        retry_delay: float = RETRY_DELAY
-) -> Callable:
-    """
-    Decorator to handle errors in async functions with retries and default return value.
-
-    Args:
-        operation_name: Name of the operation for logging
-        default_return: Value to return on error
-        max_retries: Maximum number of retry attempts
-        retry_delay: Base delay between retries in seconds
-
-    Returns:
-        Decorator function
-    """
-
-    def decorator(func: Callable) -> Callable:
-        @functools.wraps(func)
-        async def wrapper(*args, **kwargs):
-            return await db_operation(
-                operation_name,
-                func,
-                *args,
-                default_return=default_return,
-                max_retries=max_retries,
-                retry_delay=retry_delay,
-                raise_error=False,
-                **kwargs
-            )
-
-        return wrapper
-
-    return decorator
+# Add this import for exponential backoff with jitter
+import random

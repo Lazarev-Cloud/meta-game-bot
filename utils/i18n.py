@@ -14,7 +14,7 @@ from typing import Dict, Any, Optional, Callable, Awaitable
 # Initialize logger
 logger = logging.getLogger(__name__)
 
-# Global translations storage
+# Global translations storage with improved structure
 _translations = {
     "en_US": {},
     "ru_RU": {}
@@ -24,22 +24,20 @@ _translations = {
 SUPPORTED_LANGUAGES = ["en_US", "ru_RU"]
 DEFAULT_LANGUAGE = "en_US"
 
-# Language cache to improve performance and reduce DB calls
+# Efficient language cache with TTL
 _language_cache = {}
 _cache_timeout = 300  # 5 minutes in seconds
 _cache_timestamps = {}
+
+# Fallback system for missing translations
+_missing_translation_log = set()  # Track missing translations to avoid log spam
 
 
 def _(text: str, language: str = DEFAULT_LANGUAGE) -> str:
     """
     Translate a text string to the specified language.
 
-    Args:
-        text: Text string to translate
-        language: Language code (en_US or ru_RU)
-
-    Returns:
-        Translated string or original text if no translation is found
+    Enhanced with fallback system and missing translation tracking.
     """
     if not text:
         return ""
@@ -47,52 +45,45 @@ def _(text: str, language: str = DEFAULT_LANGUAGE) -> str:
     # Normalize language code
     language = language if language in SUPPORTED_LANGUAGES else DEFAULT_LANGUAGE
 
-    # Return the translation if it exists, otherwise return the original text
-    return _translations[language].get(text, text)
+    # Check for translation
+    translation = _translations[language].get(text)
+
+    # If translation exists, return it
+    if translation:
+        return translation
+
+    # No translation found, try fallbacks
+    if language != DEFAULT_LANGUAGE:
+        # Try default language
+        default_translation = _translations[DEFAULT_LANGUAGE].get(text)
+        if default_translation:
+            return default_translation
+
+    # Log missing translation (only once per string to avoid spam)
+    cache_key = f"{language}:{text}"
+    if cache_key not in _missing_translation_log and len(text) < 100:  # Don't log very long strings
+        _missing_translation_log.add(cache_key)
+        logger.debug(f"Missing translation for '{text}' in {language}")
+
+    # Return original text as last resort
+    return text
 
 
 # Helper functions for consistent translation patterns
 async def translate_resource(resource_type: str, language: str) -> str:
-    """
-    Translate a resource type consistently.
-
-    Args:
-        resource_type: Resource type (influence, money, information, force)
-        language: Language code
-
-    Returns:
-        Translated resource name
-    """
+    """Translate a resource type consistently."""
     # Ensure consistent capitalization
     resource_type = resource_type.lower()
     return _(resource_type.capitalize(), language)
 
 
 async def translate_action(action_type: str, language: str) -> str:
-    """
-    Translate an action type consistently.
-
-    Args:
-        action_type: Action type (attack, defense, etc.)
-        language: Language code
-
-    Returns:
-        Translated action name
-    """
+    """Translate an action type consistently."""
     return _(action_type, language)
 
 
 async def translate_district(district_name: str, language: str) -> str:
-    """
-    Translate a district name if a translation exists.
-
-    Args:
-        district_name: District name
-        language: Language code
-
-    Returns:
-        Translated district name or original if no translation exists
-    """
+    """Translate a district name if a translation exists."""
     district_key = f"district.{district_name}"
     translation = _(district_key, language)
     return district_name if translation == district_key else translation
@@ -102,11 +93,7 @@ async def get_user_language(telegram_id: str) -> str:
     """
     Get a user's preferred language with improved reliability and caching.
 
-    Args:
-        telegram_id: User's Telegram ID
-
-    Returns:
-        Language code (en_US or ru_RU)
+    Optimized with TTL caching and fallback handling.
     """
     # Check if we have a recent cached value
     current_time = time.time()
@@ -129,8 +116,11 @@ async def get_user_language(telegram_id: str) -> str:
                 return player["language"]
     except Exception as e:
         logger.warning(f"Error getting player language from database: {e}")
+        # Continue to default language
 
     # Default to English if not found or error occurs
+    _language_cache[telegram_id] = DEFAULT_LANGUAGE
+    _cache_timestamps[telegram_id] = current_time
     return DEFAULT_LANGUAGE
 
 
@@ -138,15 +128,14 @@ async def set_user_language(telegram_id: str, language: str) -> bool:
     """
     Set a user's preferred language with database persistence.
 
-    Args:
-        telegram_id: User's Telegram ID
-        language: Language code (en_US or ru_RU)
-
-    Returns:
-        True if successful, False otherwise
+    Improved with error handling and immediate cache update.
     """
     if language not in SUPPORTED_LANGUAGES:
         return False
+
+    # Update cache immediately for responsiveness
+    _language_cache[telegram_id] = language
+    _cache_timestamps[telegram_id] = time.time()
 
     try:
         # Check if player exists in database
@@ -160,16 +149,14 @@ async def set_user_language(telegram_id: str, language: str) -> bool:
             success = result is not None
 
             if success:
-                # Update cache
-                _language_cache[telegram_id] = language
-                _cache_timestamps[telegram_id] = time.time()
                 logger.info(f"Language for {telegram_id} set to {language}")
                 return True
-            return False
+            else:
+                logger.warning(f"Failed to update language in database for {telegram_id}")
+                return False
         else:
-            # Store in memory temporarily (will be saved upon registration)
-            _language_cache[telegram_id] = language
-            _cache_timestamps[telegram_id] = time.time()
+            # Language will be saved upon registration
+            logger.info(f"Stored language {language} in memory for unregistered user {telegram_id}")
             return True
     except Exception as e:
         logger.error(f"Error setting user language: {e}")
@@ -213,10 +200,26 @@ def load_default_translations() -> None:
             "Error": "Error",
             "Database error": "Database error",
             "Please try again": "Please try again",
+            "Permission denied": "Permission denied",
+            "Connection error": "Connection error",
+            "Not enough resources": "Not enough resources",
 
             # Languages
             "English": "English",
-            "Russian": "Russian"
+            "Russian": "Russian",
+
+            # Registration/auth messages
+            "You need to register first": "You need to register first",
+            "You are not registered yet": "You are not registered yet",
+            "Use /start to register": "Use /start to register",
+
+            # Common game terms
+            "district": "district",
+            "politician": "politician",
+            "action": "action",
+            "cycle": "cycle",
+            "control points": "control points",
+            "collective action": "collective action"
         },
         "ru_RU": {
             # Basic UI elements
@@ -251,10 +254,26 @@ def load_default_translations() -> None:
             "Error": "Ошибка",
             "Database error": "Ошибка базы данных",
             "Please try again": "Пожалуйста, попробуйте снова",
+            "Permission denied": "Доступ запрещен",
+            "Connection error": "Ошибка соединения",
+            "Not enough resources": "Недостаточно ресурсов",
 
             # Languages
             "English": "Английский",
-            "Russian": "Русский"
+            "Russian": "Русский",
+
+            # Registration/auth messages
+            "You need to register first": "Вам нужно сначала зарегистрироваться",
+            "You are not registered yet": "Вы еще не зарегистрированы",
+            "Use /start to register": "Используйте /start для регистрации",
+
+            # Common game terms
+            "district": "район",
+            "politician": "политик",
+            "action": "действие",
+            "cycle": "цикл",
+            "control points": "очки контроля",
+            "collective action": "коллективное действие"
         }
     }
 
@@ -331,8 +350,6 @@ async def load_translations() -> None:
     1. Default fallback translations (hardcoded)
     2. Local files (from translations directory)
     3. Database (overrides previous sources)
-
-    The loading is done sequentially to ensure proper override priority.
     """
     try:
         # 1. First set up default fallback translations
@@ -357,18 +374,31 @@ async def load_translations() -> None:
         logger.info("Continuing with default translations only")
 
 
+# Track missing translations for future improvement
+def save_missing_translations() -> None:
+    """Save list of missing translations to a file for future additions."""
+    try:
+        missing_file = os.path.join(
+            os.path.dirname(os.path.dirname(__file__)),
+            "translations",
+            "missing_translations.txt"
+        )
+
+        with open(missing_file, "w", encoding="utf-8") as f:
+            for key in sorted(_missing_translation_log):
+                f.write(f"{key}\n")
+
+        logger.info(f"Saved {len(_missing_translation_log)} missing translations to {missing_file}")
+    except Exception as e:
+        logger.error(f"Error saving missing translations: {e}")
+
+
 # Decorator for automatic language handling in handlers
 def with_language(handler_func: Callable) -> Callable:
     """
     Decorator to automatically get language for a handler function.
 
     This decorator detects the user's language and provides it to the handler.
-
-    Args:
-        handler_func: The handler function to decorate
-
-    Returns:
-        Wrapped function with language handling
     """
 
     async def wrapper(update, context, *args, **kwargs):
