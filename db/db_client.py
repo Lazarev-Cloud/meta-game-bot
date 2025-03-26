@@ -79,24 +79,16 @@ async def db_operation(operation_name: str,
 async def execute_rpc(
         function_name: str,
         params: Dict[str, Any],
-        schema_prefix: bool = True,
+        schema_prefix: bool = False,  # Change default to False
         operation_name: Optional[str] = None
 ) -> Any:
     """
     Execute an RPC function with proper error handling.
-
-    Args:
-        function_name: Name of the function to call
-        params: Parameters to pass to the function
-        schema_prefix: Whether to add "game." prefix to function name
-        operation_name: Name for logging (defaults to function_name)
-
-    Returns:
-        Result of the RPC call or None on error
     """
     op_name = operation_name or function_name
-    prefixed_name = f"game.{function_name}" if schema_prefix and not function_name.startswith(
-        "game.") else function_name
+
+    # Only prefix if explicitly requested
+    prefixed_name = f"game.{function_name}" if schema_prefix else function_name
 
     return await db_operation(
         op_name,
@@ -403,22 +395,10 @@ def build_params(params_dict: Dict[str, Any], param_prefix: str = "p_") -> Dict[
 
 @db_retry
 async def player_exists(telegram_id: str) -> bool:
-    """
-    Check if a player exists in the database.
-
-    Args:
-        telegram_id: Player's Telegram ID
-
-    Returns:
-        True if player exists, False otherwise
-    """
-    params = {"p_telegram_id": telegram_id}
+    params = {"p_telegram_id": telegram_id}  # Note the p_ prefix
     result = await execute_rpc("player_exists", params)
-
-    # Handle the case where the RPC might return a non-boolean value
-    if isinstance(result, bool):
-        return result
     return bool(result)
+
 
 
 @db_retry
@@ -452,17 +432,6 @@ async def get_player_by_telegram_id(telegram_id: str) -> Optional[Dict[str, Any]
 
 @db_retry
 async def register_player(telegram_id: str, name: str, ideology_score: int) -> Optional[Dict[str, Any]]:
-    """
-    Register a new player.
-
-    Args:
-        telegram_id: Player's Telegram ID
-        name: Player's name
-        ideology_score: Player's ideology score (-5 to 5)
-
-    Returns:
-        Player record or None on error
-    """
     params = {
         "p_telegram_id": telegram_id,
         "p_name": name,

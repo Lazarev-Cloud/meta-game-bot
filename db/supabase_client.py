@@ -14,6 +14,7 @@ import os
 from typing import Dict, Any, Optional, List, Union
 
 from supabase import create_client, Client
+from supabase._sync.client import SyncClient
 
 # Initialize logger
 logger = logging.getLogger(__name__)
@@ -55,7 +56,7 @@ def init_supabase() -> Client:
         raise
 
 
-def get_supabase() -> Client:
+def get_supabase() -> SyncClient | None:
     """
     Get the Supabase client instance, initializing if necessary.
 
@@ -86,6 +87,7 @@ async def execute_function(function_name: str, params: Dict[str, Any]) -> Any:
     """
     client = get_supabase()
     try:
+        # Remove schema prefixing logic
         response = client.rpc(function_name, params).execute()
 
         if hasattr(response, 'data'):
@@ -98,7 +100,6 @@ async def execute_function(function_name: str, params: Dict[str, Any]) -> Any:
     except Exception as e:
         logger.error(f"Error executing function {function_name}: {str(e)}")
         raise
-
 
 async def check_schema_exists() -> bool:
     """
