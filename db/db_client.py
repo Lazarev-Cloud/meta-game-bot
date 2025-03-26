@@ -71,7 +71,7 @@ async def get_record(
         table: str,
         column: str,
         value: Any,
-        schema: str = "game",
+        schema: str = "public",
         operation_name: Optional[str] = None
 ) -> Optional[Dict[str, Any]]:
     """Get a single record by column value with improved error handling."""
@@ -459,7 +459,7 @@ async def get_records(
         filters: Optional[List[Dict[str, Any]]] = None,
         order: Optional[List[Dict[str, str]]] = None,
         limit: Optional[int] = None,
-        schema: str = "game"
+        schema: str = "public"
 ) -> List[Dict[str, Any]]:
     """Get records with filtering options."""
     try:

@@ -47,7 +47,7 @@ async def check_and_create_schema():
 
         try:
             # Try to execute a direct query to check if the schema exists
-            sql = "SELECT EXISTS(SELECT 1 FROM pg_namespace WHERE nspname = 'game');"
+            sql = "SELECT EXISTS(SELECT 1 FROM pg_namespace WHERE nspname = 'public');"
             response = await execute_sql(sql)
 
             schema_exists = False

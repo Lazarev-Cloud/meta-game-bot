@@ -87,13 +87,13 @@ async def init_database_with_retry(max_attempts=3):
             schema_exists = await check_schema_exists()
 
             if not schema_exists:
-                logger.info("Database schema 'game' doesn't exist. Running initialization...")
+                logger.info("Database schema 'public' doesn't exist. Running initialization...")
 
                 # Import SQL files
                 from db.supabase_client import execute_sql
 
                 # Create schema
-                await execute_sql("CREATE SCHEMA IF NOT EXISTS game;")
+                await execute_sql("CREATE SCHEMA IF NOT EXISTS public;")
 
                 # Create minimal tables needed for operation
                 await execute_sql("""
@@ -138,7 +138,7 @@ async def init_database_with_retry(max_attempts=3):
 
                 logger.info("Created basic database functions")
             else:
-                logger.info("Database schema 'game' already exists")
+                logger.info("Database schema 'public' already exists")
 
             # Run permission check
             await check_database_permissions()
@@ -217,6 +217,9 @@ async def main():
 
     # Load configuration
     config = load_config()
+    proxy_config = config.get('bot', {}).get('proxy', None)
+    if proxy_config:
+        logger.info("Proxy configuration detected but not supported with this version")
 
     # Initialize the Application with better error handling
     application = Application.builder().token(token).build()

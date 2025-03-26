@@ -36,15 +36,15 @@ async def check_database_permissions():
     try:
         logger.info("Checking if 'game' schema exists...")
         result = await execute_sql(
-            "SELECT EXISTS (SELECT 1 FROM information_schema.schemata WHERE schema_name = 'game');"
+            "SELECT EXISTS (SELECT 1 FROM information_schema.schemata WHERE schema_name = 'public');"
         )
         
         if result and isinstance(result, list) and len(result) > 0:
             schema_exists = result[0].get('exists', False)
             if schema_exists:
-                logger.info("✓ 'game' schema exists")
+                logger.info("✓ 'public' schema exists")
             else:
-                logger.error("✗ 'game' schema does not exist")
+                logger.error("✗ 'public' schema does not exist")
                 issues_found += 1
         else:
             logger.error("✗ Could not verify schema existence")
@@ -100,7 +100,7 @@ async def check_database_permissions():
         logger.info("""
 Database access troubleshooting recommendations:
 1. Check that Supabase credentials (URL and API key) are correct
-2. Ensure the database schema 'game' exists and has been properly initialized
+2. Ensure the database schema 'public' exists and has been properly initialized
 3. Verify that your Supabase API key has the necessary permissions
 4. Check that RLS (Row Level Security) policies are properly configured
 5. For function-related errors, ensure functions are created without schema in their names for RPC calls
