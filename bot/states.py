@@ -95,14 +95,29 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
     # Language selection first
     await update.message.reply_text(
         "Welcome to Novi-Sad, a city at the crossroads of Yugoslavia's future! "
-        "Please select your preferred language:\n\n"
-        "Добро пожаловать в Нови-Сад, город на перекрестке будущего Югославии! "
-        "Пожалуйста, выберите предпочитаемый язык:",
+        "Please select your preferred language:",
         reply_markup=get_language_keyboard()
     )
 
     return NAME_ENTRY
 
+async def language_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle language selection during registration."""
+    query = update.callback_query
+    await query.answer()
+
+    language = query.data.split(":", 1)[1]
+    telegram_id = str(update.effective_user.id)
+
+    # Store language preference temporarily
+    context.user_data["preferred_language"] = language
+
+    # Continue with name entry
+    await query.edit_message_text(
+        _("Great! Now, tell me your character's name:", language)
+    )
+
+    return NAME_ENTRY
 
 async def language_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle language selection."""
@@ -1304,8 +1319,7 @@ registration_handler = ConversationHandler(
             CallbackQueryHandler(ideology_choice, pattern=r"^ideology:")
         ]
     },
-    fallbacks=[CommandHandler("cancel", cancel_handler)],
-    # Remove the per_message=True parameter
+    fallbacks=[CommandHandler("cancel", cancel_handler)]
 )
 
 action_handler = ConversationHandler(

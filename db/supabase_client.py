@@ -69,7 +69,7 @@ async def execute_function(function_name: str, params: Dict[str, Any]) -> Any:
     """Execute a Postgres function through Supabase RPC with better error handling."""
     client = get_supabase()
 
-    # Try without modification first
+    # Try without schema prefix first
     try:
         response = client.rpc(function_name, params).execute()
 
@@ -82,11 +82,14 @@ async def execute_function(function_name: str, params: Dict[str, Any]) -> Any:
     except Exception as original_error:
         error_message = str(original_error).lower()
 
-        # Try alternative schema variations if function not found
+        # If function not found, try with/without schema prefix
         if "could not find the function" in error_message:
-            # Try flipping the prefix (add/remove game.)
-            alt_name = function_name.replace("game.", "") if function_name.startswith(
-                "game.") else f"game.{function_name}"
+            # Remove schema prefix if present, add it if not
+            alt_name = function_name
+            if function_name.startswith("game."):
+                alt_name = function_name[5:]  # Remove "game." prefix
+            else:
+                alt_name = f"game.{function_name}"
 
             try:
                 logger.info(f"Trying alternative function name: {alt_name}")
@@ -96,22 +99,9 @@ async def execute_function(function_name: str, params: Dict[str, Any]) -> Any:
                     return alt_response.data
                 return alt_response
             except Exception as alt_error:
-                # Special case for critical functions like player_exists
-                if "player_exists" in function_name:
-                    try:
-                        # Direct SQL fallback
-                        sql = f"SELECT EXISTS (SELECT 1 FROM game.players WHERE telegram_id = '{params.get('p_telegram_id', '')}');"
-                        result = await execute_sql(sql)
-
-                        if result and isinstance(result, list) and len(result) > 0:
-                            return result[0].get('exists', False)
-                    except Exception as sql_error:
-                        logger.error(f"SQL fallback also failed: {sql_error}")
-
                 logger.error(f"Both versions of function call failed: {function_name} and {alt_name}")
                 raise original_error
         else:
-            logger.error(f"Error executing function {function_name}: {original_error}")
             raise
 
 async def execute_sql(sql: str) -> Any:

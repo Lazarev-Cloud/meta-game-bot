@@ -120,6 +120,38 @@ async def db_operation(
     return default_return
 
 
+class ErrorHandler:
+    @staticmethod
+    async def handle_db_error(operation, error, language="en_US", update=None):
+        """Handle database errors with consistent messaging"""
+        logger.error(f"Error in {operation}: {str(error)}")
+
+        error_text = str(error).lower()
+        message = _("An error occurred. Please try again later.", language)
+
+        # Map common errors to user-friendly messages
+        if "database" in error_text or "connection" in error_text:
+            message = _("Database connection issue. Please try again later.", language)
+        elif "not enough" in error_text or "resource" in error_text:
+            message = _("You don't have enough resources for this action.", language)
+        elif "permission" in error_text:
+            message = _("You don't have permission to perform this action.", language)
+        elif "deadline" in error_text:
+            message = _("The submission deadline for this cycle has passed.", language)
+
+        # Send message to user if update is provided
+        if update:
+            try:
+                if update.callback_query:
+                    await update.callback_query.answer(message[:200])
+                    await update.callback_query.edit_message_text(message)
+                elif update.message:
+                    await update.message.reply_text(message)
+            except Exception as msg_error:
+                logger.error(f"Error sending error message: {str(msg_error)}")
+
+        return message
+
 def db_retry(func: Callable[..., T]) -> Callable[..., T]:
     """Decorator to retry database operations with exponential backoff."""
 

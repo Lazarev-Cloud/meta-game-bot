@@ -483,14 +483,23 @@ async def get_player_by_telegram_id(telegram_id: str) -> Optional[Dict[str, Any]
 
 
 @db_retry
-async def register_player(telegram_id: str, name: str, ideology_score: int) -> Optional[Dict[str, Any]]:
+async def register_player(telegram_id: str, name: str, ideology_score: int, language: str = "en_US") -> Optional[
+    Dict[str, Any]]:
     params = {
         "p_telegram_id": telegram_id,
         "p_name": name,
-        "p_ideology_score": ideology_score
+        "p_ideology_score": ideology_score,
+        "p_language": language
     }
-    return await execute_rpc("api_register_player", params)
 
+    # Try the registration API call
+    result = await execute_rpc("api_register_player", params)
+
+    # If successful, also set the language
+    if result and result.get("success", False):
+        await set_player_language(telegram_id, language)
+
+    return result
 
 # ===== Language and preferences =====
 
