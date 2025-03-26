@@ -12,6 +12,9 @@ import asyncio
 import logging
 from typing import Dict, Any, Optional, List, TypeVar, Callable, Awaitable, Union, Tuple
 
+from telegram import Update
+
+from utils import _
 from utils.error_handling import db_retry, DatabaseError
 from db.supabase_client import get_supabase, execute_function, execute_sql
 
@@ -395,26 +398,75 @@ def build_params(params_dict: Dict[str, Any], param_prefix: str = "p_") -> Dict[
 
 @db_retry
 async def player_exists(telegram_id: str) -> bool:
-    params = {"p_telegram_id": telegram_id}  # Note the p_ prefix
-    result = await execute_rpc("player_exists", params)
-    return bool(result)
+    """Check if a player exists by telegram ID with robust error handling."""
+    try:
+        # Try first without schema prefix
+        params = {"p_telegram_id": telegram_id}
+        result = await execute_rpc("player_exists", params, schema_prefix=False)
+        return bool(result)
+    except Exception as e:
+        logger.warning(f"Initial player_exists call failed: {e}")
 
+        # Try direct SQL as ultimate fallback
+        try:
+            result = await execute_sql(
+                f"SELECT EXISTS (SELECT 1 FROM game.players WHERE telegram_id = '{telegram_id}');"
+            )
+            if result and isinstance(result, list) and len(result) > 0:
+                return result[0].get('exists', False)
+            return False
+        except Exception as sql_error:
+            logger.error(f"All player_exists fallbacks failed: {sql_error}")
+            return False
 
+async def call_api_function(
+    function_name: str,
+    params: Dict[str, Any],
+    operation_name: Optional[str] = None
+) -> Optional[Dict[str, Any]]:
+    """Generic helper to call API functions with standard parameter handling."""
+    # Ensure function name has api_ prefix
+    api_name = function_name if function_name.startswith("api_") else f"api_{function_name}"
+    return await execute_rpc(api_name, params, operation_name=operation_name)
 
 @db_retry
 async def get_player(telegram_id: str) -> Optional[Dict[str, Any]]:
-    """
-    Get player information by Telegram ID.
+    """Get player information by Telegram ID."""
+    return await call_api_function("get_player_status", {"p_telegram_id": telegram_id})
 
-    Args:
-        telegram_id: Player's Telegram ID
+@db_retry
+async def get_district_info(telegram_id: str, district_name: str, language: str = "en_US") -> Optional[Dict[str, Any]]:
+    """Get detailed information about a district."""
+    return await call_api_function(
+        "get_district_info",
+        {
+            "p_telegram_id": telegram_id,
+            "p_district_name": district_name,
+            "p_language": language
+        }
+    )
 
-    Returns:
-        Player information as a dictionary or None if not found
-    """
-    params = {"p_telegram_id": telegram_id}
-    return await execute_rpc("api_get_player_status", params)
 
+async def handle_command_error(
+        update: Update,
+        language: str,
+        error: Exception,
+        command_name: str
+) -> None:
+    """Handle errors in command handlers with standardized messaging."""
+    logger.error(f"Error in {command_name}: {str(error)}")
+
+    error_text = str(error).lower()
+    message = _("An error occurred. Please try again later.", language)
+
+    if "database" in error_text or "sql" in error_text:
+        message = _("Database connection issue. Please try again later.", language)
+    elif "resource" in error_text:
+        message = _("You don't have enough resources for this action.", language)
+    elif "permission" in error_text:
+        message = _("You don't have permission to perform this action.", language)
+
+    await update.message.reply_text(message)
 
 @db_retry
 async def get_player_by_telegram_id(telegram_id: str) -> Optional[Dict[str, Any]]:

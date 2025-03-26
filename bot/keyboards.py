@@ -483,6 +483,36 @@ def get_join_collective_action_keyboard(action_id: str, language: str) -> Inline
     return InlineKeyboardMarkup(keyboard)
 
 
+async def create_standard_keyboard(
+        keyboard_type: str,
+        language: str,
+        **kwargs
+) -> InlineKeyboardMarkup:
+    """Create standard keyboards with proper translations."""
+
+    if keyboard_type == "yes_no":
+        return InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton(_("Yes", language), callback_data="yes"),
+                InlineKeyboardButton(_("No", language), callback_data="no")
+            ]
+        ])
+    elif keyboard_type == "confirmation":
+        return InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton(_("Confirm", language), callback_data="confirm"),
+                InlineKeyboardButton(_("Cancel", language), callback_data="cancel_selection")
+            ]
+        ])
+    elif keyboard_type == "back":
+        callback = kwargs.get("callback_data", "back_to_menu")
+        return InlineKeyboardMarkup([
+            [InlineKeyboardButton(_("Back", language), callback_data=callback)]
+        ])
+
+    # Default back button
+    return get_back_keyboard(language)
+
 def get_extended_start_keyboard(language: str) -> InlineKeyboardMarkup:
     """Get an extended version of the welcome keyboard with more options."""
     keyboard = [

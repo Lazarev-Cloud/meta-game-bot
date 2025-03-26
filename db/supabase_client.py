@@ -66,55 +66,53 @@ def get_supabase() -> Client:
 
 
 async def execute_function(function_name: str, params: Dict[str, Any]) -> Any:
-    """
-    Execute a Postgres function through Supabase RPC with better error handling.
-
-    The key issue is likely schema-related permissions. This revised function:
-    1. Properly formats function names with game schema
-    2. Handles authentication errors more gracefully
-    3. Provides clearer error messages
-    """
+    """Execute a Postgres function through Supabase RPC with better error handling."""
     client = get_supabase()
 
-    # Add schema prefix if not already present
-    # THIS WAS THE KEY ISSUE - need to use proper schema prefix
-    if not function_name.startswith("game.api_") and not function_name.startswith("game."):
-        prefixed_name = f"game.{function_name}"
-    else:
-        prefixed_name = function_name
-
+    # Try without modification first
     try:
-        response = client.rpc(prefixed_name, params).execute()
+        response = client.rpc(function_name, params).execute()
 
         if hasattr(response, 'data'):
             return response.data
         elif hasattr(response, 'json'):
             return response.json()
         else:
-            logger.warning(f"Unexpected response format from function {function_name}")
             return response
-    except Exception as e:
-        error_message = str(e)
+    except Exception as original_error:
+        error_message = str(original_error).lower()
 
-        # Special handling for permission errors
-        if "permission denied" in error_message.lower():
-            logger.error(f"Permission denied for function {prefixed_name}. Check database roles and grants.")
+        # Try alternative schema variations if function not found
+        if "could not find the function" in error_message:
+            # Try flipping the prefix (add/remove game.)
+            alt_name = function_name.replace("game.", "") if function_name.startswith(
+                "game.") else f"game.{function_name}"
 
-            # Try alternative approach for critical functions
-            if function_name == "player_exists":
-                # Fallback query using direct SQL (with proper permissions)
-                try:
-                    result = await execute_sql(
-                        f"SELECT EXISTS (SELECT 1 FROM game.players WHERE telegram_id = '{params.get('p_telegram_id', '')}');"
-                    )
-                    if result and isinstance(result, list) and len(result) > 0:
-                        return result[0].get('exists', False)
-                except Exception as fallback_error:
-                    logger.error(f"Fallback query also failed: {fallback_error}")
+            try:
+                logger.info(f"Trying alternative function name: {alt_name}")
+                alt_response = client.rpc(alt_name, params).execute()
 
-        logger.error(f"Error executing function {prefixed_name}: {error_message}")
-        raise
+                if hasattr(alt_response, 'data'):
+                    return alt_response.data
+                return alt_response
+            except Exception as alt_error:
+                # Special case for critical functions like player_exists
+                if "player_exists" in function_name:
+                    try:
+                        # Direct SQL fallback
+                        sql = f"SELECT EXISTS (SELECT 1 FROM game.players WHERE telegram_id = '{params.get('p_telegram_id', '')}');"
+                        result = await execute_sql(sql)
 
+                        if result and isinstance(result, list) and len(result) > 0:
+                            return result[0].get('exists', False)
+                    except Exception as sql_error:
+                        logger.error(f"SQL fallback also failed: {sql_error}")
+
+                logger.error(f"Both versions of function call failed: {function_name} and {alt_name}")
+                raise original_error
+        else:
+            logger.error(f"Error executing function {function_name}: {original_error}")
+            raise
 
 async def execute_sql(sql: str) -> Any:
     """Execute a raw SQL query with improved error handling."""
