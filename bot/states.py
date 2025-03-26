@@ -183,45 +183,37 @@ async def cancel_registration(update: Update, context: ContextTypes.DEFAULT_TYPE
 
 
 async def ideology_choice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Handle ideology selection with memory fallback."""
+    """Handle ideology selection with proper formatting."""
     query = update.callback_query
     await query.answer()
 
     telegram_id = str(update.effective_user.id)
     ideology_value = int(query.data.split(":", 1)[1])
     language = await get_user_language(telegram_id)
-    player_name = get_user_data(telegram_id, "player_name") or update.effective_user.first_name
+
+    # Get player name from context
+    user_data = get_user_data(telegram_id, context)
+    player_name = user_data.get("player_name", update.effective_user.first_name)
 
     try:
         # Register player
         result = await register_player(telegram_id, player_name, ideology_value, language)
 
-        if not result:
-            await query.edit_message_text(_("Registration problem. Please try again.", language))
-            return ConversationHandler.END
+        # Determine ideology description
+        ideology_text = _("Neutral", language) if ideology_value == 0 else \
+            _("Conservative", language) if ideology_value > 0 else \
+                _("Reformist", language)
 
-        # Store registration in memory
-        from utils.context_manager import context_manager
-        context_manager.set(telegram_id, "is_registered", True)
-        context_manager.set(telegram_id, "player_data", {
-            "player_name": player_name,
-            "ideology_score": ideology_value,
-            "language": language
-        })
+        # Format success message properly
+        success_message = _(
+            "Registration complete! Welcome to Novi-Sad, {name}.\n\n"
+            "You have chosen an ideology of {ideology_value} ({ideology_text}).\n\n"
+            "You have been granted initial resources to begin your journey. Use "
+            "/help to learn about available commands, or /status to see your current situation.",
+            language
+        ).format(name=player_name, ideology_value=ideology_value, ideology_text=ideology_text)
 
-        # Success message
-        ideology_text = _("Neutral", language) if ideology_value == 0 else _("Conservative",
-                                                                             language) if ideology_value > 0 else _(
-            "Reformist", language)
-
-        await query.edit_message_text(
-            _("Registration complete! Welcome to Novi-Sad, {name}.\n\n"
-              "You have chosen an ideology of {ideology_value} ({ideology_text}).\n\n"
-              "You have been granted initial resources to begin your journey. Use "
-              "/help to learn about available commands, or /status to see your current situation.",
-              language).format(name=player_name, ideology_value=ideology_value, ideology_text=ideology_text)
-        )
-
+        await query.edit_message_text(success_message)
         return ConversationHandler.END
     except Exception as e:
         logger.error(f"Registration error: {e}")

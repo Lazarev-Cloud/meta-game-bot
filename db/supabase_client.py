@@ -69,61 +69,58 @@ def get_supabase() -> Client:
             lambda: logger.error("Database unavailable, using fallback data")
         return mock_client
 
+
 async def execute_function(function_name: str, params: Dict[str, Any], schema_prefix: bool = False) -> Any:
     """Execute a Postgres function through Supabase RPC with better error handling."""
     client = get_supabase()
-    original_function_name = function_name
 
-    # Strip schema prefix if present - Supabase RPC doesn't support schema prefixes directly
-    if "." in function_name:
-        schema, function_name = function_name.split(".", 1)
-        logger.debug(f"Stripped schema '{schema}' from function call, using '{function_name}'")
-
-    # Try without schema prefix first
     try:
-        response = client.rpc(function_name, params).execute()
+        # Strip schema prefix if present
+        if "." in function_name:
+            schema, function_name = function_name.split(".", 1)
 
-        if hasattr(response, 'data'):
-            return response.data
-        elif hasattr(response, 'json'):
-            return response.json()
-        else:
-            return response
-    except Exception as original_error:
-        error_message = str(original_error).lower()
-        logger.warning(f"Error executing function {function_name}: {original_error}")
+        # Use the correct method to execute RPC
+        response = client.rpc(function_name, params)
+        data = response.execute()
 
-        # Try with alternative function name if the first attempt failed
+        if hasattr(data, 'data'):
+            return data.data
+        return data
+    except Exception as e:
+        logger.warning(f"Error executing function {function_name}: {e}")
+        return None
+
+
+async def execute_sql(sql: str) -> Any:
+    """Execute raw SQL with better error handling."""
+    try:
+        # Attempt direct query if possible
+        if sql.lower().startswith("select"):
+            try:
+                # Extract table name from SQL
+                table_match = None
+                if "from " in sql.lower():
+                    parts = sql.lower().split("from ")
+                    if len(parts) > 1:
+                        table = parts[1].split()[0].strip().rstrip(';')
+
+                        client = get_supabase()
+                        response = client.from_(table).select("*")
+                        return response.execute().data
+            except Exception as e:
+                logger.warning(f"Direct query failed: {e}")
+
+        # Fallback to RPC method
         try:
-            # Try different variations of the function name or parameters
-            if "could not find the function" in error_message or "permission denied" in error_message:
-                # Try with explicit schema
-                alt_function = f"api_{function_name}" if not function_name.startswith("api_") else function_name[4:]
-                logger.info(f"Trying alternative function name: {alt_function}")
+            client = get_supabase()
+            return client.rpc("exec_sql", {"sql": sql}).execute().data
+        except Exception:
+            pass
 
-                alt_response = client.rpc(alt_function, params).execute()
-                if hasattr(alt_response, 'data'):
-                    return alt_response.data
-                return alt_response
-        except Exception as alt_error:
-            logger.error(f"Alternative function call failed: {alt_error}")
-
-        # If all RPC attempts fail, try direct SQL for simple functions
-        try:
-            if function_name == "player_exists":
-                # Direct SQL fallback for player_exists
-                result = await execute_sql(
-                    f"SELECT EXISTS (SELECT 1 FROM players WHERE telegram_id = '{params.get('p_telegram_id', '')}');"
-                )
-                if result and isinstance(result, list) and len(result) > 0:
-                    return result[0].get('exists', False)
-                return False
-        except Exception as sql_error:
-            logger.error(f"SQL fallback also failed: {sql_error}")
-
-        # Re-raise the original error
-        raise original_error
-
+        return None
+    except Exception as e:
+        logger.error(f"Error executing SQL: {e}")
+        return None
 
 async def execute_sql(sql: str) -> Any:
     """Execute a raw SQL query with improved error handling."""

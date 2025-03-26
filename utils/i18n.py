@@ -11,6 +11,8 @@ import os
 import time
 from typing import Dict, Any, Optional, Callable, Awaitable
 
+from db import get_supabase, player_exists
+
 # Initialize logger
 logger = logging.getLogger(__name__)
 
@@ -90,63 +92,53 @@ async def translate_district(district_name: str, language: str) -> str:
 
 
 async def get_user_language(telegram_id: str) -> str:
-    """Get user language with robust fallback."""
-    # Use cache first to reduce database calls
-    if telegram_id in _language_cache:
-        return _language_cache[telegram_id]
+    """Get user language with memory fallback."""
+    # Check memory cache first
+    from utils.context_manager import context_manager
+    cached_language = context_manager.get(telegram_id, "language")
+    if cached_language in SUPPORTED_LANGUAGES:
+        return cached_language
 
+    # Try database as fallback
     try:
-        # Use local import to avoid circular imports
-        from db import db_client
-        player = await db_client.get_player_by_telegram_id(telegram_id)
-        if player and "language" in player and player["language"] in SUPPORTED_LANGUAGES:
-            _language_cache[telegram_id] = player["language"]
-            _cache_timestamps[telegram_id] = time.time()
-            return player["language"]
-    except Exception as e:
-        logger.warning(f"Error getting language from database: {e}")
+        client = get_supabase()
+        response = client.from_("players").select("language")
+        response = response.eq("telegram_id", telegram_id).limit(1)
+        data = response.execute().data
 
-    # Default to English when database fails
-    _language_cache[telegram_id] = DEFAULT_LANGUAGE
-    _cache_timestamps[telegram_id] = time.time()
+        if data and len(data) > 0 and data[0].get("language") in SUPPORTED_LANGUAGES:
+            language = data[0].get("language")
+            context_manager.set(telegram_id, "language", language)
+            return language
+    except Exception as e:
+        logger.warning(f"Database language lookup failed: {e}")
+
     return DEFAULT_LANGUAGE
 
 
 async def set_user_language(telegram_id: str, language: str) -> bool:
-    """Set a user's preferred language with database persistence and better error handling."""
+    """Set language with memory-first approach."""
     if language not in SUPPORTED_LANGUAGES:
         return False
 
-    # Update cache immediately for responsiveness
-    _language_cache[telegram_id] = language
-    _cache_timestamps[telegram_id] = time.time()
+    # Update memory cache immediately
+    from utils.context_manager import context_manager
+    context_manager.set(telegram_id, "language", language)
 
+    # Try database update
     try:
-        # Check if player exists in database
-        from db.db_client import player_exists, update_record
-
+        client = get_supabase()
         exists = await player_exists(telegram_id)
 
         if exists:
-            # Update language in database with error handling
-            result = await update_record("players", "telegram_id", telegram_id, {"language": language})
-            success = result is not None
-
-            if success:
-                logger.info(f"Language for {telegram_id} set to {language}")
-                return True
-            else:
-                # Even if DB update fails, we've still cached the language
-                logger.warning(f"Failed to update language in database for {telegram_id}")
-                return True  # Return success anyway since the cache is updated
-        else:
-            # Language will be saved upon registration
-            logger.info(f"Stored language {language} in memory for unregistered user {telegram_id}")
-            return True
+            client.from_("players").update({"language": language})
+            client = client.eq("telegram_id", telegram_id)
+            client.execute()
+        # If player doesn't exist, language will be saved during registration
     except Exception as e:
-        # Even if there's an error, we've already updated the in-memory cache
-        logger.error(f"Error setting user language in DB: {e}")
-        return True  # Return success since the cache is updated
+        logger.warning(f"Database language update failed: {e}")
+
+    return True
 
 
 def load_default_translations() -> None:

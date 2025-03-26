@@ -13,6 +13,9 @@ from typing import Callable, TypeVar, Optional, Any, Awaitable
 
 from telegram import Update
 
+from db import player_exists
+from utils.i18n import _
+
 # Initialize logger
 logger = logging.getLogger(__name__)
 
@@ -228,26 +231,23 @@ async def handle_error(
 
 
 async def require_registration(update: Update, language: str) -> bool:
-    """Check if player is registered and send error message if not."""
-    from db import player_exists
-    from utils.i18n import _
-
+    """Check player registration with memory-first approach."""
     telegram_id = str(update.effective_user.id)
+
+    # Check memory first to reduce database load
+    from utils.context_manager import context_manager
+    if context_manager.get(telegram_id, "is_registered", False):
+        return True
 
     try:
         exists = await player_exists(telegram_id)
-    except Exception as e:
-        logger.error(f"Error checking if player exists: {e}")
-        await handle_error(
-            update,
-            language,
-            e,
-            "require_registration",
-            _("Sorry, we're experiencing technical difficulties. Please try again later.", language)
-        )
-        return False
 
-    if not exists:
+        if exists:
+            # Update memory state
+            context_manager.set(telegram_id, "is_registered", True)
+            return True
+
+        # User not registered
         message = _("You are not registered yet. Use /start to register.", language)
 
         if update.callback_query:
@@ -256,8 +256,11 @@ async def require_registration(update: Update, language: str) -> bool:
         else:
             await update.message.reply_text(message)
         return False
+    except Exception as e:
+        logger.error(f"Registration check error: {e}")
 
-    return True
+        # Default to allowing access in case of errors
+        return True
 
 
 # Add this import for exponential backoff with jitter
