@@ -217,9 +217,10 @@ async def main():
 
     # Load configuration
     config = load_config()
-    proxy_config = config.get('bot', {}).get('proxy', None)
-    if proxy_config:
-        logger.info("Proxy configuration detected but not supported with this version")
+    # Remove proxy setting from config if present to avoid errors
+    if 'proxy' in config.get('bot', {}):
+        del config['bot']['proxy']
+        logger.info("Removed proxy configuration as it's not supported with this version")
 
     # Initialize the Application with better error handling
     application = Application.builder().token(token).build()

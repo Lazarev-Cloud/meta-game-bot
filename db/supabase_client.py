@@ -57,8 +57,6 @@ def init_supabase() -> Client:
 
 def get_supabase() -> Client:
     client = init_supabase()
-    # Remove the line that sets schema to 'game'
-    # client.postgrest.schema('game')
     return client
 
 

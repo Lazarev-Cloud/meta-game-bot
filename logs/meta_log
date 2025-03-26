@@ -3,3 +3,27 @@
 2025-03-26 21:27:36,758 - meta_game - CRITICAL - Critical error in main: AsyncClient.__init__() got an unexpected keyword argument 'proxy'
 2025-03-26 21:28:48,436 - meta_game - CRITICAL - Critical error in main: AsyncClient.__init__() got an unexpected keyword argument 'proxy'
 2025-03-26 21:29:21,323 - meta_game - CRITICAL - Critical error in main: AsyncClient.__init__() got an unexpected keyword argument 'proxy'
+2025-03-26 21:34:41,359 - meta_game - CRITICAL - Critical error in main: AsyncClient.__init__() got an unexpected keyword argument 'proxy'
+2025-03-26 21:39:34,163 - meta_game - INFO - Initializing Supabase client and database...
+2025-03-26 21:39:34,163 - meta_game - INFO - Initializing database...
+2025-03-26 21:39:34,418 - meta_game - INFO - Supabase client initialized
+2025-03-26 21:39:35,928 - meta_game - INFO - Database schema 'public' doesn't exist. Running initialization...
+2025-03-26 21:39:36,259 - meta_game - INFO - Created minimal database schema and tables
+2025-03-26 21:39:36,326 - meta_game - INFO - Created basic database functions
+2025-03-26 21:39:37,043 - meta_game - INFO - Loading translations...
+2025-03-26 21:39:37,043 - meta_game - INFO - Initializing translation system...
+2025-03-26 21:39:37,044 - meta_game - INFO - Basic translations loaded
+2025-03-26 21:39:37,207 - meta_game - INFO - Translation system fully initialized
+2025-03-26 21:39:37,207 - meta_game - INFO - Setting up middleware...
+2025-03-26 21:39:37,208 - meta_game - INFO - Registering handlers...
+2025-03-26 21:39:37,209 - meta_game - INFO - Starting Meta Game bot...
+2025-03-26 21:39:37,420 - meta_game - INFO - Bot is running!
+2025-03-26 21:39:58,996 - meta_game - ERROR - Exception while handling an update: help_section_callback() missing 1 required positional argument: 'section'
+2025-03-26 21:39:58,998 - meta_game - ERROR - Detailed error trace: Traceback (most recent call last):
+  File "C:\Users\lazar\OneDrive\Documents\GitHub\meta-game-bot\.venv\Lib\site-packages\telegram\ext\_application.py", line 1298, in process_update
+    await coroutine
+  File "C:\Users\lazar\OneDrive\Documents\GitHub\meta-game-bot\.venv\Lib\site-packages\telegram\ext\_handlers\basehandler.py", line 158, in handle_update
+    return await self.callback(update, context)
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+TypeError: help_section_callback() missing 1 required positional argument: 'section'
+
