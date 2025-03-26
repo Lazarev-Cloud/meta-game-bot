@@ -10,6 +10,7 @@ import asyncio
 import os
 import traceback
 import sys
+from utils.i18n import init_i18n
 
 from dotenv import load_dotenv
 from telegram import Update
@@ -17,6 +18,8 @@ from telegram.ext import (
     Application,
     ContextTypes,
 )
+from db.supabase_client import get_supabase
+from db import initialize_db
 
 # Import core components
 from bot.handlers import register_all_handlers
@@ -72,6 +75,8 @@ async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     # Return True to mark the error as handled
     return True
 
+db_functions = initialize_db()
+init_i18n(player_exists_func=db_functions['player_exists'], get_supabase_func=get_supabase)
 
 async def init_database_with_retry(max_attempts=3):
     """Initialize database with robust fallback."""

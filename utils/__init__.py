@@ -15,7 +15,7 @@ __all__ = [
     'execute_function',
     'execute_sql',
     'check_schema_exists',
-
+    'init_i18n',
     # Player management
     'player_exists',
     'get_player',

@@ -46,3 +46,14 @@ from db.db_client import (
     admin_process_actions,
     admin_generate_international_effects
 )
+def initialize_db():
+    # Import remaining functions
+    from db.db_client import (
+        player_exists,
+        get_player,
+        # Additional imports
+    )
+    return {
+        'player_exists': player_exists,
+        'get_player': get_player,
+    }
