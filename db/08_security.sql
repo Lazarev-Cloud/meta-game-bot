@@ -7,14 +7,14 @@ CREATE ROLE game_player;
 CREATE ROLE game_anonymous;
 
 -- Grant usage on schema
-GRANT USAGE ON SCHEMA game TO game_admin, game_player, game_anonymous;
-GRANT USAGE ON SCHEMA game TO game_anonymous;
+GRANT USAGE ON SCHEMA public TO game_admin, game_player, game_anonymous;
+GRANT USAGE ON SCHEMA public TO game_anonymous;
 GRANT EXECUTE ON FUNCTION player_exists TO game_anonymous;
 
 -- Administrator permissions (full access)
-GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA game TO game_admin;
-GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA game TO game_admin;
-GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA game TO game_admin;
+GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO game_admin;
+GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO game_admin;
+GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA public TO game_admin;
 
 -- Player permissions (limited access)
 GRANT SELECT, INSERT, UPDATE, DELETE ON 

@@ -1,1 +1,2 @@
 2025-03-26 21:00:06,147 - meta_game - CRITICAL - Critical error in main: AsyncClient.__init__() got an unexpected keyword argument 'proxy'
+2025-03-26 21:22:53,427 - meta_game - CRITICAL - Critical error in main: AsyncClient.__init__() got an unexpected keyword argument 'proxy'
