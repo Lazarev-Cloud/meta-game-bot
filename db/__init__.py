@@ -1,14 +1,10 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-
 """
-Database module for the Meta 
+Database module for the Meta Game bot.
 
-This module provides a unified API for database operations, consolidating
-functionality from supabase_client.py and db_client.py to eliminate duplication.
+This module provides a unified API for database operations.
 """
 
-# Import core database functions from supabase_client
+# First, import core database functions that don't depend on i18n
 from db.supabase_client import (
     init_supabase,
     get_supabase,
@@ -17,98 +13,36 @@ from db.supabase_client import (
     check_schema_exists
 )
 
-# Import business logic functions from db_client
+# Import the database functions but we'll handle player_exists/get_player specially
 from db.db_client import (
-    # Player management
+    # Core database operations that don't use i18n
+    db_operation,
+    get_record,
+    call_api_function,
+    get_player_by_telegram_id,
+
+    # Functions that use i18n which we need to modify
     player_exists,
     get_player,
-    get_player_by_telegram_id,
     register_player,
-
-    # Language and preferences
     get_player_language,
     set_player_language,
-
-    # Game cycle and actions
     get_cycle_info,
     is_submission_open,
     submit_action,
     cancel_latest_action,
-
-    # Districts and map
     get_districts,
     get_district_info,
     get_map_data,
-
-    # Resources and economy
     exchange_resources,
     check_income,
-
-    # News and information
     get_latest_news,
-
-    # Politicians
     get_politicians,
     get_politician_status,
-
-    # Collective actions
     initiate_collective_action,
     join_collective_action,
     get_active_collective_actions,
     get_collective_action,
-
-    # Admin functions
     admin_process_actions,
-    admin_generate_international_effects,
+    admin_generate_international_effects
 )
-
-__all__ = [
-    # Core database functionality
-    'init_supabase',
-    'get_supabase',
-    'execute_function',
-    'execute_sql',
-    'check_schema_exists',
-
-    # Player management
-    'player_exists',
-    'get_player',
-    'get_player_by_telegram_id',
-    'register_player',
-
-    # Language and preferences
-    'get_player_language',
-    'set_player_language',
-
-    # Game cycle and actions
-    'get_cycle_info',
-    'is_submission_open',
-    'submit_action',
-    'cancel_latest_action',
-
-    # Districts and map
-    'get_districts',
-    'get_district_info',
-    'get_map_data',
-
-    # Resources and economy
-    'exchange_resources',
-    'check_income',
-
-    # News and information
-    'get_latest_news',
-
-    # Politicians
-    'get_politicians',
-    'get_politician_status',
-
-    # Collective actions
-    'initiate_collective_action',
-    'join_collective_action',
-    'get_active_collective_actions',
-    'get_collective_action',
-
-    # Admin functions
-    'admin_process_actions',
-    'admin_generate_international_effects',
-]

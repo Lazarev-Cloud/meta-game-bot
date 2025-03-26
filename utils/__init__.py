@@ -1,39 +1,61 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
+from db import init_supabase, get_supabase, execute_function, execute_sql, check_schema_exists, player_exists, \
+    get_player, get_player_by_telegram_id, register_player, get_player_language, set_player_language, get_cycle_info, \
+    is_submission_open, submit_action, cancel_latest_action, get_districts, get_district_info, get_map_data, \
+    exchange_resources, check_income, get_latest_news, get_politicians, get_politician_status, \
+    initiate_collective_action, join_collective_action, get_active_collective_actions, get_collective_action, \
+    admin_process_actions, admin_generate_international_effects
+from utils.i18n import init_i18n
+init_i18n(player_exists_func=player_exists, get_supabase_func=get_supabase)
 
-"""
-Utility module for the Meta Game bot.
-"""
-
-from utils.config import load_config, get_config, set_config
-from utils.formatting import (
-    format_player_status,
-    format_district_info,
-    format_time,
-    format_cycle_info,
-    format_news,
-    format_income_info,
-    format_politicians_list,
-    format_politician_info
-)
-from utils.i18n import _, get_user_language, set_user_language
-from utils.logger import setup_logger, get_logger
-
+# Export all the functions
 __all__ = [
-    '_',
-    'get_user_language',
-    'set_user_language',
-    'format_player_status',
-    'format_district_info',
-    'format_time',
-    'format_cycle_info',
-    'format_news',
-    'format_income_info',
-    'format_politicians_list',
-    'format_politician_info',
-    'load_config',
-    'get_config',
-    'set_config',
-    'setup_logger',
-    'get_logger'
+    # Core database functionality
+    'init_supabase',
+    'get_supabase',
+    'execute_function',
+    'execute_sql',
+    'check_schema_exists',
+
+    # Player management
+    'player_exists',
+    'get_player',
+    'get_player_by_telegram_id',
+    'register_player',
+
+    # Language and preferences
+    'get_player_language',
+    'set_player_language',
+
+    # Game cycle and actions
+    'get_cycle_info',
+    'is_submission_open',
+    'submit_action',
+    'cancel_latest_action',
+
+    # Districts and map
+    'get_districts',
+    'get_district_info',
+    'get_map_data',
+
+    # Resources and economy
+    'exchange_resources',
+    'check_income',
+
+    # News and information
+    'get_latest_news',
+
+    # Politicians
+    'get_politicians',
+    'get_politician_status',
+
+    # Collective actions
+    'initiate_collective_action',
+    'join_collective_action',
+    'get_active_collective_actions',
+    'get_collective_action',
+
+    # Admin functions
+    'admin_process_actions',
+    'admin_generate_international_effects',
 ]
+

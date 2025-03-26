@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 """
-Enhanced internationalization module for the Meta 
+Enhanced internationalization module for the Meta Game bot.
 """
 
 import json
@@ -11,64 +11,23 @@ import os
 import time
 from typing import Dict, Any, Optional, Callable, Awaitable
 
-from db import get_supabase, player_exists
+# Import core functionality without database dependencies
+from utils.i18n_core import _, load_default_translations, SUPPORTED_LANGUAGES, DEFAULT_LANGUAGE, _translations, load_translations_from_file
 
 # Initialize logger
 logger = logging.getLogger(__name__)
 
-# Global translations storage with improved structure
-_translations = {
-    "en_US": {},
-    "ru_RU": {}
-}
-
-# Supported languages
-SUPPORTED_LANGUAGES = ["en_US", "ru_RU"]
-DEFAULT_LANGUAGE = "en_US"
-
-# Efficient language cache with TTL
-_language_cache = {}
-_cache_timeout = 300  # 5 minutes in seconds
-_cache_timestamps = {}
-
-# Fallback system for missing translations
-_missing_translation_log = set()  # Track missing translations to avoid log spam
+# Using dependency injection to avoid circular imports
+_player_exists_func = None
+_get_supabase_func = None
 
 
-def _(text: str, language: str = DEFAULT_LANGUAGE) -> str:
-    """
-    Translate a text string to the specified language.
-
-    Enhanced with fallback system and missing translation tracking.
-    """
-    if not text:
-        return ""
-
-    # Normalize language code
-    language = language if language in SUPPORTED_LANGUAGES else DEFAULT_LANGUAGE
-
-    # Check for translation
-    translation = _translations[language].get(text)
-
-    # If translation exists, return it
-    if translation:
-        return translation
-
-    # No translation found, try fallbacks
-    if language != DEFAULT_LANGUAGE:
-        # Try default language
-        default_translation = _translations[DEFAULT_LANGUAGE].get(text)
-        if default_translation:
-            return default_translation
-
-    # Log missing translation (only once per string to avoid spam)
-    cache_key = f"{language}:{text}"
-    if cache_key not in _missing_translation_log and len(text) < 100:  # Don't log very long strings
-        _missing_translation_log.add(cache_key)
-        logger.debug(f"Missing translation for '{text}' in {language}")
-
-    # Return original text as last resort
-    return text
+def init_i18n(player_exists_func=None, get_supabase_func=None):
+    """Initialize i18n module with database functions to avoid circular imports."""
+    global _player_exists_func, _get_supabase_func
+    _player_exists_func = player_exists_func
+    _get_supabase_func = get_supabase_func
+    logger.info("i18n module initialized with database functions")
 
 
 # Helper functions for consistent translation patterns
@@ -101,15 +60,16 @@ async def get_user_language(telegram_id: str) -> str:
 
     # Try database as fallback
     try:
-        client = get_supabase()
-        response = client.from_("players").select("language")
-        response = response.eq("telegram_id", telegram_id).limit(1)
-        data = response.execute().data
+        if _get_supabase_func is not None:
+            client = _get_supabase_func()
+            response = client.from_("players").select("language")
+            response = response.eq("telegram_id", telegram_id).limit(1)
+            data = response.execute().data
 
-        if data and len(data) > 0 and data[0].get("language") in SUPPORTED_LANGUAGES:
-            language = data[0].get("language")
-            context_manager.set(telegram_id, "language", language)
-            return language
+            if data and len(data) > 0 and data[0].get("language") in SUPPORTED_LANGUAGES:
+                language = data[0].get("language")
+                context_manager.set(telegram_id, "language", language)
+                return language
     except Exception as e:
         logger.warning(f"Database language lookup failed: {e}")
 
@@ -127,13 +87,14 @@ async def set_user_language(telegram_id: str, language: str) -> bool:
 
     # Try database update
     try:
-        client = get_supabase()
-        exists = await player_exists(telegram_id)
+        if _get_supabase_func is not None and _player_exists_func is not None:
+            client = _get_supabase_func()
+            exists = await _player_exists_func(telegram_id)
 
-        if exists:
-            client.from_("players").update({"language": language})
-            client = client.eq("telegram_id", telegram_id)
-            client.execute()
+            if exists:
+                client.from_("players").update({"language": language})
+                client = client.eq("telegram_id", telegram_id)
+                client.execute()
         # If player doesn't exist, language will be saved during registration
     except Exception as e:
         logger.warning(f"Database language update failed: {e}")
@@ -141,180 +102,33 @@ async def set_user_language(telegram_id: str, language: str) -> bool:
     return True
 
 
-def load_default_translations() -> None:
-    """Initialize the system with essential fallback translations."""
-    # Core UI elements and commonly used strings
-    essentials = {
-        "en_US": {
-            # Basic UI elements
-            "Yes": "Yes",
-            "No": "No",
-            "Back": "Back",
-            "Cancel": "Cancel",
-            "Confirm": "Confirm",
-            "Main Menu": "Main Menu",
-            "Status": "Status",
-            "Map": "Map",
-            "News": "News",
-            "Resources": "Resources",
-            "Previous": "Previous",
-            "Next": "Next",
-
-            # Resource types
-            "Influence": "Influence",
-            "Money": "Money",
-            "Information": "Information",
-            "Force": "Force",
-
-            # Common actions
-            "influence": "Influence",
-            "attack": "Attack",
-            "defense": "Defense",
-            "reconnaissance": "Reconnaissance",
-            "support": "Support",
-            "Politician Influence": "Politician Influence",
-
-            # Error messages
-            "Error": "Error",
-            "Database error": "Database error",
-            "Please try again": "Please try again",
-            "Permission denied": "Permission denied",
-            "Connection error": "Connection error",
-            "Not enough resources": "Not enough resources",
-
-            # Languages
-            "English": "English",
-            "Russian": "Russian",
-
-            # Registration/auth messages
-            "You need to register first": "You need to register first",
-            "You are not registered yet": "You are not registered yet",
-            "Use /start to register": "Use /start to register",
-
-            # Common game terms
-            "district": "district",
-            "politician": "politician",
-            "action": "action",
-            "cycle": "cycle",
-            "control points": "control points",
-            "collective action": "collective action"
-        },
-        "ru_RU": {
-            # Basic UI elements
-            "Yes": "Да",
-            "No": "Нет",
-            "Back": "Назад",
-            "Cancel": "Отмена",
-            "Confirm": "Подтвердить",
-            "Main Menu": "Главное меню",
-            "Status": "Статус",
-            "Map": "Карта",
-            "News": "Новости",
-            "Resources": "Ресурсы",
-            "Previous": "Предыдущий",
-            "Next": "Следующий",
-
-            # Resource types
-            "Influence": "Влияние",
-            "Money": "Деньги",
-            "Information": "Информация",
-            "Force": "Сила",
-
-            # Common actions
-            "influence": "Влияние",
-            "attack": "Атака",
-            "defense": "Защита",
-            "reconnaissance": "Разведка",
-            "support": "Поддержка",
-            "Politician Influence": "Влияние на Политика",
-
-            # Error messages
-            "Error": "Ошибка",
-            "Database error": "Ошибка базы данных",
-            "Please try again": "Пожалуйста, попробуйте снова",
-            "Permission denied": "Доступ запрещен",
-            "Connection error": "Ошибка соединения",
-            "Not enough resources": "Недостаточно ресурсов",
-
-            # Languages
-            "English": "Английский",
-            "Russian": "Русский",
-
-            # Registration/auth messages
-            "You need to register first": "Вам нужно сначала зарегистрироваться",
-            "You are not registered yet": "Вы еще не зарегистрированы",
-            "Use /start to register": "Используйте /start для регистрации",
-
-            # Common game terms
-            "district": "район",
-            "politician": "политик",
-            "action": "действие",
-            "cycle": "цикл",
-            "control points": "очки контроля",
-            "collective action": "коллективное действие"
-        }
-    }
-
-    # Load these essentials into the translation dictionary
-    for lang in SUPPORTED_LANGUAGES:
-        _translations[lang].update(essentials.get(lang, {}))
-
-    logger.info("Loaded default translations as fallback")
-
-
-async def load_translations_from_file() -> None:
-    """Load translations from JSON files with improved error handling."""
-    # Path to translations directory
-    translations_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "translations")
-
-    # Create the directory if it doesn't exist
-    os.makedirs(translations_dir, exist_ok=True)
-
-    # Load for each supported language
-    for lang_code in SUPPORTED_LANGUAGES:
-        lang_path = os.path.join(translations_dir, f"{lang_code}.json")
-
-        try:
-            if os.path.exists(lang_path):
-                with open(lang_path, "r", encoding="utf-8") as f:
-                    lang_data = json.load(f)
-                    _translations[lang_code].update(lang_data)
-                    logger.info(f"Loaded {len(lang_data)} {lang_code} translations from file")
-            else:
-                # Create an empty translations file for future use
-                with open(lang_path, "w", encoding="utf-8") as f:
-                    json.dump({}, f, indent=4)
-                    logger.info(f"Created empty {lang_code} translations file")
-        except Exception as e:
-            logger.error(f"Error loading translation file {lang_path}: {str(e)}")
-
-
 async def load_translations_from_db() -> None:
     """Load translations from the database with unified error handling."""
     try:
         # Use a direct SQL query for reliability
-        from db.supabase_client import execute_sql
+        if _get_supabase_func is not None:
+            from db.supabase_client import execute_sql
 
-        # Direct SQL query to fetch translations
-        query = "SELECT translation_key, en_US, ru_RU FROM translations;"
-        translations_data = await execute_sql(query)
+            # Direct SQL query to fetch translations
+            query = "SELECT translation_key, en_US, ru_RU FROM translations;"
+            translations_data = await execute_sql(query)
 
-        # Process the translations
-        if translations_data and isinstance(translations_data, list):
-            loaded_count = 0
-            for translation in translations_data:
-                if isinstance(translation, dict):
-                    key = translation.get("translation_key", "")
-                    if key:
-                        if "en_US" in translation and translation["en_US"]:
-                            _translations["en_US"][key] = translation["en_US"]
-                        if "ru_RU" in translation and translation["ru_RU"]:
-                            _translations["ru_RU"][key] = translation["ru_RU"]
-                        loaded_count += 1
+            # Process the translations
+            if translations_data and isinstance(translations_data, list):
+                loaded_count = 0
+                for translation in translations_data:
+                    if isinstance(translation, dict):
+                        key = translation.get("translation_key", "")
+                        if key:
+                            if "en_US" in translation and translation["en_US"]:
+                                _translations["en_US"][key] = translation["en_US"]
+                            if "ru_RU" in translation and translation["ru_RU"]:
+                                _translations["ru_RU"][key] = translation["ru_RU"]
+                            loaded_count += 1
 
-            logger.info(f"Loaded {loaded_count} translations from database")
-        else:
-            logger.info("No translations found in database or invalid format")
+                logger.info(f"Loaded {loaded_count} translations from database")
+            else:
+                logger.info("No translations found in database or invalid format")
     except Exception as e:
         logger.warning(f"Error loading translations from database: {e}")
         logger.info("Continuing with file-based translations only")
@@ -338,7 +152,8 @@ async def load_translations() -> None:
 
         # 3. Finally, try to load from database (which may override file translations)
         try:
-            await load_translations_from_db()
+            if _get_supabase_func is not None:
+                await load_translations_from_db()
         except Exception as db_error:
             logger.error(f"Failed to load translations from database: {db_error}")
             logger.info("Continuing with file-based translations only")
@@ -356,6 +171,7 @@ async def load_translations() -> None:
 def save_missing_translations() -> None:
     """Save list of missing translations to a file for future additions."""
     try:
+        from utils.i18n_core import _missing_translation_log
         missing_file = os.path.join(
             os.path.dirname(os.path.dirname(__file__)),
             "translations",

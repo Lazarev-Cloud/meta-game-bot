@@ -13,9 +13,11 @@ import logging
 import random
 from typing import Dict, Any, Optional, List, TypeVar, Callable, Awaitable, Union, Tuple
 
-from utils.i18n import _
+# Use direct import from i18n_core to avoid circular references
+from utils.i18n_core import _
 from utils.error_handling import db_retry, DatabaseError
 from db.supabase_client import get_supabase, execute_function, execute_sql
+
 
 # Initialize logger
 logger = logging.getLogger(__name__)
