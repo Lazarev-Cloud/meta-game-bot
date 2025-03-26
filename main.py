@@ -10,47 +10,42 @@ import asyncio
 import os
 import traceback
 import sys
-from utils.i18n import init_i18n
-
 from dotenv import load_dotenv
 from telegram import Update
 from telegram.ext import (
     Application,
     ContextTypes,
 )
-from db import initialize_db
 
-# Import core components
-from bot.handlers import register_all_handlers
-from bot.middleware import setup_middleware
-from dotenv import load_dotenv
-load_dotenv()
-
-# Import basic modules first
-from db.supabase_client import get_supabase
-import db
-import utils
-
-# Initialize modules in order
-db_functions = db.initialize_db()
-utils.initialize_utils(db)
-
-from utils.config import load_config
-from utils.i18n import load_translations, get_user_language
-from utils.logger import setup_logger, configure_telegram_logger, configure_supabase_logger
-from utils.error_handling import handle_error
-from utils.context_manager import context_manager
-
-# Load environment variables
+# Load environment variables first
 load_dotenv()
 
 # Create log directory if it doesn't exist
 os.makedirs("logs", exist_ok=True)
 
-# Setup logging
+# Setup logging before anything else
+from utils.logger import setup_logger, configure_telegram_logger, configure_supabase_logger
+
 logger = setup_logger(name="meta_game", level="INFO", log_file="logs/meta_log")
 configure_telegram_logger()
 configure_supabase_logger()
+
+# Now import database components
+from db.supabase_client import init_supabase, get_supabase, check_schema_exists
+from db.permission_checker import check_database_permissions
+
+# Import core components
+from bot.handlers import register_all_handlers
+from bot.middleware import setup_middleware
+from utils.config import load_config
+from utils.i18n import load_translations, get_user_language, init_i18n
+from utils.error_handling import handle_error
+from utils.context_manager import context_manager
+
+# Initialize db and i18n
+from db import initialize_db
+
+db_functions = initialize_db()
 
 
 async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -84,8 +79,6 @@ async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     # Return True to mark the error as handled
     return True
 
-db_functions = initialize_db()
-init_i18n(player_exists_func=db_functions['player_exists'], get_supabase_func=get_supabase)
 
 async def init_database_with_retry(max_attempts=3):
     """Initialize database with robust fallback."""
@@ -93,7 +86,7 @@ async def init_database_with_retry(max_attempts=3):
 
     for attempt in range(1, max_attempts + 1):
         try:
-            # Try to initialize
+            # Try to initialize Supabase client
             client = init_supabase()
             logger.info("Supabase client initialized")
 
@@ -102,19 +95,17 @@ async def init_database_with_retry(max_attempts=3):
                 response = client.table("players").select("count").limit(1).execute()
                 logger.info("Database tables verified")
                 return True
-            except Exception:
-                logger.info("Tables don't exist. Creating minimal schema...")
+            except Exception as e:
+                logger.warning(f"Tables access check failed: {e}")
 
-                # Create basic tables
+                # Try to create database schema if possible
                 try:
-                    # Create minimal tables through available methods
-                    # If direct SQL execution fails, bot will continue
-                    # with in-memory fallbacks
-                    pass
+                    # Run schema creation (optional based on your setup)
+                    logger.info("Tables don't exist. Will use memory fallbacks.")
                 except Exception as inner_e:
                     logger.warning(f"Failed to create tables: {inner_e}")
 
-                # This return statement is now properly within the outer try block
+                # Continue anyway with memory fallbacks
                 return True
 
         except Exception as e:
@@ -128,12 +119,13 @@ async def init_database_with_retry(max_attempts=3):
                 logger.warning("All database initialization attempts failed. Using in-memory fallbacks.")
                 return False
 
+
 async def init_translations():
     """Initialize translations with better reliability and failsafes."""
     logger.info("Initializing translation system...")
 
     # Import i18n functions
-    from utils.i18n import load_default_translations, load_translations
+    from utils.i18n import load_default_translations
 
     # Start with defaults (synchronous, always works)
     load_default_translations()
@@ -204,6 +196,9 @@ async def main():
     db_init_success = await init_database_with_retry()
     if not db_init_success:
         logger.warning("Bot will continue but database functionality may be limited")
+
+    # Initialize i18n with correct dependencies
+    init_i18n(player_exists_func=db_functions['player_exists'], get_supabase_func=get_supabase)
 
     # Asynchronously load translations
     logger.info("Loading translations...")
