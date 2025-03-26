@@ -22,6 +22,7 @@ from telegram.ext import (
 from bot.handlers import register_all_handlers
 from bot.middleware import setup_middleware
 from db.supabase_client import init_supabase, check_schema_exists
+from db.permission_checker import check_database_permissions
 from utils.config import load_config
 from utils.i18n import load_translations, get_user_language
 from utils.logger import setup_logger, configure_telegram_logger, configure_supabase_logger
@@ -72,6 +73,90 @@ async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     return True
 
 
+async def init_database_with_retry(max_attempts=3):
+    """Initialize the database with retry mechanism."""
+    logger.info("Initializing database...")
+
+    for attempt in range(1, max_attempts + 1):
+        try:
+            # Initialize Supabase client
+            client = init_supabase()
+            logger.info("Supabase client initialized")
+
+            # Check schema existence
+            schema_exists = await check_schema_exists()
+
+            if not schema_exists:
+                logger.info("Database schema 'game' doesn't exist. Running initialization...")
+
+                # Import SQL files
+                from db.supabase_client import execute_sql
+
+                # Create schema
+                await execute_sql("CREATE SCHEMA IF NOT EXISTS game;")
+
+                # Create minimal tables needed for operation
+                await execute_sql("""
+                CREATE TABLE IF NOT EXISTS game.players (
+                    player_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    telegram_id TEXT UNIQUE NOT NULL,
+                    name TEXT NOT NULL,
+                    ideology_score INTEGER NOT NULL DEFAULT 0,
+                    remaining_actions INTEGER NOT NULL DEFAULT 1,
+                    remaining_quick_actions INTEGER NOT NULL DEFAULT 2,
+                    is_admin BOOLEAN DEFAULT FALSE,
+                    is_active BOOLEAN DEFAULT TRUE,
+                    language TEXT DEFAULT 'en_US',
+                    registered_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+                    last_active_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+                );""")
+
+                await execute_sql("""
+                CREATE TABLE IF NOT EXISTS game.resources (
+                    resource_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    player_id UUID NOT NULL,
+                    influence_amount INTEGER NOT NULL DEFAULT 0,
+                    money_amount INTEGER NOT NULL DEFAULT 0,
+                    information_amount INTEGER NOT NULL DEFAULT 0,
+                    force_amount INTEGER NOT NULL DEFAULT 0,
+                    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+                );""")
+
+                logger.info("Created minimal database schema and tables")
+
+                # Create basic functions for operation
+                await execute_sql("""
+                CREATE OR REPLACE FUNCTION player_exists(p_telegram_id TEXT)
+                RETURNS BOOLEAN AS $$
+                BEGIN
+                    RETURN EXISTS (
+                        SELECT 1 FROM game.players WHERE telegram_id = p_telegram_id
+                    );
+                END;
+                $$ LANGUAGE plpgsql;
+                """)
+
+                logger.info("Created basic database functions")
+            else:
+                logger.info("Database schema 'game' already exists")
+
+            # Run permission check
+            await check_database_permissions()
+
+            return True
+
+        except Exception as e:
+            logger.error(f"Database initialization attempt {attempt}/{max_attempts} failed: {e}")
+
+            if attempt < max_attempts:
+                delay = 2 ** (attempt - 1)  # Exponential backoff
+                logger.info(f"Retrying in {delay} seconds...")
+                await asyncio.sleep(delay)
+            else:
+                logger.critical("All database initialization attempts failed")
+                return False
+
+
 async def init_translations():
     """Initialize translations with better reliability and failsafes."""
     logger.info("Initializing translation system...")
@@ -105,78 +190,6 @@ async def init_translations():
         logger.error(f"All attempts to initialize translations failed: {e}")
         logger.warning("Continuing with basic translations only")
 
-async def init_database():
-    """Initialize the database if it hasn't been set up yet."""
-    try:
-        # Initialize Supabase client
-        client = init_supabase()
-
-        # Check if game schema exists
-        schema_exists = False
-        try:
-            schema_exists = await check_schema_exists()
-        except Exception as check_error:
-            logger.error(f"Error checking schema existence: {check_error}")
-            # Try a more direct approach
-            try:
-                from db.supabase_client import execute_sql
-                check_result = await execute_sql(
-                    "SELECT schema_name FROM information_schema.schemata WHERE schema_name = 'game';")
-                schema_exists = check_result and len(check_result) > 0
-                logger.info(f"Alternative schema check result: {schema_exists}")
-            except Exception as direct_check_error:
-                logger.error(f"Direct schema check also failed: {direct_check_error}")
-                # Assume schema exists to avoid potential data loss
-                schema_exists = True
-                logger.warning("Assuming schema exists due to check failures")
-
-        if not schema_exists:
-            logger.info("Database schema 'game' doesn't exist. Running initialization...")
-
-            try:
-                # Execute basic SQL for schema and critical tables
-                from db.supabase_client import execute_sql
-
-                # Create the game schema
-                await execute_sql("CREATE SCHEMA IF NOT EXISTS game;")
-
-                # Create essential tables with proper schema reference
-                await execute_sql("""
-                CREATE TABLE IF NOT EXISTS game.players (
-                    player_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-                    telegram_id TEXT UNIQUE NOT NULL,
-                    name TEXT NOT NULL,
-                    ideology_score INTEGER NOT NULL DEFAULT 0,
-                    remaining_actions INTEGER NOT NULL DEFAULT 1,
-                    remaining_quick_actions INTEGER NOT NULL DEFAULT 2,
-                    is_admin BOOLEAN DEFAULT FALSE,
-                    is_active BOOLEAN DEFAULT TRUE,
-                    language TEXT DEFAULT 'en_US',
-                    registered_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-                    last_active_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-                );""")
-
-                await execute_sql("""
-                CREATE TABLE IF NOT EXISTS game.resources (
-                    resource_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-                    player_id UUID NOT NULL,
-                    influence_amount INTEGER NOT NULL DEFAULT 0,
-                    money_amount INTEGER NOT NULL DEFAULT 0,
-                    information_amount INTEGER NOT NULL DEFAULT 0,
-                    force_amount INTEGER NOT NULL DEFAULT 0,
-                    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-                );""")
-
-                logger.info("Created minimal database schema and tables")
-            except Exception as init_error:
-                logger.error(f"Error during database initialization: {init_error}")
-                logger.warning("Continuing without database initialization")
-        else:
-            logger.info("Database schema 'game' already exists")
-    except Exception as e:
-        logger.error(f"Error initializing database: {e}")
-        logger.warning("Bot will continue but database functionality may be limited")
-
 
 async def cleanup_task():
     """Periodically clean up expired user contexts."""
@@ -200,7 +213,7 @@ async def main():
 
     # Load admin IDs
     admin_ids_str = os.getenv("TELEGRAM_ADMIN_IDS", "")
-    admin_ids = [int(id_str) for id_str in admin_ids_str.split(",") if id_str]
+    admin_ids = [int(id_str) for id_str in admin_ids_str.split(",") if id_str.strip()]
 
     # Load configuration
     config = load_config()
@@ -213,11 +226,8 @@ async def main():
 
     # Start initialization tasks
     logger.info("Initializing Supabase client and database...")
-    try:
-        # Initialize Supabase client and database
-        await init_database()
-    except Exception as e:
-        logger.error(f"Database initialization failed: {e}")
+    db_init_success = await init_database_with_retry()
+    if not db_init_success:
         logger.warning("Bot will continue but database functionality may be limited")
 
     # Asynchronously load translations

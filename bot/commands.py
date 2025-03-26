@@ -8,7 +8,7 @@ Complete command handlers implementation for the Meta Game bot.
 import logging
 
 from telegram import Update
-from telegram.ext import ContextTypes, CommandHandler
+from telegram.ext import ContextTypes, CommandHandler, ConversationHandler
 
 from bot.keyboards import (
     get_start_keyboard,
@@ -22,7 +22,7 @@ from bot.keyboards import (
     get_politicians_keyboard,
     get_back_keyboard
 )
-from bot.states import NAME_ENTRY
+from bot.states import NAME_ENTRY, resource_conversion_start
 from db import (
     player_exists,
     get_player,
@@ -229,6 +229,45 @@ async def map_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         )
     except Exception as e:
         await handle_error(update, language, e, "map_command")
+
+
+async def resource_conversion_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle the /convert_resource command - start resource conversion process."""
+    telegram_id = str(update.effective_user.id)
+    language = await get_user_language(telegram_id)
+
+    if not await require_registration(update, language):
+        return ConversationHandler.END
+
+    # Check if resource type and amount are provided
+    if len(context.args) >= 2:
+        from_resource = context.args[0].lower()
+
+        # Validate resource type
+        if from_resource not in ["influence", "money", "information", "force"]:
+            await update.message.reply_text(
+                _("Invalid resource type. Choose from: influence, money, information, force.", language)
+            )
+            return ConversationHandler.END
+
+        try:
+            amount = int(context.args[1])
+            if amount <= 0:
+                await update.message.reply_text(
+                    _("Amount must be a positive number.", language)
+                )
+                return ConversationHandler.END
+
+            # Start conversion with provided arguments
+            return await resource_conversion_start(update, context, from_resource, amount)
+        except ValueError:
+            await update.message.reply_text(
+                _("Invalid amount. Please provide a number.", language)
+            )
+            return ConversationHandler.END
+    else:
+        # Start conversion flow without arguments
+        return await resource_conversion_start(update, context)
 
 
 async def active_collective_actions_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -974,6 +1013,7 @@ async def admin_generate_effects_command(update: Update, context: ContextTypes.D
 def register_commands(registry) -> None:
     """Register all command handlers."""
     registry.register_command("help", help_command)
+    registry.register_command("convert_resource", resource_conversion_command)
     registry.register_command("status", status_command)
     registry.register_command("map", map_command)
     registry.register_command("time", time_command)

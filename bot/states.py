@@ -18,6 +18,7 @@ from telegram.ext import (
 )
 
 from bot.callbacks import join_collective_action_callback
+from bot.commands import resource_conversion_command
 # Import constants instead of defining states here (breaking circular import)
 from bot.constants import (
     NAME_ENTRY,
@@ -44,7 +45,7 @@ from bot.constants import (
     JOIN_ACTION_PHYSICAL,
     JOIN_ACTION_CONFIRM,
 )
-from utils.context_manager import get_user_context, clear_user_context
+from utils.context_manager import get_user_context, clear_user_context, clear_user_data, get_user_data, set_user_data
 from bot.keyboards import (
     get_ideology_keyboard,
     get_districts_keyboard,
@@ -53,7 +54,7 @@ from bot.keyboards import (
     get_physical_presence_keyboard,
     get_confirmation_keyboard,
     get_language_keyboard,
-    get_collective_action_keyboard
+    get_collective_action_keyboard, get_start_keyboard
 )
 from db import (
     register_player,
@@ -61,7 +62,7 @@ from db import (
     submit_action,
     exchange_resources,
     initiate_collective_action,
-    join_collective_action
+    join_collective_action, get_player
 )
 from utils.error_handling import db_retry, DatabaseError
 from utils.i18n import _, get_user_language, set_user_language
@@ -76,77 +77,88 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
     """Start the conversation to register a new player."""
     user = update.effective_user
     telegram_id = str(user.id)
+    language = await get_user_language(telegram_id)
 
     # Check if player already exists
     try:
         exists = await player_exists(telegram_id)
+
+        if exists:
+            # Player exists, welcome them back
+            try:
+                player_data = await get_player(telegram_id)
+                player_name = player_data.get("player_name", user.first_name) if player_data else user.first_name
+
+                welcome_text = _("Welcome back to Novi-Sad, {name}! What would you like to do?", language).format(
+                    name=player_name
+                )
+
+                await update.message.reply_text(
+                    welcome_text,
+                    reply_markup=get_start_keyboard(language)
+                )
+                return ConversationHandler.END
+
+            except Exception as e:
+                logger.error(f"Error getting player data: {e}")
+                # Continue with registration if we can't get player data
+
+        # New player, start registration
+        await update.message.reply_text(
+            "Welcome to Novi-Sad, a city at the crossroads of Yugoslavia's future! "
+            "Please select your preferred language:",
+            reply_markup=get_language_keyboard()
+        )
+
+        return NAME_ENTRY
+
     except Exception as e:
         logger.error(f"Error checking if player exists: {e}")
+
+        # Fallback to language selection
         await update.message.reply_text(
-            "Sorry, we're experiencing technical difficulties. Please try again later."
+            "Welcome to Novi-Sad! Let's start by selecting your language:",
+            reply_markup=get_language_keyboard()
         )
-        return ConversationHandler.END
 
-    if exists:
-        # Redirect to welcome handler for existing players
-        from bot.commands import start_command as welcome_command
-        return await welcome_command(update, context)
+        return NAME_ENTRY
 
-    # Language selection first
-    await update.message.reply_text(
-        "Welcome to Novi-Sad, a city at the crossroads of Yugoslavia's future! "
-        "Please select your preferred language:",
-        reply_markup=get_language_keyboard()
-    )
-
-    return NAME_ENTRY
 
 async def language_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Handle language selection during registration."""
+    """Handle language selection for registration."""
     query = update.callback_query
     await query.answer()
 
     language = query.data.split(":", 1)[1]
     telegram_id = str(update.effective_user.id)
 
-    # Store language preference temporarily
-    context.user_data["preferred_language"] = language
-
-    # Continue with name entry
-    await query.edit_message_text(
-        _("Great! Now, tell me your character's name:", language)
-    )
-
-    return NAME_ENTRY
-
-async def language_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Handle language selection."""
-    query = update.callback_query
-    await query.answer()
-
-    language = query.data.split(":", 1)[1]
-    telegram_id = str(update.effective_user.id)
-
-    # Store language preference
-    # (will be properly saved after registration)
+    # Save the language selection
     await set_user_language(telegram_id, language)
+    # Also store in context for this session
+    set_user_data(telegram_id, "language", language, context)
 
-    # Continue with name entry
+    # Now prompt for name
     await query.edit_message_text(
         _("Great! Now, tell me your character's name:", language)
     )
 
     return NAME_ENTRY
-
 
 async def name_entry(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Handle name entry."""
+    """Handle name entry during registration."""
     user_input = update.message.text
     telegram_id = str(update.effective_user.id)
     language = await get_user_language(telegram_id)
 
-    # Store the name in context
-    context.user_data["player_name"] = user_input
+    # Validate name (add any required validation)
+    if not user_input or len(user_input.strip()) < 2:
+        await update.message.reply_text(
+            _("Please enter a valid name (at least 2 characters):", language)
+        )
+        return NAME_ENTRY
+
+    # Store name in context
+    set_user_data(telegram_id, "player_name", user_input, context)
 
     # Prompt for ideology selection
     await update.message.reply_text(
@@ -158,9 +170,23 @@ async def name_entry(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     return IDEOLOGY_CHOICE
 
 
-@db_retry
+async def cancel_registration(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle cancellation of registration."""
+    telegram_id = str(update.effective_user.id)
+    language = await get_user_language(telegram_id)
+
+    await update.message.reply_text(
+        _("Registration canceled. You can start again with /start when you're ready.", language)
+    )
+
+    # Clean up context data
+    clear_user_data(telegram_id, context)
+
+    return ConversationHandler.END
+
+
 async def ideology_choice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Handle ideology choice."""
+    """Handle ideology selection and complete registration."""
     query = update.callback_query
     await query.answer()
 
@@ -169,32 +195,31 @@ async def ideology_choice(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     telegram_id = str(update.effective_user.id)
     language = await get_user_language(telegram_id)
 
-    # Register the new player
-    player_name = context.user_data.get("player_name", update.effective_user.first_name)
+    # Get the player name from context
+    player_name = get_user_data(telegram_id, "player_name") or update.effective_user.first_name
 
     try:
-        # Call the registration function with proper error handling
-        result = await register_player(telegram_id, player_name, ideology_value)
+        # Register the player
+        result = await register_player(telegram_id, player_name, ideology_value, language)
 
-        # Better error handling
+        # Check if registration was successful
         if not result:
             await query.edit_message_text(
-                _("Error during registration: Database connection issue", language)
+                _("There was a problem with registration. Please try again later.", language)
             )
+            clear_user_data(telegram_id, context)
             return ConversationHandler.END
 
-        # Save the language preference permanently
-        await set_user_language(telegram_id, language)
-
-        # Welcome message
-        ideology_text = _("Strong Reformist", language) if ideology_value == -5 else \
-            _("Moderate Reformist", language) if ideology_value == -3 else \
-                _("Slight Reformist", language) if ideology_value == -1 else \
+        # Determine ideology text based on value
+        ideology_text = _("Strong Reformist", language) if ideology_value <= -4 else \
+            _("Moderate Reformist", language) if ideology_value <= -2 else \
+                _("Slight Reformist", language) if ideology_value < 0 else \
                     _("Neutral", language) if ideology_value == 0 else \
-                        _("Slight Conservative", language) if ideology_value == 1 else \
-                            _("Moderate Conservative", language) if ideology_value == 3 else \
+                        _("Slight Conservative", language) if ideology_value <= 2 else \
+                            _("Moderate Conservative", language) if ideology_value <= 4 else \
                                 _("Strong Conservative", language)
 
+        # Send success message
         await query.edit_message_text(
             _("Registration complete! Welcome to Novi-Sad, {name}.\n\n"
               "You have chosen an ideology of {ideology_value} ({ideology_text}).\n\n"
@@ -207,17 +232,24 @@ async def ideology_choice(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             )
         )
 
-        # Clean up context
-        clear_user_context(telegram_id)
+        # Clean up context data
+        clear_user_data(telegram_id, context)
 
-        # End the conversation
         return ConversationHandler.END
 
     except Exception as e:
-        logger.error(f"Error registering player: {str(e)}")
+        logger.error(f"Error registering player: {e}")
+
+        # Send error message
         await query.edit_message_text(
-            _("There was an error registering your account. Please try again later or contact support.", language)
+            _("Registration error: {error}. Please try again later.", language).format(
+                error=str(e)
+            )
         )
+
+        # Clean up context data
+        clear_user_data(telegram_id, context)
+
         return ConversationHandler.END
 
 
@@ -1226,6 +1258,39 @@ async def join_action_physical_selected(update: Update, context: ContextTypes.DE
     return ConversationHandler.END
 
 
+async def convert_amount_text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle amount entry as text input for resource conversion."""
+    user_input = update.message.text
+    telegram_id = str(update.effective_user.id)
+    language = await get_user_language(telegram_id)
+
+    try:
+        convert_amount = int(user_input)
+        if convert_amount <= 0:
+            await update.message.reply_text(
+                _("Please enter a positive number.", language)
+            )
+            return CONVERT_AMOUNT
+
+        # Store in user context
+        user_data = get_user_context(telegram_id)
+        user_data["convert_amount"] = convert_amount
+        from_resource = user_data.get("from_resource")
+
+        # Prompt for destination resource
+        await update.message.reply_text(
+            _("What type of resource do you want to convert to?", language),
+            reply_markup=get_resource_type_keyboard(language, exclude_type=from_resource)
+        )
+
+        return CONVERT_TO_RESOURCE
+    except ValueError:
+        await update.message.reply_text(
+            _("Invalid input. Please enter a number.", language)
+        )
+        return CONVERT_AMOUNT
+
+
 @db_retry
 async def join_action_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle confirmation for joining a collective action."""
@@ -1319,8 +1384,10 @@ registration_handler = ConversationHandler(
             CallbackQueryHandler(ideology_choice, pattern=r"^ideology:")
         ]
     },
-    fallbacks=[CommandHandler("cancel", cancel_handler)]
+    fallbacks=[CommandHandler("cancel", cancel_registration)],
+    per_message=False  # This is the correct setting for mixed handlers
 )
+
 
 action_handler = ConversationHandler(
     entry_points=[
@@ -1350,11 +1417,12 @@ action_handler = ConversationHandler(
         CallbackQueryHandler(lambda u, c: ConversationHandler.END, pattern=r"^cancel_selection$"),
         CommandHandler("cancel", cancel_handler)
     ],
-    per_message=True  # Add this parameter
+    per_message=False  # Use this instead of True
 )
 
 resource_conversion_handler = ConversationHandler(
     entry_points=[
+        CommandHandler("convert_resource", resource_conversion_command),
         CallbackQueryHandler(resource_conversion_start, pattern=r"^exchange_resources$")
     ],
     states={
@@ -1362,7 +1430,8 @@ resource_conversion_handler = ConversationHandler(
             CallbackQueryHandler(convert_from_selected, pattern=r"^resource:")
         ],
         CONVERT_AMOUNT: [
-            CallbackQueryHandler(convert_amount_selected, pattern=r"^amount:")
+            CallbackQueryHandler(convert_amount_selected, pattern=r"^amount:"),
+            MessageHandler(filters.TEXT & ~filters.COMMAND, convert_amount_text_handler)
         ],
         CONVERT_TO_RESOURCE: [
             CallbackQueryHandler(convert_to_selected, pattern=r"^resource:")
@@ -1375,8 +1444,9 @@ resource_conversion_handler = ConversationHandler(
         CallbackQueryHandler(lambda u, c: ConversationHandler.END, pattern=r"^cancel_selection$"),
         CommandHandler("cancel", cancel_handler)
     ],
-    per_message=True  # Add this parameter
+    per_message=True
 )
+
 
 collective_action_handler = ConversationHandler(
     entry_points=[
@@ -1409,7 +1479,7 @@ collective_action_handler = ConversationHandler(
         CallbackQueryHandler(lambda u, c: ConversationHandler.END, pattern=r"^cancel_selection$"),
         CommandHandler("cancel", cancel_handler)
     ],
-    per_message=True  # Add this parameter
+    per_message=False  # Use this instead of True
 )
 
 join_command_handler = ConversationHandler(

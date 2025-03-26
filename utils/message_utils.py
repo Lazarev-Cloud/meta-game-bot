@@ -32,8 +32,6 @@ async def send_message(
 ) -> Optional[Message]:
     """
     Send a message to the user, handling both regular messages and callback queries.
-
-    This unified function handles both message types and provides clean error handling.
     """
     # Ensure text is not None or empty
     if not text:
@@ -49,12 +47,11 @@ async def send_message(
         return None
 
     # Clean up Markdown to avoid parsing errors
-    if parse_mode == "Markdown":
-        text, parse_mode = await fixup_message_text(text, parse_mode)
+    text, parse_mode = await fixup_message_text(text, parse_mode)
 
     # Safely truncate text if it's too long
     if len(text) > MAX_MESSAGE_LENGTH:
-        logger.warning(f"Message too long ({len(text)} chars), truncating to {MAX_MESSAGE_LENGTH} chars")
+        logger.warning(f"Message too long ({len(text)} chars), truncating")
         text = text[:MAX_MESSAGE_LENGTH - 3] + "..."
 
     try:
@@ -177,15 +174,6 @@ async def answer_callback(
 ) -> bool:
     """
     Answer a callback query with optional text.
-
-    Args:
-        update: The update object
-        text: Optional text to show (limited to 200 characters)
-        show_alert: Whether to show as alert or toast notification
-        cache_time: Time in seconds for caching the response
-
-    Returns:
-        True if successful, False otherwise
     """
     if update.callback_query:
         try:
@@ -200,174 +188,9 @@ async def answer_callback(
     return False
 
 
-async def create_keyboard(
-        buttons: List[List[Dict[str, str]]],
-        language: str
-) -> InlineKeyboardMarkup:
-    """
-    Create an inline keyboard from a list of button definitions.
-
-    This helper function simplifies keyboard creation and handles translations.
-    """
-    # Import here to avoid circular imports
-    from utils.i18n import _
-
-    keyboard = []
-    for row in buttons:
-        keyboard_row = []
-        for button in row:
-            text = _(button["text"], language) if "text" in button else "Button"
-
-            # Handle different button types (callback, url, etc.)
-            if "url" in button:
-                keyboard_row.append(InlineKeyboardButton(text, url=button["url"]))
-            elif "callback_data" in button:
-                keyboard_row.append(InlineKeyboardButton(text, callback_data=button["callback_data"]))
-            elif "switch_inline_query" in button:
-                keyboard_row.append(InlineKeyboardButton(text, switch_inline_query=button["switch_inline_query"]))
-            elif "switch_inline_query_current_chat" in button:
-                keyboard_row.append(InlineKeyboardButton(
-                    text,
-                    switch_inline_query_current_chat=button["switch_inline_query_current_chat"]
-                ))
-
-        keyboard.append(keyboard_row)
-
-    return InlineKeyboardMarkup(keyboard)
-
-
-async def split_long_message(
-        text: str,
-        max_length: int = MAX_MESSAGE_LENGTH
-) -> List[str]:
-    """
-    Split a long message into multiple parts that respect message length limits.
-
-    Intelligently splits on paragraph boundaries when possible.
-    """
-    if len(text) <= max_length:
-        return [text]
-
-    parts = []
-    current_part = ""
-
-    # Try to split on double newlines to keep paragraphs together
-    paragraphs = text.split('\n\n')
-
-    for paragraph in paragraphs:
-        # If adding this paragraph would exceed the limit
-        if len(current_part) + len(paragraph) + 2 > max_length:
-            # If current_part is not empty, add it to parts
-            if current_part:
-                parts.append(current_part.strip())
-                current_part = ""
-
-            # If paragraph itself is too long, split it further
-            if len(paragraph) > max_length:
-                # Split on single newlines
-                lines = paragraph.split('\n')
-                for line in lines:
-                    if len(current_part) + len(line) + 1 > max_length:
-                        if current_part:
-                            parts.append(current_part.strip())
-                            current_part = ""
-
-                        # If even a single line is too long, split it into chunks
-                        if len(line) > max_length:
-                            for i in range(0, len(line), max_length):
-                                parts.append(line[i:i + max_length])
-                        else:
-                            current_part = line
-                    else:
-                        if current_part:
-                            current_part += "\n" + line
-                        else:
-                            current_part = line
-            else:
-                current_part = paragraph
-        else:
-            if current_part:
-                current_part += "\n\n" + paragraph
-            else:
-                current_part = paragraph
-
-    if current_part:
-        parts.append(current_part.strip())
-
-    return parts
-
-
-async def send_long_message(
-        update: Update,
-        text: str,
-        keyboard: Optional[InlineKeyboardMarkup] = None,
-        parse_mode: str = "Markdown",
-        max_length: int = MAX_MESSAGE_LENGTH,
-        context: Optional[ContextTypes.DEFAULT_TYPE] = None,
-        disable_web_page_preview: bool = True
-) -> Optional[Message]:
-    """
-    Send a long message, splitting it into multiple messages if needed.
-
-    Returns the last message sent, which contains any keyboard attachments.
-    """
-    parts = await split_long_message(text, max_length)
-
-    last_message = None
-
-    for i, part in enumerate(parts):
-        # Only add keyboard to the last part
-        part_keyboard = keyboard if i == len(parts) - 1 else None
-
-        # Send this part
-        message = await send_message(
-            update,
-            part,
-            keyboard=part_keyboard,
-            parse_mode=parse_mode,
-            context=context,
-            disable_web_page_preview=disable_web_page_preview
-        )
-
-        if message:
-            last_message = message
-
-        # Add a small delay if sending multiple messages to avoid rate limiting
-        if i < len(parts) - 1:
-            import asyncio
-            await asyncio.sleep(0.5)
-
-    return last_message
-
-
-async def escape_markdown(text: str, version: int = 1) -> str:
-    """Escape special characters for Markdown formatting."""
-    if not text:
-        return ""
-
-    if version == 1:
-        # Markdown v1
-        escape_chars = r'_*`['
-        return re.sub(r'([{}])'.format(re.escape(escape_chars)), r'\\\1', text)
-    else:
-        # Markdown v2
-        escape_chars = r'_*[]()~`>#+-=|{}.!'
-        return re.sub(r'([{}])'.format(re.escape(escape_chars)), r'\\\1', text)
-
-
-async def escape_html(text: str) -> str:
-    """Escape special characters for HTML formatting."""
-    if not text:
-        return ""
-
-    return text.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
-
-
 async def fixup_message_text(text: str, parse_mode: Optional[str]) -> Tuple[str, Optional[str]]:
     """
     Fix up message text to avoid formatting issues.
-
-    This crucial utility prevents common Markdown/HTML formatting errors.
     """
     if not parse_mode:
         return text, None
@@ -396,124 +219,58 @@ async def fixup_message_text(text: str, parse_mode: Optional[str]) -> Tuple[str,
     return text, parse_mode
 
 
-async def send_paginated_content(
-        update: Update,
-        content_items: List[Dict[str, Any]],
-        page: int,
-        format_func: callable,
-        language: str,
-        page_size: int = 5,
-        navigation_callback_prefix: str = "page:",
-        additional_buttons: Optional[List[List[Dict[str, str]]]] = None,
-        context: Optional[ContextTypes.DEFAULT_TYPE] = None
-) -> Optional[Message]:
-    """
-    Send paginated content with navigation buttons.
+async def escape_markdown(text: str) -> str:
+    """Escape special characters for Markdown formatting."""
+    if not text:
+        return ""
 
-    Perfect for news, lists of politicians, districts, etc.
+    # Escape special Markdown characters
+    escape_chars = r'_*`[]()~>#+-=|{}.!'
+    return re.sub(r'([{}])'.format(re.escape(escape_chars)), r'\\\1', text)
+
+
+async def escape_html(text: str) -> str:
+    """Escape special characters for HTML formatting."""
+    if not text:
+        return ""
+
+    return text.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+
+
+async def create_error_message(error: Exception, language: str, operation: str = "") -> str:
     """
+    Create a user-friendly error message based on the exception.
+    """
+    # Import _ function here to avoid circular imports
     from utils.i18n import _
 
-    # Calculate pagination info
-    total_items = len(content_items)
-    total_pages = (total_items + page_size - 1) // page_size  # Ceiling division
+    error_text = str(error).lower()
 
-    if total_items == 0:
-        # No items to display
-        return await send_message(
-            update,
-            _("No items to display.", language),
-            keyboard=await create_keyboard(
-                [
-                    [{"text": _("Back", language), "callback_data": "back_to_menu"}]
-                ],
-                language
-            ),
-            context=context
-        )
-
-    # Ensure page is within valid range
-    page = max(0, min(page, total_pages - 1))
-
-    # Get items for current page
-    start_idx = page * page_size
-    end_idx = min(start_idx + page_size, total_items)
-    current_items = content_items[start_idx:end_idx]
-
-    # Format content
-    content_text = await format_func(current_items, language)
-
-    # Add pagination info
-    content_text += f"\n\n{_('Page', language)} {page + 1}/{total_pages}"
-
-    # Create navigation buttons
-    buttons = []
-    nav_row = []
-
-    if page > 0:
-        nav_row.append({
-            "text": f"◀️ {_('Previous', language)}",
-            "callback_data": f"{navigation_callback_prefix}prev"
-        })
-
-    if page < total_pages - 1:
-        nav_row.append({
-            "text": f"{_('Next', language)} ▶️",
-            "callback_data": f"{navigation_callback_prefix}next"
-        })
-
-    if nav_row:
-        buttons.append(nav_row)
-
-    # Add additional buttons
-    if additional_buttons:
-        buttons.extend(additional_buttons)
-
-    # Add back button if not already included
-    if not any(any(button.get("callback_data") == "back_to_menu" for button in row) for row in buttons):
-        buttons.append([{"text": _("Back", language), "callback_data": "back_to_menu"}])
-
-    # Create keyboard
-    keyboard = await create_keyboard(buttons, language)
-
-    # Send message
-    return await send_message(update, content_text, keyboard=keyboard, context=context)
-
-
-# Standardized keyboards builder
-async def get_standard_keyboard(keyboard_type: str, language: str, **kwargs) -> InlineKeyboardMarkup:
-    """
-    Get a standard keyboard based on type with proper translations.
-
-    Centralizes keyboard creation for consistency across the bot.
-    """
-    from utils.i18n import _
-
-    if keyboard_type == "yes_no":
-        return await create_keyboard([
-            [
-                {"text": _("Yes", language), "callback_data": "yes"},
-                {"text": _("No", language), "callback_data": "no"}
-            ]
-        ], language)
-
-    elif keyboard_type == "back":
-        callback = kwargs.get("callback_data", "back_to_menu")
-        return await create_keyboard([
-            [{"text": _("Back", language), "callback_data": callback}]
-        ], language)
-
-    elif keyboard_type == "confirmation":
-        return await create_keyboard([
-            [
-                {"text": _("Confirm", language), "callback_data": "confirm"},
-                {"text": _("Cancel", language), "callback_data": "cancel_selection"}
-            ]
-        ], language)
-
-    # Add more standard keyboards as needed
-
-    # Default fallback to simple back button
-    return await create_keyboard([
-        [{"text": _("Back", language), "callback_data": "back_to_menu"}]
-    ], language)
+    # Create appropriate user-facing message based on error type
+    if "permission denied" in error_text or "not authorized" in error_text:
+        return _("You don't have permission to perform this action.", language)
+    elif "connection" in error_text or "timeout" in error_text:
+        return _("Server connection issue. Please try again later.", language)
+    elif "not enough" in error_text or "resource" in error_text:
+        return _("You don't have enough resources for this action.", language)
+    elif "not found" in error_text:
+        if "player" in error_text:
+            return _("Player not found. Please check the name.", language)
+        elif "district" in error_text:
+            return _("District not found. Please check the name.", language)
+        elif "politician" in error_text:
+            return _("Politician not found. Please check the name.", language)
+        else:
+            return _("The requested item was not found.", language)
+    elif "deadline" in error_text or "closed" in error_text:
+        return _("The submission deadline for this cycle has passed.", language)
+    elif "already exists" in error_text:
+        return _("This already exists.", language)
+    else:
+        # Generic error message
+        if operation:
+            return _("Error during {operation}: {error}", language).format(
+                operation=operation,
+                error=str(error)
+            )
+        return _("An error occurred. Please try again later.", language)

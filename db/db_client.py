@@ -4,17 +4,16 @@
 """
 Unified database operations for Meta Game.
 
-This module consolidates database operations into a set of generic
-functions that handle errors, retries, and common patterns.
+This module provides robust database operations with multiple fallback approaches,
+comprehensive error handling, and detailed logging for troubleshooting.
 """
 
 import asyncio
 import logging
+import random
 from typing import Dict, Any, Optional, List, TypeVar, Callable, Awaitable, Union, Tuple
 
-from telegram import Update
-
-from utils import _
+from utils.i18n import _
 from utils.error_handling import db_retry, DatabaseError
 from db.supabase_client import get_supabase, execute_function, execute_sql
 
@@ -25,29 +24,19 @@ logger = logging.getLogger(__name__)
 T = TypeVar('T')
 
 
-async def db_operation(operation_name: str,
-                       func: Callable,
-                       *args,
-                       default_return=None,
-                       log_error: bool = True,
-                       max_retries: int = 3,
-                       retry_delay: float = 1.5,
-                       **kwargs) -> Any:
-    """
-    Execute a database operation with standardized error handling and retries.
+# ===== Core database utility functions =====
 
-    Args:
-        operation_name: Name of operation for logging
-        func: Function to execute
-        default_return: Value to return on error
-        log_error: Whether to log errors
-        max_retries: Maximum number of retry attempts
-        retry_delay: Base delay between retries in seconds
-        *args, **kwargs: Arguments to pass to the function
-
-    Returns:
-        Result of the function or default_return on error
-    """
+async def db_operation(
+        operation_name: str,
+        func: Callable,
+        *args,
+        default_return=None,
+        log_error: bool = True,
+        max_retries: int = 3,
+        retry_delay: float = 1.5,
+        **kwargs
+) -> Any:
+    """Execute a database operation with standardized error handling and retries."""
     retries = 0
     last_exception = None
 
@@ -55,7 +44,6 @@ async def db_operation(operation_name: str,
         try:
             result = await func(*args, **kwargs)
             # Handle cases where result is a number that could be mistaken for an error
-            # (e.g., 0 is a valid result but might be treated as falsey)
             if result is not None or isinstance(result, (int, float, bool)):
                 return result
             return default_return
@@ -69,129 +57,14 @@ async def db_operation(operation_name: str,
                 )
 
             if retries < max_retries:
-                # Wait before retrying with exponential backoff
-                await asyncio.sleep(retry_delay * retries)
+                # Exponential backoff with jitter for retries
+                delay = retry_delay * (2 ** (retries - 1)) * (0.9 + 0.2 * random.random())
+                await asyncio.sleep(delay)
             elif log_error:
-                # Log final failure
                 logger.error(f"Database operation '{operation_name}' failed after {max_retries} attempts: {str(e)}")
 
     # Return default value on complete failure
     return default_return
-
-
-async def execute_rpc(
-        function_name: str,
-        params: Dict[str, Any],
-        schema_prefix: bool = False,  # Change default to False
-        operation_name: Optional[str] = None
-) -> Any:
-    """
-    Execute an RPC function with proper error handling.
-    """
-    op_name = operation_name or function_name
-
-    # Only prefix if explicitly requested
-    prefixed_name = f"game.{function_name}" if schema_prefix else function_name
-
-    return await db_operation(
-        op_name,
-        execute_function,
-        prefixed_name,
-        params
-    )
-
-
-async def execute_query(
-        query: str,
-        operation_name: str,
-        params: Optional[Dict[str, Any]] = None,
-        table: str = "",
-        schema: str = "game",
-) -> Any:
-    """
-    Execute a database query with proper error handling.
-
-    Args:
-        query: SQL query or query type like "select", "insert", etc.
-        operation_name: Name for logging
-        params: Query parameters
-        table: Table name for Supabase operations
-        schema: Schema name
-
-    Returns:
-        Query results or None on error
-    """
-
-    async def run_query():
-        client = get_supabase()
-
-        # Handle raw SQL queries
-        if query.lower().startswith(("select", "insert", "update", "delete")):
-            return await execute_sql(query)
-
-        # Handle Supabase query builder operations
-        if table:
-            builder = client.from_(table).schema(schema)
-
-            if query == "select":
-                columns = params.get("columns", "*") if params else "*"
-                builder = builder.select(columns)
-            elif query == "insert":
-                builder = builder.insert(params)
-            elif query == "update":
-                builder = builder.update(params)
-            elif query == "delete":
-                builder = builder.delete()
-
-            # Apply filters if provided
-            if params and "filters" in params:
-                for filter_item in params["filters"]:
-                    column = filter_item.get("column")
-                    operator = filter_item.get("operator", "eq")
-                    value = filter_item.get("value")
-
-                    if column and value is not None:
-                        if operator == "eq":
-                            builder = builder.eq(column, value)
-                        elif operator == "gt":
-                            builder = builder.gt(column, value)
-                        elif operator == "lt":
-                            builder = builder.lt(column, value)
-                        elif operator == "gte":
-                            builder = builder.gte(column, value)
-                        elif operator == "lte":
-                            builder = builder.lte(column, value)
-                        elif operator == "neq":
-                            builder = builder.neq(column, value)
-                        elif operator == "in":
-                            builder = builder.in_(column, value)
-                        elif operator == "like":
-                            builder = builder.like(column, value)
-
-            # Apply order if provided
-            if params and "order" in params:
-                for order_item in params["order"]:
-                    column = order_item.get("column")
-                    ascending = order_item.get("ascending", True)
-
-                    if column:
-                        builder = builder.order(column, ascending=ascending)
-
-            # Apply limit and offset if provided
-            if params and "limit" in params:
-                builder = builder.limit(params["limit"])
-
-            if params and "offset" in params:
-                builder = builder.offset(params["offset"])
-
-            response = builder.execute()
-
-            if hasattr(response, 'data'):
-                return response.data
-
-        return None
-
-    return await db_operation(operation_name, run_query)
 
 
 async def get_record(
@@ -201,197 +74,56 @@ async def get_record(
         schema: str = "game",
         operation_name: Optional[str] = None
 ) -> Optional[Dict[str, Any]]:
-    """
-    Get a single record by column value.
-
-    Args:
-        table: Table name
-        column: Column name to filter on
-        value: Value to filter by
-        schema: Schema name
-        operation_name: Name for logging
-
-    Returns:
-        Record as dictionary or None if not found
-    """
+    """Get a single record by column value with improved error handling."""
     op_name = operation_name or f"get_{table}_by_{column}"
+    logger.debug(f"Getting record: {op_name}, {value}")
 
-    params = {
-        "filters": [
-            {"column": column, "value": value}
-        ],
-        "limit": 1
-    }
+    # Try direct SQL first
+    try:
+        sql = f"SELECT * FROM {schema}.{table} WHERE {column} = '{value}' LIMIT 1;"
+        result = await execute_sql(sql)
+        if result and len(result) > 0:
+            logger.debug(f"SQL query found record in {table}")
+            return result[0]
+    except Exception as sql_error:
+        logger.warning(f"Direct SQL get_record failed: {sql_error}")
 
-    result = await execute_query("select", op_name, params, table, schema)
+    # Try using Supabase query builder
+    try:
+        client = get_supabase()
+        response = client.table(f"{schema}.{table}").select("*").eq(column, value).limit(1).execute()
+        if hasattr(response, 'data') and response.data and len(response.data) > 0:
+            return response.data[0]
+    except Exception as builder_error:
+        logger.warning(f"Query builder get_record failed: {builder_error}")
 
-    if result and len(result) > 0:
-        return result[0]
+        # Try without schema prefix
+        try:
+            response = client.table(table).select("*").eq(column, value).limit(1).execute()
+            if hasattr(response, 'data') and response.data and len(response.data) > 0:
+                return response.data[0]
+        except Exception as no_schema_error:
+            logger.warning(f"No schema get_record failed: {no_schema_error}")
+
     return None
 
 
-async def get_records(
-        table: str,
-        filters: Optional[List[Dict[str, Any]]] = None,
-        order: Optional[List[Dict[str, str]]] = None,
-        limit: Optional[int] = None,
-        offset: Optional[int] = None,
-        columns: str = "*",
-        schema: str = "game",
+async def call_api_function(
+        function_name: str,
+        params: Dict[str, Any],
         operation_name: Optional[str] = None
-) -> List[Dict[str, Any]]:
-    """
-    Get records with flexible filtering.
+) -> Optional[Dict[str, Any]]:
+    """Generic helper to call API functions with standard parameter handling."""
+    # Ensure function name has api_ prefix
+    api_name = function_name if function_name.startswith("api_") else f"api_{function_name}"
 
-    Args:
-        table: Table name
-        filters: List of filter conditions
-        order: List of order specifications
-        limit: Maximum number of records to return
-        offset: Number of records to skip
-        columns: Columns to select
-        schema: Schema name
-        operation_name: Name for logging
-
-    Returns:
-        List of records as dictionaries
-    """
-    op_name = operation_name or f"get_{table}_records"
-
-    params = {
-        "columns": columns
-    }
-
-    if filters:
-        params["filters"] = filters
-
-    if order:
-        params["order"] = order
-
-    if limit is not None:
-        params["limit"] = limit
-
-    if offset is not None:
-        params["offset"] = offset
-
-    result = await execute_query("select", op_name, params, table, schema)
-
-    if result:
+    logger.debug(f"Calling API function: {api_name}")
+    try:
+        result = await execute_function(api_name, params)
         return result
-    return []
-
-
-async def create_record(
-        table: str,
-        data: Dict[str, Any],
-        schema: str = "game",
-        operation_name: Optional[str] = None
-) -> Optional[Dict[str, Any]]:
-    """
-    Create a new record.
-
-    Args:
-        table: Table name
-        data: Record data to insert
-        schema: Schema name
-        operation_name: Name for logging
-
-    Returns:
-        Created record or None on error
-    """
-    op_name = operation_name or f"create_{table}_record"
-
-    result = await execute_query("insert", op_name, data, table, schema)
-
-    if result and len(result) > 0:
-        return result[0]
-    return None
-
-
-async def update_record(
-        table: str,
-        column: str,
-        value: Any,
-        data: Dict[str, Any],
-        schema: str = "game",
-        operation_name: Optional[str] = None
-) -> Optional[Dict[str, Any]]:
-    """
-    Update a record by column value.
-
-    Args:
-        table: Table name
-        column: Column name to filter on
-        value: Value to filter by
-        data: Record data to update
-        schema: Schema name
-        operation_name: Name for logging
-
-    Returns:
-        Updated record or None on error
-    """
-    op_name = operation_name or f"update_{table}_record"
-
-    params = data.copy()
-    params["filters"] = [
-        {"column": column, "value": value}
-    ]
-
-    result = await execute_query("update", op_name, params, table, schema)
-
-    if result and len(result) > 0:
-        return result[0]
-    return None
-
-
-async def delete_record(
-        table: str,
-        column: str,
-        value: Any,
-        schema: str = "game",
-        operation_name: Optional[str] = None
-) -> bool:
-    """
-    Delete a record by column value.
-
-    Args:
-        table: Table name
-        column: Column name to filter on
-        value: Value to filter by
-        schema: Schema name
-        operation_name: Name for logging
-
-    Returns:
-        True if successful, False otherwise
-    """
-    op_name = operation_name or f"delete_{table}_record"
-
-    params = {
-        "filters": [
-            {"column": column, "value": value}
-        ]
-    }
-
-    result = await execute_query("delete", op_name, params, table, schema)
-
-    if result is not None:
-        return True
-    return False
-
-
-# Helper function to build RPC parameters
-def build_params(params_dict: Dict[str, Any], param_prefix: str = "p_") -> Dict[str, Any]:
-    """
-    Build parameters for RPC calls with proper prefixing.
-
-    Args:
-        params_dict: Dictionary of parameters
-        param_prefix: Prefix to add to parameter names
-
-    Returns:
-        Dictionary with prefixed parameter names
-    """
-    return {f"{param_prefix}{k}": v for k, v in params_dict.items()}
+    except Exception as e:
+        logger.warning(f"API function call {api_name} failed: {e}")
+        return None
 
 
 # ===== Player-related functions =====
@@ -399,121 +131,127 @@ def build_params(params_dict: Dict[str, Any], param_prefix: str = "p_") -> Dict[
 @db_retry
 async def player_exists(telegram_id: str) -> bool:
     """Check if a player exists by telegram ID with robust error handling."""
+    logger.debug(f"Checking if player exists: {telegram_id}")
+
     try:
-        # Try first without schema prefix
+        # Try first with direct SQL query as it's most reliable
+        result = await execute_sql(
+            f"SELECT EXISTS (SELECT 1 FROM game.players WHERE telegram_id = '{telegram_id}');"
+        )
+        if result and isinstance(result, list) and len(result) > 0:
+            return bool(result[0].get('exists', False))
+    except Exception as e:
+        logger.warning(f"SQL player_exists query failed: {e}")
+
+    try:
+        # Try RPC without schema prefix
         params = {"p_telegram_id": telegram_id}
-        result = await execute_rpc("player_exists", params, schema_prefix=False)
+        result = await execute_function("player_exists", params, schema_prefix=False)
+        if isinstance(result, bool):
+            return result
         return bool(result)
     except Exception as e:
-        logger.warning(f"Initial player_exists call failed: {e}")
+        logger.warning(f"RPC player_exists call failed: {e}")
 
-        # Try direct SQL as ultimate fallback
-        try:
-            result = await execute_sql(
-                f"SELECT EXISTS (SELECT 1 FROM game.players WHERE telegram_id = '{telegram_id}');"
-            )
-            if result and isinstance(result, list) and len(result) > 0:
-                return result[0].get('exists', False)
-            return False
-        except Exception as sql_error:
-            logger.error(f"All player_exists fallbacks failed: {sql_error}")
-            return False
+    # Final fallback - check if we can get player info
+    try:
+        player = await get_record("players", "telegram_id", telegram_id)
+        return player is not None
+    except Exception as final_error:
+        logger.error(f"All player_exists attempts failed: {final_error}")
+        return False
 
-async def call_api_function(
-    function_name: str,
-    params: Dict[str, Any],
-    operation_name: Optional[str] = None
-) -> Optional[Dict[str, Any]]:
-    """Generic helper to call API functions with standard parameter handling."""
-    # Ensure function name has api_ prefix
-    api_name = function_name if function_name.startswith("api_") else f"api_{function_name}"
-    return await execute_rpc(api_name, params, operation_name=operation_name)
-
-@db_retry
-async def get_player(telegram_id: str) -> Optional[Dict[str, Any]]:
-    """Get player information by Telegram ID."""
-    return await call_api_function("get_player_status", {"p_telegram_id": telegram_id})
-
-@db_retry
-async def get_district_info(telegram_id: str, district_name: str, language: str = "en_US") -> Optional[Dict[str, Any]]:
-    """Get detailed information about a district."""
-    return await call_api_function(
-        "get_district_info",
-        {
-            "p_telegram_id": telegram_id,
-            "p_district_name": district_name,
-            "p_language": language
-        }
-    )
-
-
-async def handle_command_error(
-        update: Update,
-        language: str,
-        error: Exception,
-        command_name: str
-) -> None:
-    """Handle errors in command handlers with standardized messaging."""
-    logger.error(f"Error in {command_name}: {str(error)}")
-
-    error_text = str(error).lower()
-    message = _("An error occurred. Please try again later.", language)
-
-    if "database" in error_text or "sql" in error_text:
-        message = _("Database connection issue. Please try again later.", language)
-    elif "resource" in error_text:
-        message = _("You don't have enough resources for this action.", language)
-    elif "permission" in error_text:
-        message = _("You don't have permission to perform this action.", language)
-
-    await update.message.reply_text(message)
 
 @db_retry
 async def get_player_by_telegram_id(telegram_id: str) -> Optional[Dict[str, Any]]:
-    """
-    Get detailed player record by Telegram ID.
-
-    Args:
-        telegram_id: Player's Telegram ID
-
-    Returns:
-        Player record as a dictionary or None if not found
-    """
+    """Get detailed player record by Telegram ID."""
     return await get_record("players", "telegram_id", telegram_id)
 
 
 @db_retry
 async def register_player(telegram_id: str, name: str, ideology_score: int, language: str = "en_US") -> Optional[
     Dict[str, Any]]:
-    params = {
-        "p_telegram_id": telegram_id,
-        "p_name": name,
-        "p_ideology_score": ideology_score,
-        "p_language": language
-    }
+    """Register a new player with better error handling."""
+    logger.info(f"Registering new player: {telegram_id}, {name}")
 
-    # Try the registration API call
-    result = await execute_rpc("api_register_player", params)
+    # First, check if player already exists
+    exists = await player_exists(telegram_id)
+    if exists:
+        logger.warning(f"Player already exists: {telegram_id}")
+        return await get_player(telegram_id)
 
-    # If successful, also set the language
-    if result and result.get("success", False):
-        await set_player_language(telegram_id, language)
+    # Try RPC method first
+    try:
+        params = {
+            "p_telegram_id": telegram_id,
+            "p_name": name,
+            "p_ideology_score": ideology_score,
+            "p_language": language
+        }
+        result = await execute_function("api_register_player", params)
 
-    return result
+        # If successful, also set the language
+        if result:
+            await set_player_language(telegram_id, language)
+            return result
+    except Exception as rpc_error:
+        logger.warning(f"RPC register_player failed: {rpc_error}")
 
-# ===== Language and preferences =====
+    # Direct insert fallback
+    try:
+        # Create player record
+        client = get_supabase()
+        player_data = {
+            "telegram_id": telegram_id,
+            "name": name,
+            "ideology_score": ideology_score,
+            "language": language,
+            "remaining_actions": 1,
+            "remaining_quick_actions": 2,
+            "is_active": True
+        }
+
+        # Insert player
+        player_response = client.table("players").insert(player_data).execute()
+        if not hasattr(player_response, 'data') or not player_response.data:
+            # Try with schema prefix
+            player_response = client.table("game.players").insert(player_data).execute()
+
+        player_result = None
+        if hasattr(player_response, 'data') and player_response.data:
+            player_result = player_response.data[0]
+
+            # Create initial resources
+            resource_data = {
+                "player_id": player_result.get("player_id"),
+                "influence_amount": 5,
+                "money_amount": 10,
+                "information_amount": 3,
+                "force_amount": 2
+            }
+
+            # Insert resources
+            try:
+                resource_response = client.table("resources").insert(resource_data).execute()
+                if not hasattr(resource_response, 'data') or not resource_response.data:
+                    # Try with schema prefix
+                    client.table("game.resources").insert(resource_data).execute()
+            except Exception as resource_error:
+                logger.warning(f"Error creating initial resources: {resource_error}")
+
+            # Set language
+            await set_player_language(telegram_id, language)
+
+            return player_result
+    except Exception as direct_error:
+        logger.error(f"Direct register_player failed: {direct_error}")
+
+    return None
+
 
 @db_retry
 async def get_player_language(telegram_id: str) -> str:
-    """
-    Get player's preferred language.
-
-    Args:
-        telegram_id: Player's Telegram ID
-
-    Returns:
-        Language code (en_US or ru_RU)
-    """
+    """Get player's preferred language."""
     player = await get_record("players", "telegram_id", telegram_id)
     if player and "language" in player:
         return player["language"]
@@ -522,57 +260,83 @@ async def get_player_language(telegram_id: str) -> str:
 
 @db_retry
 async def set_player_language(telegram_id: str, language: str) -> bool:
-    """
-    Set player's preferred language.
-
-    Args:
-        telegram_id: Player's Telegram ID
-        language: Language code (en_US or ru_RU)
-
-    Returns:
-        True if successful, False otherwise
-    """
+    """Set player's preferred language."""
     if language not in ["en_US", "ru_RU"]:
         return False
 
-    player = await get_record("players", "telegram_id", telegram_id)
-    if not player:
+    try:
+        # Direct SQL update as it's most reliable
+        sql = f"UPDATE game.players SET language = '{language}' WHERE telegram_id = '{telegram_id}';"
+        await execute_sql(sql)
+        return True
+    except Exception as e:
+        logger.warning(f"SQL set_player_language failed: {e}")
+
+    try:
+        # Try with Supabase query builder
+        client = get_supabase()
+        response = client.table("players").update({"language": language}).eq("telegram_id", telegram_id).execute()
+
+        if not (hasattr(response, 'data') and response.data):
+            # Try with schema prefix
+            response = client.table("game.players").update({"language": language}).eq("telegram_id",
+                                                                                      telegram_id).execute()
+
+        return hasattr(response, 'data') and response.data
+    except Exception as e:
+        logger.error(f"Query builder set_player_language failed: {e}")
         return False
 
-    result = await update_record("players", "telegram_id", telegram_id, {"language": language})
-    return result is not None
-
-
-# ===== Game cycle and actions =====
 
 @db_retry
-async def get_cycle_info(language: str = "en_US") -> Optional[Dict[str, Any]]:
-    """
-    Get current game cycle information.
+async def get_player(telegram_id: str) -> Optional[Dict[str, Any]]:
+    """Get player information by Telegram ID."""
+    result = await call_api_function("get_player_status", {"p_telegram_id": telegram_id})
 
-    Args:
-        language: Language code for translations
+    # Fallback to direct query if API fails
+    if result is None:
+        logger.debug("API get_player_status failed, trying direct query")
+        player = await get_player_by_telegram_id(telegram_id)
+        if player:
+            # Minimal player info structure
+            return {
+                "player_name": player.get("name", "Unknown"),
+                "ideology_score": player.get("ideology_score", 0),
+                "resources": await get_player_resources(telegram_id),
+                "actions_remaining": player.get("remaining_actions", 0),
+                "quick_actions_remaining": player.get("remaining_quick_actions", 0)
+            }
 
-    Returns:
-        Cycle information as a dictionary
-    """
-    params = {"p_language": language}
-    return await execute_rpc("api_get_cycle_info", params)
+    return result
 
 
-@db_retry
-async def is_submission_open() -> bool:
-    """
-    Check if submissions are open for the current cycle.
+async def get_player_resources(telegram_id: str) -> Dict[str, int]:
+    """Get player resources directly from the database as a fallback."""
+    try:
+        # Get player ID first
+        player = await get_player_by_telegram_id(telegram_id)
+        if not player or "player_id" not in player:
+            return {"influence": 0, "money": 0, "information": 0, "force": 0}
 
-    Returns:
-        True if submissions are open, False otherwise
-    """
-    result = await execute_rpc("is_submission_open", {})
-    if isinstance(result, bool):
-        return result
-    return bool(result)
+        player_id = player["player_id"]
 
+        # Get resources by player ID
+        resources = await get_record("resources", "player_id", player_id)
+        if resources:
+            return {
+                "influence": resources.get("influence_amount", 0),
+                "money": resources.get("money_amount", 0),
+                "information": resources.get("information_amount", 0),
+                "force": resources.get("force_amount", 0)
+            }
+    except Exception as e:
+        logger.warning(f"Error getting player resources: {e}")
+
+    # Default empty resources
+    return {"influence": 0, "money": 0, "information": 0, "force": 0}
+
+
+# ===== Game action functions =====
 
 @db_retry
 async def submit_action(
@@ -588,25 +352,9 @@ async def submit_action(
         expected_outcome: Optional[str] = None,
         language: str = "en_US"
 ) -> Optional[Dict[str, Any]]:
-    """
-    Submit an action.
+    """Submit an action with improved error handling."""
+    logger.info(f"Submitting action for {telegram_id}: {action_type}, quick={is_quick_action}")
 
-    Args:
-        telegram_id: Player's Telegram ID
-        action_type: Type of action
-        is_quick_action: Whether this is a quick action
-        district_name: Target district name
-        target_player_name: Target player name
-        target_politician_name: Target politician name
-        resource_type: Type of resource to use
-        resource_amount: Amount of resource to use
-        physical_presence: Whether player is physically present
-        expected_outcome: Expected outcome of action
-        language: Language code for translations
-
-    Returns:
-        Action result information
-    """
     params = {
         "p_telegram_id": telegram_id,
         "p_action_type": action_type,
@@ -620,78 +368,50 @@ async def submit_action(
         "p_expected_outcome": expected_outcome,
         "p_language": language
     }
-    return await execute_rpc("api_submit_action", params)
+
+    try:
+        result = await execute_function("api_submit_action", params)
+        if result and result.get("success"):
+            logger.info(f"Successfully submitted action: {action_type}")
+        else:
+            logger.warning(f"Action submission returned unsuccessful result: {result}")
+        return result
+    except Exception as e:
+        logger.error(f"Error submitting action: {e}")
+
+        # Create minimal error response as fallback
+        return {
+            "success": False,
+            "message": f"Error: {str(e)}",
+            "action_type": action_type
+        }
 
 
 @db_retry
 async def cancel_latest_action(telegram_id: str, language: str = "en_US") -> Optional[Dict[str, Any]]:
-    """
-    Cancel the latest action.
-
-    Args:
-        telegram_id: Player's Telegram ID
-        language: Language code for translations
-
-    Returns:
-        Cancellation result information
-    """
+    """Cancel the latest action."""
     params = {
         "p_telegram_id": telegram_id,
         "p_language": language
     }
-    return await execute_rpc("api_cancel_latest_action", params)
-
-
-# ===== Districts and map =====
-
-@db_retry
-async def get_districts() -> List[Dict[str, Any]]:
-    """
-    Get all districts.
-
-    Returns:
-        List of district records
-    """
-    return await get_records("districts", order=[{"column": "name", "ascending": True}])
+    return await call_api_function("cancel_latest_action", params)
 
 
 @db_retry
-async def get_district_info(telegram_id: str, district_name: str, language: str = "en_US") -> Optional[Dict[str, Any]]:
-    """
-    Get detailed information about a district.
-
-    Args:
-        telegram_id: Player's Telegram ID
-        district_name: District name
-        language: Language code for translations
-
-    Returns:
-        District information
-    """
-    params = {
-        "p_telegram_id": telegram_id,
-        "p_district_name": district_name,
-        "p_language": language
-    }
-    return await execute_rpc("api_get_district_info", params)
-
-
-@db_retry
-async def get_map_data(language: str = "en_US") -> Optional[Dict[str, Any]]:
-    """
-    Get map data with district control information.
-
-    Args:
-        language: Language code for translations
-
-    Returns:
-        Map data
-    """
+async def get_cycle_info(language: str = "en_US") -> Optional[Dict[str, Any]]:
+    """Get current game cycle information."""
     params = {"p_language": language}
-    return await execute_rpc("api_get_map_data", params)
+    return await call_api_function("get_cycle_info", params)
 
 
-# ===== Resources and economy =====
+@db_retry
+async def is_submission_open() -> bool:
+    """Check if submissions are open for the current cycle."""
+    result = await execute_function("is_submission_open", {})
+    if isinstance(result, bool):
+        return result
+    return bool(result)
+
 
 @db_retry
 async def exchange_resources(
@@ -701,19 +421,7 @@ async def exchange_resources(
         amount: int,
         language: str = "en_US"
 ) -> Optional[Dict[str, Any]]:
-    """
-    Exchange resources.
-
-    Args:
-        telegram_id: Player's Telegram ID
-        from_resource: Source resource type
-        to_resource: Target resource type
-        amount: Amount to exchange
-        language: Language code for translations
-
-    Returns:
-        Exchange result information
-    """
+    """Exchange resources."""
     params = {
         "p_telegram_id": telegram_id,
         "p_from_resource": from_resource,
@@ -721,98 +429,151 @@ async def exchange_resources(
         "p_amount": amount,
         "p_language": language
     }
-    return await execute_rpc("api_exchange_resources", params)
+    return await call_api_function("api_exchange_resources", params)
+
+
+@db_retry
+async def get_district_info(telegram_id: str, district_name: str, language: str = "en_US") -> Optional[Dict[str, Any]]:
+    """Get detailed information about a district."""
+    params = {
+        "p_telegram_id": telegram_id,
+        "p_district_name": district_name,
+        "p_language": language
+    }
+    return await call_api_function("api_get_district_info", params)
+
+
+@db_retry
+async def get_districts() -> List[Dict[str, Any]]:
+    """Get all districts."""
+    return await get_records("districts", order=[{"column": "name", "ascending": True}])
+
+
+async def get_records(
+        table: str,
+        filters: Optional[List[Dict[str, Any]]] = None,
+        order: Optional[List[Dict[str, str]]] = None,
+        limit: Optional[int] = None,
+        schema: str = "game"
+) -> List[Dict[str, Any]]:
+    """Get records with filtering options."""
+    try:
+        client = get_supabase()
+        query = client.table(f"{schema}.{table}").select("*")
+
+        if filters:
+            for filter_item in filters:
+                column = filter_item.get("column")
+                value = filter_item.get("value")
+                if column and value is not None:
+                    query = query.eq(column, value)
+
+        if order:
+            for order_item in order:
+                column = order_item.get("column")
+                ascending = order_item.get("ascending", True)
+                if column:
+                    query = query.order(column, ascending=ascending)
+
+        if limit:
+            query = query.limit(limit)
+
+        response = query.execute()
+
+        if hasattr(response, 'data'):
+            return response.data
+    except Exception as e:
+        logger.warning(f"Error getting records from {table}: {e}")
+        # Try SQL fallback
+        try:
+            sql = f"SELECT * FROM {schema}.{table}"
+            conditions = []
+
+            if filters:
+                for filter_item in filters:
+                    column = filter_item.get("column")
+                    value = filter_item.get("value")
+                    if column and value is not None:
+                        conditions.append(f"{column} = '{value}'")
+
+            if conditions:
+                sql += " WHERE " + " AND ".join(conditions)
+
+            if order:
+                order_clauses = []
+                for order_item in order:
+                    column = order_item.get("column")
+                    ascending = order_item.get("ascending", True)
+                    if column:
+                        direction = "ASC" if ascending else "DESC"
+                        order_clauses.append(f"{column} {direction}")
+
+                if order_clauses:
+                    sql += " ORDER BY " + ", ".join(order_clauses)
+
+            if limit:
+                sql += f" LIMIT {limit}"
+
+            result = await execute_sql(sql)
+            if result:
+                return result
+        except Exception as sql_error:
+            logger.error(f"SQL fallback for get_records failed: {sql_error}")
+
+    return []
+
+
+@db_retry
+async def get_map_data(language: str = "en_US") -> Optional[Dict[str, Any]]:
+    """Get map data with district control information."""
+    params = {"p_language": language}
+    return await call_api_function("api_get_map_data", params)
 
 
 @db_retry
 async def check_income(telegram_id: str, language: str = "en_US") -> Optional[Dict[str, Any]]:
-    """
-    Check expected resource income.
-
-    Args:
-        telegram_id: Player's Telegram ID
-        language: Language code for translations
-
-    Returns:
-        Income information
-    """
+    """Check expected resource income."""
     params = {
         "p_telegram_id": telegram_id,
         "p_language": language
     }
-    return await execute_rpc("api_check_income", params)
+    return await call_api_function("api_check_income", params)
 
-
-# ===== News and information =====
 
 @db_retry
 async def get_latest_news(telegram_id: str, count: int = 5, language: str = "en_US") -> Optional[Dict[str, Any]]:
-    """
-    Get latest news.
-
-    Args:
-        telegram_id: Player's Telegram ID
-        count: Number of news items to retrieve
-        language: Language code for translations
-
-    Returns:
-        News information
-    """
+    """Get latest news."""
     params = {
         "p_telegram_id": telegram_id,
         "p_count": count,
         "p_language": language
     }
-    return await execute_rpc("api_get_latest_news", params)
+    return await call_api_function("api_get_latest_news", params)
 
-
-# ===== Politicians =====
 
 @db_retry
 async def get_politicians(telegram_id: str, type_filter: str = "all", language: str = "en_US") -> Optional[
     Dict[str, Any]]:
-    """
-    Get politicians.
-
-    Args:
-        telegram_id: Player's Telegram ID
-        type_filter: Type of politicians to retrieve (local, international, or all)
-        language: Language code for translations
-
-    Returns:
-        Politicians information
-    """
+    """Get politicians."""
     params = {
         "p_telegram_id": telegram_id,
         "p_type": type_filter,
         "p_language": language
     }
-    return await execute_rpc("api_get_politicians", params)
+    return await call_api_function("api_get_politicians", params)
 
 
 @db_retry
 async def get_politician_status(telegram_id: str, politician_name: str, language: str = "en_US") -> Optional[
     Dict[str, Any]]:
-    """
-    Get detailed information about a politician.
-
-    Args:
-        telegram_id: Player's Telegram ID
-        politician_name: Politician name
-        language: Language code for translations
-
-    Returns:
-        Politician information
-    """
+    """Get detailed information about a politician."""
     params = {
         "p_telegram_id": telegram_id,
         "p_politician_name": politician_name,
         "p_language": language
     }
-    return await execute_rpc("api_get_politician_status", params)
+    return await call_api_function("api_get_politician_status", params)
 
-
-# ===== Collective actions =====
 
 @db_retry
 async def initiate_collective_action(
@@ -825,22 +586,7 @@ async def initiate_collective_action(
         physical_presence: bool = False,
         language: str = "en_US"
 ) -> Optional[Dict[str, Any]]:
-    """
-    Initiate a collective action.
-
-    Args:
-        telegram_id: Player's Telegram ID
-        action_type: Type of action
-        district_name: Target district name
-        target_player_name: Target player name
-        resource_type: Type of resource to use
-        resource_amount: Amount of resource to use
-        physical_presence: Whether player is physically present
-        language: Language code for translations
-
-    Returns:
-        Collective action result information
-    """
+    """Initiate a collective action."""
     params = {
         "p_telegram_id": telegram_id,
         "p_action_type": action_type,
@@ -851,7 +597,7 @@ async def initiate_collective_action(
         "p_physical_presence": physical_presence,
         "p_language": language
     }
-    return await execute_rpc("api_initiate_collective_action", params)
+    return await call_api_function("api_initiate_collective_action", params)
 
 
 @db_retry
@@ -863,20 +609,7 @@ async def join_collective_action(
         physical_presence: bool = False,
         language: str = "en_US"
 ) -> Optional[Dict[str, Any]]:
-    """
-    Join a collective action.
-
-    Args:
-        telegram_id: Player's Telegram ID
-        collective_action_id: Collective action ID
-        resource_type: Type of resource to contribute
-        resource_amount: Amount of resource to contribute
-        physical_presence: Whether player is physically present
-        language: Language code for translations
-
-    Returns:
-        Join result information
-    """
+    """Join a collective action."""
     params = {
         "p_telegram_id": telegram_id,
         "p_collective_action_id": collective_action_id,
@@ -885,17 +618,12 @@ async def join_collective_action(
         "p_physical_presence": physical_presence,
         "p_language": language
     }
-    return await execute_rpc("api_join_collective_action", params)
+    return await call_api_function("api_join_collective_action", params)
 
 
 @db_retry
 async def get_active_collective_actions() -> List[Dict[str, Any]]:
-    """
-    Get all active collective actions.
-
-    Returns:
-        List of active collective actions
-    """
+    """Get all active collective actions."""
     return await get_records(
         "collective_actions",
         filters=[{"column": "status", "value": "active"}],
@@ -905,15 +633,7 @@ async def get_active_collective_actions() -> List[Dict[str, Any]]:
 
 @db_retry
 async def get_collective_action(action_id: str) -> Optional[Dict[str, Any]]:
-    """
-    Get a collective action by ID.
-
-    Args:
-        action_id: Collective action ID
-
-    Returns:
-        Collective action record
-    """
+    """Get a collective action by ID."""
     return await get_record("collective_actions", "collective_action_id", action_id)
 
 
@@ -921,33 +641,16 @@ async def get_collective_action(action_id: str) -> Optional[Dict[str, Any]]:
 
 @db_retry
 async def admin_process_actions(telegram_id: str) -> Optional[Dict[str, Any]]:
-    """
-    Process all pending actions (admin only).
-
-    Args:
-        telegram_id: Admin's Telegram ID
-
-    Returns:
-        Process result information
-    """
+    """Process all pending actions (admin only)."""
     params = {"p_telegram_id": telegram_id}
-    return await execute_rpc("api_admin_process_actions", params)
+    return await call_api_function("api_admin_process_actions", params)
 
 
 @db_retry
 async def admin_generate_international_effects(telegram_id: str, count: int = 2) -> Optional[Dict[str, Any]]:
-    """
-    Generate international effects (admin only).
-
-    Args:
-        telegram_id: Admin's Telegram ID
-        count: Number of effects to generate
-
-    Returns:
-        Generation result information
-    """
+    """Generate international effects (admin only)."""
     params = {
         "p_telegram_id": telegram_id,
         "p_count": count
     }
-    return await execute_rpc("api_admin_generate_international_effects", params)
+    return await call_api_function("api_admin_generate_international_effects", params)

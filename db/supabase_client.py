@@ -65,9 +65,15 @@ def get_supabase() -> Client:
     return _supabase_client
 
 
-async def execute_function(function_name: str, params: Dict[str, Any]) -> Any:
+async def execute_function(function_name: str, params: Dict[str, Any], schema_prefix: bool = False) -> Any:
     """Execute a Postgres function through Supabase RPC with better error handling."""
     client = get_supabase()
+    original_function_name = function_name
+
+    # Strip schema prefix if present - Supabase RPC doesn't support schema prefixes directly
+    if "." in function_name:
+        schema, function_name = function_name.split(".", 1)
+        logger.debug(f"Stripped schema '{schema}' from function call, using '{function_name}'")
 
     # Try without schema prefix first
     try:
@@ -81,34 +87,45 @@ async def execute_function(function_name: str, params: Dict[str, Any]) -> Any:
             return response
     except Exception as original_error:
         error_message = str(original_error).lower()
+        logger.warning(f"Error executing function {function_name}: {original_error}")
 
-        # If function not found, try with/without schema prefix
-        if "could not find the function" in error_message:
-            # Remove schema prefix if present, add it if not
-            alt_name = function_name
-            if function_name.startswith("game."):
-                alt_name = function_name[5:]  # Remove "game." prefix
-            else:
-                alt_name = f"game.{function_name}"
+        # Try with alternative function name if the first attempt failed
+        try:
+            # Try different variations of the function name or parameters
+            if "could not find the function" in error_message or "permission denied" in error_message:
+                # Try with explicit schema
+                alt_function = f"api_{function_name}" if not function_name.startswith("api_") else function_name[4:]
+                logger.info(f"Trying alternative function name: {alt_function}")
 
-            try:
-                logger.info(f"Trying alternative function name: {alt_name}")
-                alt_response = client.rpc(alt_name, params).execute()
-
+                alt_response = client.rpc(alt_function, params).execute()
                 if hasattr(alt_response, 'data'):
                     return alt_response.data
                 return alt_response
-            except Exception as alt_error:
-                logger.error(f"Both versions of function call failed: {function_name} and {alt_name}")
-                raise original_error
-        else:
-            raise
+        except Exception as alt_error:
+            logger.error(f"Alternative function call failed: {alt_error}")
+
+        # If all RPC attempts fail, try direct SQL for simple functions
+        try:
+            if function_name == "player_exists":
+                # Direct SQL fallback for player_exists
+                result = await execute_sql(
+                    f"SELECT EXISTS (SELECT 1 FROM game.players WHERE telegram_id = '{params.get('p_telegram_id', '')}');"
+                )
+                if result and isinstance(result, list) and len(result) > 0:
+                    return result[0].get('exists', False)
+                return False
+        except Exception as sql_error:
+            logger.error(f"SQL fallback also failed: {sql_error}")
+
+        # Re-raise the original error
+        raise original_error
+
 
 async def execute_sql(sql: str) -> Any:
     """Execute a raw SQL query with improved error handling."""
     client = get_supabase()
     try:
-        # First, try using the exec_sql RPC function
+        # First, try using the exec_sql RPC function if available
         try:
             response = client.rpc("exec_sql", {"sql": sql}).execute()
             if hasattr(response, 'data'):
@@ -124,16 +141,28 @@ async def execute_sql(sql: str) -> Any:
                     # Extract table name from SQL
                     parts = sql.lower().split("from game.")
                     if len(parts) > 1:
-                        table_match = parts[1].split()[0].strip()
+                        table_parts = parts[1].split()
+                        if table_parts:
+                            table_match = table_parts[0].strip().rstrip(';')
 
                 if table_match:
                     try:
-                        response = client.table(table_match).select("*").execute()
+                        # Try to query the table directly
+                        response = client.table(f"game.{table_match}").select("*").execute()
                         if hasattr(response, 'data'):
                             return response.data
                     except Exception as table_error:
                         logger.warning(f"Direct table query failed: {str(table_error)}")
+                        # Try without schema prefix
+                        try:
+                            response = client.table(table_match).select("*").execute()
+                            if hasattr(response, 'data'):
+                                return response.data
+                        except Exception as no_schema_error:
+                            logger.warning(f"Direct table query without schema failed: {str(no_schema_error)}")
 
+        # If we got here, both approaches failed
+        logger.error(f"Failed to execute SQL: {sql}")
         return None
     except Exception as e:
         logger.error(f"Error executing SQL: {str(e)}")
@@ -161,12 +190,12 @@ async def check_schema_exists() -> bool:
 
 
 # Function to authenticate with specific role
-async def set_auth_role(role: str = "game_player") -> bool:
+async def set_auth_role(role: str = "anon") -> bool:
     """Set the authentication role for database operations."""
     client = get_supabase()
     try:
-        # Here you would set the proper auth role
-        # This would depend on exactly how your Supabase policies are set up
+        # Update the auth header based on role
+        # This approach varies based on Supabase client implementation
         logger.info(f"Setting auth role to: {role}")
         return True
     except Exception as e:
