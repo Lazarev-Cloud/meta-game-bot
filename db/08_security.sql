@@ -8,6 +8,8 @@ CREATE ROLE game_anonymous;
 
 -- Grant usage on schema
 GRANT USAGE ON SCHEMA game TO game_admin, game_player, game_anonymous;
+GRANT USAGE ON SCHEMA game TO game_anonymous;
+GRANT EXECUTE ON FUNCTION game.player_exists TO game_anonymous;
 
 -- Administrator permissions (full access)
 GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA game TO game_admin;

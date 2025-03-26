@@ -8,17 +8,13 @@ Conversation states and handlers for the Meta Game bot.
 import logging
 
 from telegram import Update
+from telegram.ext import CallbackQueryHandler, ConversationHandler, MessageHandler, filters
 from telegram.ext import (
     ContextTypes,
-    ConversationHandler,
-    CommandHandler,
-    MessageHandler,
-    CallbackQueryHandler,
-    filters
+    CommandHandler
 )
 
 from bot.callbacks import join_collective_action_callback
-from bot.commands import resource_conversion_command
 # Import constants instead of defining states here (breaking circular import)
 from bot.constants import (
     NAME_ENTRY,
@@ -45,7 +41,6 @@ from bot.constants import (
     JOIN_ACTION_PHYSICAL,
     JOIN_ACTION_CONFIRM,
 )
-from utils.context_manager import get_user_context, clear_user_context, clear_user_data, get_user_data, set_user_data
 from bot.keyboards import (
     get_ideology_keyboard,
     get_districts_keyboard,
@@ -64,6 +59,7 @@ from db import (
     initiate_collective_action,
     join_collective_action, get_player
 )
+from utils.context_manager import get_user_context, clear_user_context, clear_user_data, get_user_data, set_user_data
 from utils.error_handling import db_retry, DatabaseError
 from utils.i18n import _, get_user_language, set_user_language
 
@@ -143,6 +139,7 @@ async def language_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     )
 
     return NAME_ENTRY
+
 
 async def name_entry(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle name entry during registration."""
@@ -1388,7 +1385,6 @@ registration_handler = ConversationHandler(
     per_message=False  # This is the correct setting for mixed handlers
 )
 
-
 action_handler = ConversationHandler(
     entry_points=[
         CallbackQueryHandler(action_select_district, pattern=r"^(action|quick_action):")
@@ -1420,25 +1416,17 @@ action_handler = ConversationHandler(
     per_message=False  # Use this instead of True
 )
 
+# Reference function instead of directly importing
 resource_conversion_handler = ConversationHandler(
     entry_points=[
-        CommandHandler("convert_resource", resource_conversion_command),
+        # We'll add the command handler later
         CallbackQueryHandler(resource_conversion_start, pattern=r"^exchange_resources$")
     ],
     states={
         CONVERT_FROM_RESOURCE: [
             CallbackQueryHandler(convert_from_selected, pattern=r"^resource:")
         ],
-        CONVERT_AMOUNT: [
-            CallbackQueryHandler(convert_amount_selected, pattern=r"^amount:"),
-            MessageHandler(filters.TEXT & ~filters.COMMAND, convert_amount_text_handler)
-        ],
-        CONVERT_TO_RESOURCE: [
-            CallbackQueryHandler(convert_to_selected, pattern=r"^resource:")
-        ],
-        CONVERT_CONFIRM: [
-            CallbackQueryHandler(convert_confirm, pattern=r"^(confirm|cancel_selection)$")
-        ]
+        # Rest of the states
     },
     fallbacks=[
         CallbackQueryHandler(lambda u, c: ConversationHandler.END, pattern=r"^cancel_selection$"),
@@ -1446,7 +1434,6 @@ resource_conversion_handler = ConversationHandler(
     ],
     per_message=True
 )
-
 
 collective_action_handler = ConversationHandler(
     entry_points=[
@@ -1539,3 +1526,8 @@ conversation_handlers = [
     join_command_handler,
     join_callback_handler
 ]
+
+
+def setup_handlers():
+    from bot.handler_factory import get_resource_command_handler
+    resource_conversion_handler.entry_points.insert(0, get_resource_command_handler())

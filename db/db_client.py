@@ -91,7 +91,7 @@ async def get_record(
     # Try using Supabase query builder
     try:
         client = get_supabase()
-        response = client.table(f"{schema}.{table}").select("*").eq(column, value).limit(1).execute()
+        response = client.table(f"{table}").select("*").eq(column, value).limit(1).execute()
         if hasattr(response, 'data') and response.data and len(response.data) > 0:
             return response.data[0]
     except Exception as builder_error:
@@ -146,7 +146,12 @@ async def player_exists(telegram_id: str) -> bool:
     try:
         # Try RPC without schema prefix
         params = {"p_telegram_id": telegram_id}
-        result = await execute_function("player_exists", params, schema_prefix=False)
+        try:
+            result = await execute_function("player_exists", params, schema_prefix=False)
+        except Exception:
+            # Then try with explicit function path
+            result = await execute_sql("SELECT game.player_exists($1)", [telegram_id])
+
         if isinstance(result, bool):
             return result
         return bool(result)

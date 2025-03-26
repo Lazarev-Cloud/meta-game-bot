@@ -56,13 +56,14 @@ def init_supabase() -> Client:
 
 
 def get_supabase() -> Client:
-    """Get the Supabase client instance, initializing if necessary."""
-    global _supabase_client
-
-    if _supabase_client is None:
-        return init_supabase()
-
-    return _supabase_client
+    client = init_supabase()
+    # Set schema to 'game' instead of default 'public'
+    try:
+        # Add this line to explicitly set schema
+        client.postgrest.schema('game')
+    except Exception as e:
+        logger.warning(f"Could not set schema: {e}")
+    return client
 
 
 async def execute_function(function_name: str, params: Dict[str, Any], schema_prefix: bool = False) -> Any:
