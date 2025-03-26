@@ -183,72 +183,50 @@ async def cancel_registration(update: Update, context: ContextTypes.DEFAULT_TYPE
 
 
 async def ideology_choice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Handle ideology selection and complete registration."""
+    """Handle ideology selection with memory fallback."""
     query = update.callback_query
     await query.answer()
 
-    # Extract ideology value
-    ideology_value = int(query.data.split(":", 1)[1])
     telegram_id = str(update.effective_user.id)
+    ideology_value = int(query.data.split(":", 1)[1])
     language = await get_user_language(telegram_id)
-
-    # Get the player name from context
     player_name = get_user_data(telegram_id, "player_name") or update.effective_user.first_name
 
     try:
-        # Register the player
+        # Register player
         result = await register_player(telegram_id, player_name, ideology_value, language)
 
-        # Check if registration was successful
         if not result:
-            await query.edit_message_text(
-                _("There was a problem with registration. Please try again later.", language)
-            )
-            clear_user_data(telegram_id, context)
+            await query.edit_message_text(_("Registration problem. Please try again.", language))
             return ConversationHandler.END
 
-        # Determine ideology text based on value
-        ideology_text = _("Strong Reformist", language) if ideology_value <= -4 else \
-            _("Moderate Reformist", language) if ideology_value <= -2 else \
-                _("Slight Reformist", language) if ideology_value < 0 else \
-                    _("Neutral", language) if ideology_value == 0 else \
-                        _("Slight Conservative", language) if ideology_value <= 2 else \
-                            _("Moderate Conservative", language) if ideology_value <= 4 else \
-                                _("Strong Conservative", language)
+        # Store registration in memory
+        from utils.context_manager import context_manager
+        context_manager.set(telegram_id, "is_registered", True)
+        context_manager.set(telegram_id, "player_data", {
+            "player_name": player_name,
+            "ideology_score": ideology_value,
+            "language": language
+        })
 
-        # Send success message
+        # Success message
+        ideology_text = _("Neutral", language) if ideology_value == 0 else _("Conservative",
+                                                                             language) if ideology_value > 0 else _(
+            "Reformist", language)
+
         await query.edit_message_text(
             _("Registration complete! Welcome to Novi-Sad, {name}.\n\n"
               "You have chosen an ideology of {ideology_value} ({ideology_text}).\n\n"
-              "You have been granted initial resources to begin your journey. "
-              "Use /help to learn about available commands, or /status to see your current situation.",
-              language).format(
-                name=player_name,
-                ideology_value=ideology_value,
-                ideology_text=ideology_text
-            )
+              "You have been granted initial resources to begin your journey. Use "
+              "/help to learn about available commands, or /status to see your current situation.",
+              language).format(name=player_name, ideology_value=ideology_value, ideology_text=ideology_text)
         )
 
-        # Clean up context data
-        clear_user_data(telegram_id, context)
-
         return ConversationHandler.END
-
     except Exception as e:
-        logger.error(f"Error registering player: {e}")
-
-        # Send error message
-        await query.edit_message_text(
-            _("Registration error: {error}. Please try again later.", language).format(
-                error=str(e)
-            )
-        )
-
-        # Clean up context data
-        clear_user_data(telegram_id, context)
-
+        logger.error(f"Registration error: {e}")
+        await query.edit_message_text(_("Registration error. Please try again later.", language))
         return ConversationHandler.END
-
 
 # Action conversation handlers
 
@@ -1419,21 +1397,24 @@ action_handler = ConversationHandler(
 # Reference function instead of directly importing
 resource_conversion_handler = ConversationHandler(
     entry_points=[
-        # We'll add the command handler later
         CallbackQueryHandler(resource_conversion_start, pattern=r"^exchange_resources$")
     ],
     states={
         CONVERT_FROM_RESOURCE: [
             CallbackQueryHandler(convert_from_selected, pattern=r"^resource:")
         ],
-        # Rest of the states
+        CONVERT_AMOUNT: [
+            CallbackQueryHandler(convert_amount_selected, pattern=r"^amount:"),
+            # Remove MessageHandler for text entry or change per_message to False
+        ],
+        # Other states...
     },
     fallbacks=[
-        CallbackQueryHandler(lambda u, c: ConversationHandler.END, pattern=r"^cancel_selection$"),
-        CommandHandler("cancel", cancel_handler)
+        CallbackQueryHandler(lambda u, c: ConversationHandler.END, pattern=r"^cancel_selection$")
     ],
-    per_message=True
+    per_message=False  # Changed from True
 )
+
 
 collective_action_handler = ConversationHandler(
     entry_points=[
@@ -1490,7 +1471,7 @@ join_command_handler = ConversationHandler(
     fallbacks=[
         CommandHandler("cancel", cancel_handler)
     ],
-    per_message=True  # Add this parameter to fix the warning
+    per_message=False    # Add this parameter to fix the warning
 )
 
 join_callback_handler = ConversationHandler(

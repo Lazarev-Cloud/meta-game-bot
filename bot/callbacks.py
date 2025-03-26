@@ -1035,6 +1035,11 @@ async def politician_info_callback(update: Update, context: ContextTypes.DEFAULT
     except Exception as e:
         await handle_error(update, language, e, "politician_info_callback")
 
+async def help_section_callback_wrapper(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Wrapper to extract section from callback data."""
+    if update.callback_query and update.callback_query.data:
+        section = update.callback_query.data.split(":", 1)[1]
+        await help_section_callback(update, context, section)
 
 async def action_button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle the action button from main menu."""
@@ -1334,7 +1339,7 @@ def register_callbacks(registry) -> None:
     registry.register_callback("^cancel_selection$", cancel_selection_callback)
 
     # Help callbacks
-    registry.register_callback("^help:", help_section_callback)
+    registry.register_callback("^help:", help_section_callback_wrapper)
 
     # Navigation callbacks
     registry.register_callback("^(back_to_menu|help)$", general_callback)

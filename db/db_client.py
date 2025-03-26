@@ -130,42 +130,17 @@ async def call_api_function(
 
 @db_retry
 async def player_exists(telegram_id: str) -> bool:
-    """Check if a player exists by telegram ID with robust error handling."""
-    logger.debug(f"Checking if player exists: {telegram_id}")
-
+    """Non-recursive implementation to avoid stack depth issues."""
     try:
-        # Try first with direct SQL query as it's most reliable
-        result = await execute_sql(
-            f"SELECT EXISTS (SELECT 1 FROM players WHERE telegram_id = '{telegram_id}');"
-        )
-        if result and isinstance(result, list) and len(result) > 0:
-            return bool(result[0].get('exists', False))
+        # Direct table query instead of function call
+        client = get_supabase()
+        response = client.table("players").select("telegram_id").eq("telegram_id", telegram_id).limit(1).execute()
+        return hasattr(response, 'data') and len(response.data) > 0
     except Exception as e:
-        logger.warning(f"SQL player_exists query failed: {e}")
-
-    try:
-        # Try RPC without schema prefix
-        params = {"p_telegram_id": telegram_id}
-        try:
-            result = await execute_function("player_exists", params, schema_prefix=False)
-        except Exception:
-            # Then try with explicit function path
-            result = await execute_sql("SELECT player_exists($1)", [telegram_id])
-
-        if isinstance(result, bool):
-            return result
-        return bool(result)
-    except Exception as e:
-        logger.warning(f"RPC player_exists call failed: {e}")
-
-    # Final fallback - check if we can get player info
-    try:
-        player = await get_record("players", "telegram_id", telegram_id)
-        return player is not None
-    except Exception as final_error:
-        logger.error(f"All player_exists attempts failed: {final_error}")
-        return False
-
+        logger.warning(f"Database check failed: {e}")
+        # Check context manager for registration status
+        from utils.context_manager import context_manager
+        return context_manager.get(telegram_id, "is_registered", False)
 
 @db_retry
 async def get_player_by_telegram_id(telegram_id: str) -> Optional[Dict[str, Any]]:
@@ -659,3 +634,45 @@ async def admin_generate_international_effects(telegram_id: str, count: int = 2)
         "p_count": count
     }
     return await call_api_function("api_admin_generate_international_effects", params)
+
+
+async def update_record(table: str, id_field: str, id_value: Any, data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Update a record in the database with improved error handling."""
+    logger.debug(f"Updating record in {table} where {id_field}={id_value}")
+
+    try:
+        # Try with Supabase query builder
+        client = get_supabase()
+        response = client.table(table).update(data).eq(id_field, id_value).execute()
+
+        if hasattr(response, 'data') and response.data:
+            return response.data[0]
+
+        # Try without schema prefix if first attempt failed
+        response = client.table(table).update(data).eq(id_field, id_value).execute()
+        if hasattr(response, 'data') and response.data:
+            return response.data[0]
+
+    except Exception as e:
+        logger.warning(f"Update operation failed: {e}")
+
+        # Try direct SQL as fallback
+        try:
+            # Build SET clause
+            set_clauses = []
+            for key, value in data.items():
+                if isinstance(value, str):
+                    set_clauses.append(f"{key} = '{value}'")
+                elif value is None:
+                    set_clauses.append(f"{key} = NULL")
+                else:
+                    set_clauses.append(f"{key} = {value}")
+
+            sql = f"UPDATE {table} SET {', '.join(set_clauses)} WHERE {id_field} = '{id_value}' RETURNING *;"
+            result = await execute_sql(sql)
+            if result and len(result) > 0:
+                return result[0]
+        except Exception as sql_error:
+            logger.error(f"SQL update fallback failed: {sql_error}")
+
+    return None

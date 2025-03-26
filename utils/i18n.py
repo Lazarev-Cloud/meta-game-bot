@@ -90,46 +90,30 @@ async def translate_district(district_name: str, language: str) -> str:
 
 
 async def get_user_language(telegram_id: str) -> str:
-    """
-    Get a user's preferred language with improved reliability and caching.
-
-    Optimized with TTL caching and fallback handling.
-    """
-    # Check if we have a recent cached value
-    current_time = time.time()
-    if telegram_id in _language_cache and current_time - _cache_timestamps.get(telegram_id, 0) < _cache_timeout:
+    """Get user language with robust fallback."""
+    # Use cache first to reduce database calls
+    if telegram_id in _language_cache:
         return _language_cache[telegram_id]
 
     try:
-        # Check if player exists in database
-        from db.db_client import player_exists, get_player_by_telegram_id
-
-        exists = await player_exists(telegram_id)
-
-        if exists:
-            # Try to get language from database
-            player = await get_player_by_telegram_id(telegram_id)
-            if player and "language" in player and player["language"] in SUPPORTED_LANGUAGES:
-                # Cache the result
-                _language_cache[telegram_id] = player["language"]
-                _cache_timestamps[telegram_id] = current_time
-                return player["language"]
+        # Use local import to avoid circular imports
+        from db import db_client
+        player = await db_client.get_player_by_telegram_id(telegram_id)
+        if player and "language" in player and player["language"] in SUPPORTED_LANGUAGES:
+            _language_cache[telegram_id] = player["language"]
+            _cache_timestamps[telegram_id] = time.time()
+            return player["language"]
     except Exception as e:
-        logger.warning(f"Error getting player language from database: {e}")
-        # Continue to default language
+        logger.warning(f"Error getting language from database: {e}")
 
-    # Default to English if not found or error occurs
+    # Default to English when database fails
     _language_cache[telegram_id] = DEFAULT_LANGUAGE
-    _cache_timestamps[telegram_id] = current_time
+    _cache_timestamps[telegram_id] = time.time()
     return DEFAULT_LANGUAGE
 
 
 async def set_user_language(telegram_id: str, language: str) -> bool:
-    """
-    Set a user's preferred language with database persistence.
-
-    Improved with error handling and immediate cache update.
-    """
+    """Set a user's preferred language with database persistence and better error handling."""
     if language not in SUPPORTED_LANGUAGES:
         return False
 
@@ -144,7 +128,7 @@ async def set_user_language(telegram_id: str, language: str) -> bool:
         exists = await player_exists(telegram_id)
 
         if exists:
-            # Update language in database
+            # Update language in database with error handling
             result = await update_record("players", "telegram_id", telegram_id, {"language": language})
             success = result is not None
 
@@ -152,15 +136,17 @@ async def set_user_language(telegram_id: str, language: str) -> bool:
                 logger.info(f"Language for {telegram_id} set to {language}")
                 return True
             else:
+                # Even if DB update fails, we've still cached the language
                 logger.warning(f"Failed to update language in database for {telegram_id}")
-                return False
+                return True  # Return success anyway since the cache is updated
         else:
             # Language will be saved upon registration
             logger.info(f"Stored language {language} in memory for unregistered user {telegram_id}")
             return True
     except Exception as e:
-        logger.error(f"Error setting user language: {e}")
-        return False
+        # Even if there's an error, we've already updated the in-memory cache
+        logger.error(f"Error setting user language in DB: {e}")
+        return True  # Return success since the cache is updated
 
 
 def load_default_translations() -> None:

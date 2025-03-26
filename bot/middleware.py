@@ -60,29 +60,18 @@ async def log_middleware(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
 
 async def authentication_middleware(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
-    """Authenticate users and ensure they are registered for game commands."""
+    """Authenticate users with graceful degradation when database is unavailable."""
     user = update.effective_user
-
     if not user:
-        logger.warning("Update received without a user")
         return False
 
     # Allow any user to use /start for registration
     if update.message and update.message.text and update.message.text.startswith("/start"):
         return True
 
-    # Allow admin commands for admins
+    # Admin commands check
     if update.message and update.message.text and update.message.text.startswith("/admin"):
-        if user.id in admin_ids:
-            return True
-        else:
-            # Unauthorized admin command attempt
-            logger.warning(f"User {user.id} attempted unauthorized admin command: {update.message.text}")
-            language = await get_user_language(str(user.id))
-            await update.message.reply_text(
-                _("You don't have permission to use admin commands.", language)
-            )
-            return False
+        return user.id in admin_ids
 
     # Skip registration check for help command
     if update.message and update.message.text and update.message.text.startswith("/help"):
@@ -94,14 +83,14 @@ async def authentication_middleware(update: Update, context: ContextTypes.DEFAUL
             is_registered = await player_exists(str(user.id))
 
             if not is_registered:
-                language = "en_US"  # Default before registration
+                language = "en_US"  # Fallback language
                 await update.message.reply_text(
                     _("You are not registered as a player. Please use the /start command to register.", language)
                 )
                 return False
         except Exception as e:
-            logger.error(f"Error checking if player exists: {str(e)}")
-            # Default to allowing access when there's an error to avoid locking users out
+            logger.error(f"Error checking if player exists: {e}")
+            # Allow access when database is unavailable to avoid locking users out
             return True
 
     return True
