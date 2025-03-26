@@ -11,7 +11,7 @@ are defined in db_client.py.
 
 import logging
 import os
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List, Union
 
 from supabase import create_client, Client
 
@@ -94,7 +94,7 @@ async def execute_function(function_name: str, params: Dict[str, Any]) -> Any:
             return response.json()
         else:
             logger.warning(f"Unexpected response format from function {function_name}")
-            return {}
+            return response
     except Exception as e:
         logger.error(f"Error executing function {function_name}: {str(e)}")
         raise
@@ -118,10 +118,11 @@ async def check_schema_exists() -> bool:
         """
 
         result = await execute_sql(query)
-        if result and len(result) > 0 and isinstance(result[0], dict) and 'exists' in result[0]:
-            exists = result[0]['exists']
-            logger.info(f"Game schema exists: {exists}")
-            return exists
+        if result and len(result) > 0:
+            if isinstance(result[0], dict) and 'exists' in result[0]:
+                exists = result[0]['exists']
+                logger.info(f"Game schema exists: {exists}")
+                return exists
 
         # Try alternative approach if the first one returns unexpected format
         alt_query = "SELECT schema_name FROM information_schema.schemata WHERE schema_name = 'game';"
@@ -134,9 +135,7 @@ async def check_schema_exists() -> bool:
         return False
     except Exception as e:
         logger.error(f"Error checking if schema exists: {str(e)}")
-
         # Default to assuming the schema exists if we can't check properly
-        # This prevents unnecessary re-initialization attempts
         logger.warning("Could not verify schema existence, assuming it exists")
         return True
 
@@ -149,7 +148,7 @@ async def execute_sql(sql: str) -> Any:
         sql: SQL query to execute
 
     Returns:
-        Query results or None on error
+        Query results
 
     Raises:
         Exception: If query execution fails
@@ -169,7 +168,6 @@ async def execute_sql(sql: str) -> Any:
             # For select queries, try using the query builder
             if sql.lower().startswith("select"):
                 # Extract table name for basic queries
-                # Example: "SELECT * FROM game.players" -> table="players", schema="game"
                 from_parts = sql.lower().split("from")
                 if len(from_parts) > 1:
                     table_parts = from_parts[1].strip().split()
@@ -179,31 +177,26 @@ async def execute_sql(sql: str) -> Any:
                         # If schema.table format
                         if '.' in table_name:
                             schema, table = table_name.split('.')
-
-                            # We may need a fallback approach since schema method might not be available
-                            # in older versions of the supabase client
                             try:
-                                # First try with schema
+                                # Try with schema
                                 response = client.from_(table).select('*').execute()
-                            except Exception as table_error:
-                                logger.warning(f"Error with direct table query: {str(table_error)}")
-                                # If that fails, return empty data rather than crashing
+                                if hasattr(response, 'data'):
+                                    return response.data
+                            except Exception:
+                                logger.warning("Failed to query with schema")
                                 return []
-
-                            if hasattr(response, 'data'):
-                                return response.data
                         else:
                             # No schema specified, use table directly
                             try:
                                 response = client.from_(table_name).select('*').execute()
                                 if hasattr(response, 'data'):
                                     return response.data
-                            except Exception as direct_query_error:
-                                logger.error(f"Direct query also failed: {str(direct_query_error)}")
+                            except Exception:
+                                logger.warning("Failed direct table query")
+                                return []
 
-            # Return an empty list if all approaches fail, but don't crash
+            # Return an empty list if all approaches fail
             return []
         except Exception as fallback_error:
             logger.error(f"Error executing SQL (fallback also failed): {str(fallback_error)}")
-            # Return empty result instead of raising
             return []

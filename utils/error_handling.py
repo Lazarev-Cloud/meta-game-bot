@@ -129,56 +129,6 @@ def db_retry(func: Callable[..., T]) -> Callable[..., T]:
     return wrapper
 
 
-def handle_db_error(func: Callable[..., T]) -> Callable[..., Optional[T]]:
-    """Decorator to handle database errors and return None instead of raising exceptions."""
-
-    @functools.wraps(func)
-    async def wrapper(*args, **kwargs):
-        try:
-            return await func(*args, **kwargs)
-        except Exception as e:
-            logger.error(f"Error in database operation '{func.__name__}': {str(e)}")
-            return None
-
-    return wrapper
-
-
-async def operation_with_retry(
-        operation_name: str,
-        func: Callable,
-        *args,
-        default_return: Any = None,
-        max_retries: int = MAX_RETRIES,
-        retry_delay: float = RETRY_DELAY,
-        **kwargs
-) -> Any:
-    """
-    Execute an operation with automatic retries.
-
-    Args:
-        operation_name: Name of the operation for logging
-        func: Function to execute
-        *args: Arguments for the function
-        default_return: Value to return on failure
-        max_retries: Maximum number of retry attempts
-        retry_delay: Base delay between retries in seconds
-        **kwargs: Keyword arguments for the function
-
-    Returns:
-        Result of the function or default_return on failure
-    """
-    # Use the more advanced db_operation function
-    return await db_operation(
-        operation_name,
-        func,
-        *args,
-        default_return=default_return,
-        max_retries=max_retries,
-        retry_delay=retry_delay,
-        **kwargs
-    )
-
-
 async def handle_error(
         update: Update,
         language: str,
