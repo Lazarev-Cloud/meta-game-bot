@@ -73,28 +73,37 @@ async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
 
 async def init_translations():
-    """Initialize translations asynchronously."""
+    """Initialize translations with better reliability and failsafes."""
+    logger.info("Initializing translation system...")
+
+    # Import i18n functions
+    from utils.i18n import load_default_translations, load_translations
+
+    # Start with defaults (synchronous, always works)
+    load_default_translations()
+    logger.info("Basic translations loaded")
+
+    # Try to load complete translations with retries
     try:
-        # Try up to 3 times with exponential backoff
         max_attempts = 3
         for attempt in range(1, max_attempts + 1):
             try:
-                # Load translations using the unified loading function
                 await load_translations()
-                logger.info("Translations initialized successfully")
+                logger.info("Translation system fully initialized")
                 return
             except Exception as e:
                 if attempt < max_attempts:
                     wait_time = 2 ** attempt  # Exponential backoff
                     logger.warning(
-                        f"Attempt {attempt}/{max_attempts} to load translations failed: {e}. Retrying in {wait_time} seconds...")
+                        f"Attempt {attempt}/{max_attempts} to load translations failed: {e}. "
+                        f"Retrying in {wait_time} seconds..."
+                    )
                     await asyncio.sleep(wait_time)
                 else:
                     raise
     except Exception as e:
         logger.error(f"All attempts to initialize translations failed: {e}")
-        logger.info("Continuing with default translations only")
-
+        logger.warning("Continuing with basic translations only")
 
 async def init_database():
     """Initialize the database if it hasn't been set up yet."""
