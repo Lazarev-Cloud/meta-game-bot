@@ -137,7 +137,7 @@ async def player_exists(telegram_id: str) -> bool:
         # Try direct database query first
         client = get_supabase()
         try:
-            response = client.from_("players").select("telegram_id")
+            response = client.table("players").select("telegram_id")
             response = response.eq("telegram_id", telegram_id).limit(1)
             data = response.execute().data
             return len(data) > 0
@@ -183,7 +183,7 @@ async def register_player(telegram_id: str, name: str, ideology_score: int, lang
             "language": language
         }
 
-        response = client.from_("players").insert(player_data).execute()
+        response = client.table("players").insert(player_data).execute()
 
         if response and hasattr(response, 'data') and response.data:
             return response.data[0]

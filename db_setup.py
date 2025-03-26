@@ -77,7 +77,7 @@ async def execute_sql(sql: str) -> Optional[List[Dict[str, Any]]]:
 async def check_schema_exists() -> bool:
     """Check if the game schema exists."""
     try:
-        response = client.from_("pg_catalog.pg_namespace").select("nspname").eq("nspname", "public").execute()
+        response = client.table("pg_catalog.pg_namespace").select("nspname").eq("nspname", "public").execute()
         exists = hasattr(response, 'data') and len(response.data) > 0
         logger.info(f"Game schema exists: {exists}")
         return exists

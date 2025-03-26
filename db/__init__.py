@@ -104,37 +104,35 @@ async def admin_process_actions(telegram_id: str) -> Optional[Dict[str, Any]]:
 
 async def register_player(telegram_id: str, name: str, ideology_score: int, language: str = "en_US") -> Optional[
     Dict[str, Any]]:
-    """Register a new player with existing schema."""
+    """Register a new player."""
     client = get_supabase()
     try:
         # Check if player already exists
         if await player_exists(telegram_id):
             return await get_player(telegram_id)
 
-        # Create new player - WITHOUT language field
+        # Create new player with language field
         player_data = {
             "telegram_id": telegram_id,
             "name": name,
-            "ideology_score": ideology_score
-            # Remove language field since it doesn't exist
+            "ideology_score": ideology_score,
+            "language": language  # Include language field
         }
 
-        # Store registration in memory cache as backup
+        # Memory cache
         from utils.context_manager import context_manager
         context_manager.set(telegram_id, "is_registered", True)
-        context_manager.set(telegram_id, "player_name", name)
         context_manager.set(telegram_id, "language", language)
 
-        # Try database insertion
+        # Insert to database
         response = client.table("players").insert(player_data).execute()
 
         if hasattr(response, 'data') and response.data:
-            new_player = response.data[0]
-
-            # Create initial resources
+            # Create resources
             try:
+                player_id = response.data[0].get("player_id")
                 resource_data = {
-                    "player_id": new_player.get("player_id"),
+                    "player_id": player_id,
                     "influence_amount": 5,
                     "money_amount": 10,
                     "information_amount": 3,
@@ -145,11 +143,10 @@ async def register_player(telegram_id: str, name: str, ideology_score: int, lang
                 logger.warning(f"Could not create resources: {e}")
 
             return await get_player(telegram_id)
-        return {"player_name": name, "ideology_score": ideology_score}
     except Exception as e:
         logger.error(f"Error registering player: {e}")
-        # Return memory-based info even if DB fails
-        return {"player_name": name, "ideology_score": ideology_score}
+
+    return None
 
 # Add stub implementations for other required functions
 async def get_cycle_info(language: str = "en_US"):
@@ -203,12 +200,26 @@ async def get_collective_action(*args):
 async def admin_generate_international_effects(*args, **kwargs):
     return {"success": True}
 
+
 async def get_player_language(telegram_id: str) -> str:
     """Get player language."""
-    player = await get_player_by_telegram_id(telegram_id)
-    if player and "language" in player:
-        return player["language"]
+    try:
+        client = get_supabase()
+        # Use table() method instead of from_
+        response = client.table("players").select("language").eq("telegram_id", telegram_id).limit(1).execute()
+
+        if hasattr(response, 'data') and response.data and response.data[0].get("language"):
+            return response.data[0].get("language")
+    except Exception as e:
+        logger.warning(f"Database language lookup failed: {e}")
+
+    # Memory fallback
+    from utils.context_manager import context_manager
+    cached_language = context_manager.get(telegram_id, "language")
+    if cached_language:
+        return cached_language
     return "en_US"
+
 
 async def set_player_language(telegram_id: str, language: str) -> bool:
     """Set player language."""

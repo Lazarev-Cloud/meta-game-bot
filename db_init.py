@@ -185,7 +185,7 @@ async def main():
         # Check if we can connect
         try:
             logger.info("Testing connection...")
-            response = client.from_("players").select("count", count="exact").limit(1).execute()
+            response = client.table("players").select("count", count="exact").limit(1).execute()
             logger.info("Connection successful and players table exists")
 
             # Ask if user wants to reinitialize

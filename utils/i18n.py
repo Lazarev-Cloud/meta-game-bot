@@ -61,8 +61,8 @@ async def get_user_language(telegram_id: str) -> str:
     # Try database as fallback
     try:
         if _get_supabase_func is not None:
-            client = _get_supabase_func()
-            response = client.from_("players").select("language")
+            client = _get_supabase_func
+            response = client.table("players").select("language")
             response = response.eq("telegram_id", telegram_id).limit(1)
             data = response.execute().data
 
@@ -92,7 +92,7 @@ async def set_user_language(telegram_id: str, language: str) -> bool:
             exists = await _player_exists_func(telegram_id)
 
             if exists:
-                client.from_("players").update({"language": language})
+                client.table("players").update({"language": language})
                 client = client.eq("telegram_id", telegram_id)
                 client.execute()
         # If player doesn't exist, language will be saved during registration

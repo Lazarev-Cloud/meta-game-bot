@@ -13,7 +13,6 @@ from telegram.ext import (
     ContextTypes,
     CommandHandler
 )
-
 from bot.callbacks import join_collective_action_callback
 # Import constants instead of defining states here (breaking circular import)
 from bot.constants import (
@@ -1390,6 +1389,7 @@ action_handler = ConversationHandler(
 resource_conversion_handler = ConversationHandler(
     entry_points=[
         CallbackQueryHandler(resource_conversion_start, pattern=r"^exchange_resources$")
+        # Remove CommandHandler("convert_resource", resource_conversion_command)
     ],
     states={
         CONVERT_FROM_RESOURCE: [
@@ -1397,15 +1397,22 @@ resource_conversion_handler = ConversationHandler(
         ],
         CONVERT_AMOUNT: [
             CallbackQueryHandler(convert_amount_selected, pattern=r"^amount:"),
-            # Remove MessageHandler for text entry or change per_message to False
+            MessageHandler(filters.TEXT & ~filters.COMMAND, convert_amount_text_handler)
         ],
-        # Other states...
+        CONVERT_TO_RESOURCE: [
+            CallbackQueryHandler(convert_to_selected, pattern=r"^resource:")
+        ],
+        CONVERT_CONFIRM: [
+            CallbackQueryHandler(convert_confirm, pattern=r"^(confirm|cancel_selection)$")
+        ]
     },
     fallbacks=[
         CallbackQueryHandler(lambda u, c: ConversationHandler.END, pattern=r"^cancel_selection$")
     ],
-    per_message=False  # Changed from True
+    per_message=False
 )
+
+
 
 
 collective_action_handler = ConversationHandler(
@@ -1503,4 +1510,4 @@ conversation_handlers = [
 
 def setup_handlers():
     from bot.handler_factory import get_resource_command_handler
-    resource_conversion_handler.entry_points.insert(0, get_resource_command_handler())
+    resource_conversion_handler.entry_points.append(get_resource_command_handler())
