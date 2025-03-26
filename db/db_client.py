@@ -12,7 +12,7 @@ import asyncio
 import logging
 from typing import Dict, Any, Optional, List, TypeVar, Callable, Awaitable, Union, Tuple
 
-from db.error_handling import db_retry, DatabaseError
+from utils.error_handling import db_retry, DatabaseError
 from db.supabase_client import get_supabase, execute_function, execute_sql
 
 # Initialize logger

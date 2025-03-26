@@ -2,17 +2,15 @@
 # -*- coding: utf-8 -*-
 
 """
-Unified error handling module for the Meta Game bot.
+Unified error handling utilities for the Meta Game bot.
 """
 
 import asyncio
 import logging
 import functools
-from typing import Callable, TypeVar, Optional, Dict, Any, Awaitable
+from typing import Callable, TypeVar, Optional, Dict, Any, Awaitable, Union
 
 from telegram import Update
-
-from utils.i18n import _
 
 # Initialize logger
 logger = logging.getLogger(__name__)
@@ -45,43 +43,88 @@ class AuthenticationError(DatabaseError):
     pass
 
 
+async def db_operation(
+        operation_name: str,
+        func: Callable[..., Awaitable[T]],
+        *args,
+        default_return: Any = None,
+        max_retries: int = MAX_RETRIES,
+        retry_delay: float = RETRY_DELAY,
+        log_error: bool = True,
+        raise_error: bool = False,
+        **kwargs
+) -> T:
+    """
+    Execute a database operation with automatic retries and standardized error handling.
+
+    Args:
+        operation_name: Name of the operation for logging
+        func: Async function to execute
+        *args: Arguments to pass to the function
+        default_return: Value to return on failure
+        max_retries: Maximum number of retry attempts
+        retry_delay: Base delay between retries in seconds
+        log_error: Whether to log errors
+        raise_error: Whether to raise errors after all retries fail
+        **kwargs: Keyword arguments to pass to the function
+
+    Returns:
+        The result of the function call or default_return on failure
+
+    Raises:
+        DatabaseError: If raise_error is True and all retries fail
+    """
+    retries = 0
+    last_exception = None
+
+    while retries < max_retries:
+        try:
+            result = await func(*args, **kwargs)
+            # Handle cases where result is a number or boolean that could be mistaken for an error
+            if result is not None or isinstance(result, (int, float, bool)):
+                return result
+            return default_return
+        except Exception as e:
+            last_exception = e
+            retries += 1
+
+            if log_error:
+                logger.warning(
+                    f"Operation '{operation_name}' failed (attempt {retries}/{max_retries}): {str(e)}"
+                )
+
+            if retries < max_retries:
+                # Wait before retrying with exponential backoff
+                await asyncio.sleep(retry_delay * retries)
+            elif log_error:
+                logger.error(f"Operation '{operation_name}' failed after {max_retries} attempts: {str(e)}")
+
+    # Handle failure after all retries
+    if raise_error and last_exception:
+        # Convert to appropriate database error type
+        if "connection" in str(last_exception).lower():
+            raise ConnectionError(f"Unable to connect to database: {str(last_exception)}")
+        elif "permission" in str(last_exception).lower() or "access" in str(last_exception).lower():
+            raise AuthenticationError(f"Authentication error: {str(last_exception)}")
+        else:
+            raise QueryError(f"Database query error: {str(last_exception)}")
+
+    # Return default value on complete failure
+    return default_return
+
+
 def db_retry(func: Callable[..., T]) -> Callable[..., T]:
     """Decorator to retry database operations with exponential backoff."""
 
     @functools.wraps(func)
     async def wrapper(*args, **kwargs):
-        retries = 0
-        last_exception = None
-
-        while retries < MAX_RETRIES:
-            try:
-                return await func(*args, **kwargs)
-            except Exception as e:
-                last_exception = e
-                retries += 1
-
-                # Log the error
-                logger.warning(
-                    f"Database operation '{func.__name__}' failed (attempt {retries}/{MAX_RETRIES}): {str(e)}"
-                )
-
-                if retries < MAX_RETRIES:
-                    # Wait before retrying with exponential backoff
-                    await asyncio.sleep(RETRY_DELAY * retries)
-                else:
-                    # Log the final failure
-                    logger.error(f"Database operation '{func.__name__}' failed after {MAX_RETRIES} attempts: {str(e)}")
-
-        # Re-raise the last exception with a more informative message
-        if last_exception:
-            if "connection" in str(last_exception).lower():
-                raise ConnectionError(f"Unable to connect to database: {str(last_exception)}")
-            elif "permission" in str(last_exception).lower() or "access" in str(last_exception).lower():
-                raise AuthenticationError(f"Authentication error: {str(last_exception)}")
-            else:
-                raise QueryError(f"Database query error: {str(last_exception)}")
-        else:
-            raise DatabaseError("Unknown database error occurred")
+        return await db_operation(
+            func.__name__,
+            func,
+            *args,
+            raise_error=True,
+            **kwargs
+        )
 
     return wrapper
 
@@ -100,8 +143,49 @@ def handle_db_error(func: Callable[..., T]) -> Callable[..., Optional[T]]:
     return wrapper
 
 
-async def handle_error(update: Update, language: str, error: Exception, operation: str,
-                       custom_message: Optional[str] = None) -> None:
+async def operation_with_retry(
+        operation_name: str,
+        func: Callable,
+        *args,
+        default_return: Any = None,
+        max_retries: int = MAX_RETRIES,
+        retry_delay: float = RETRY_DELAY,
+        **kwargs
+) -> Any:
+    """
+    Execute an operation with automatic retries.
+
+    Args:
+        operation_name: Name of the operation for logging
+        func: Function to execute
+        *args: Arguments for the function
+        default_return: Value to return on failure
+        max_retries: Maximum number of retry attempts
+        retry_delay: Base delay between retries in seconds
+        **kwargs: Keyword arguments for the function
+
+    Returns:
+        Result of the function or default_return on failure
+    """
+    # Use the more advanced db_operation function
+    return await db_operation(
+        operation_name,
+        func,
+        *args,
+        default_return=default_return,
+        max_retries=max_retries,
+        retry_delay=retry_delay,
+        **kwargs
+    )
+
+
+async def handle_error(
+        update: Update,
+        language: str,
+        error: Exception,
+        operation: str,
+        custom_message: Optional[str] = None
+) -> None:
     """
     Unified error handler for both commands and callbacks.
 
@@ -113,6 +197,9 @@ async def handle_error(update: Update, language: str, error: Exception, operatio
         custom_message: Optional custom error message to show the user
     """
     logger.error(f"Error in {operation}: {str(error)}")
+
+    # Import translation function here to avoid circular imports
+    from utils.i18n import _
 
     # Default message
     message = custom_message or _("Database connection error. Please try again later.", language)
@@ -170,6 +257,7 @@ async def require_registration(update: Update, language: str) -> bool:
         True if registered, False otherwise
     """
     from db import player_exists
+    from utils.i18n import _
 
     telegram_id = str(update.effective_user.id)
 
@@ -199,58 +287,6 @@ async def require_registration(update: Update, language: str) -> bool:
     return True
 
 
-async def operation_with_retry(
-        operation_name: str,
-        func: Callable[..., Awaitable[T]],
-        *args,
-        max_retries: int = MAX_RETRIES,
-        retry_delay: float = RETRY_DELAY,
-        **kwargs
-) -> T:
-    """
-    Execute an operation with automatic retries.
-
-    Args:
-        operation_name: Name of the operation for logging
-        func: Async function to execute
-        *args: Arguments to pass to the function
-        max_retries: Maximum number of retry attempts
-        retry_delay: Base delay between retries in seconds
-        **kwargs: Keyword arguments to pass to the function
-
-    Returns:
-        The result of the function call
-
-    Raises:
-        Exception: Re-raises the last exception after all retries fail
-    """
-    retries = 0
-    last_exception = None
-
-    while retries < max_retries:
-        try:
-            return await func(*args, **kwargs)
-        except Exception as e:
-            last_exception = e
-            retries += 1
-
-            logger.warning(
-                f"Operation '{operation_name}' failed (attempt {retries}/{max_retries}): {str(e)}"
-            )
-
-            if retries < max_retries:
-                # Wait before retrying with exponential backoff
-                await asyncio.sleep(retry_delay * retries)
-            else:
-                logger.error(f"Operation '{operation_name}' failed after {max_retries} attempts: {str(e)}")
-
-    # Re-raise the last exception
-    if last_exception:
-        raise last_exception
-    else:
-        raise Exception(f"Unknown error in operation '{operation_name}'")
-
-
 def async_error_handler(
         operation_name: str,
         default_return: Any = None,
@@ -273,18 +309,16 @@ def async_error_handler(
     def decorator(func: Callable) -> Callable:
         @functools.wraps(func)
         async def wrapper(*args, **kwargs):
-            try:
-                return await operation_with_retry(
-                    operation_name,
-                    func,
-                    *args,
-                    max_retries=max_retries,
-                    retry_delay=retry_delay,
-                    **kwargs
-                )
-            except Exception as e:
-                logger.error(f"Error in {operation_name}: {str(e)}")
-                return default_return
+            return await db_operation(
+                operation_name,
+                func,
+                *args,
+                default_return=default_return,
+                max_retries=max_retries,
+                retry_delay=retry_delay,
+                raise_error=False,
+                **kwargs
+            )
 
         return wrapper
 

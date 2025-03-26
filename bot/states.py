@@ -44,7 +44,7 @@ from bot.constants import (
     JOIN_ACTION_PHYSICAL,
     JOIN_ACTION_CONFIRM,
 )
-from bot.context import get_user_context, clear_user_context
+from utils.context_manager import get_user_context, clear_user_context
 from bot.keyboards import (
     get_ideology_keyboard,
     get_districts_keyboard,
@@ -63,7 +63,7 @@ from db import (
     initiate_collective_action,
     join_collective_action
 )
-from db.error_handling import db_retry, DatabaseError
+from utils.error_handling import db_retry, DatabaseError
 from utils.i18n import _, get_user_language, set_user_language
 
 # Initialize logger
