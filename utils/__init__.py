@@ -6,6 +6,26 @@ from db import init_supabase, get_supabase, execute_function, execute_sql, check
     admin_process_actions, admin_generate_international_effects
 from utils.i18n import init_i18n
 init_i18n(player_exists_func=player_exists, get_supabase_func=get_supabase)
+db_functions = {}
+
+
+def initialize_utils(db_module):
+    global db_functions
+    db_functions = {
+        'player_exists': db_module.player_exists,
+        'get_supabase': db_module.get_supabase,
+        # Add other functions as needed
+    }
+
+    from utils.i18n import init_i18n
+    init_i18n(player_exists_func=db_functions['player_exists'],
+              get_supabase_func=db_functions['get_supabase'])
+
+
+# Export getters for the functions
+def get_player_exists():
+    return db_functions.get('player_exists')
+
 
 # Export all the functions
 __all__ = [

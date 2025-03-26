@@ -18,14 +18,23 @@ from telegram.ext import (
     Application,
     ContextTypes,
 )
-from db.supabase_client import get_supabase
 from db import initialize_db
 
 # Import core components
 from bot.handlers import register_all_handlers
 from bot.middleware import setup_middleware
-from db.supabase_client import init_supabase, check_schema_exists
-from db.permission_checker import check_database_permissions
+from dotenv import load_dotenv
+load_dotenv()
+
+# Import basic modules first
+from db.supabase_client import get_supabase
+import db
+import utils
+
+# Initialize modules in order
+db_functions = db.initialize_db()
+utils.initialize_utils(db)
+
 from utils.config import load_config
 from utils.i18n import load_translations, get_user_language
 from utils.logger import setup_logger, configure_telegram_logger, configure_supabase_logger

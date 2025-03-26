@@ -13,7 +13,6 @@ from typing import Callable, TypeVar, Optional, Any, Awaitable
 
 from telegram import Update
 
-from db import player_exists
 from utils.i18n import _
 
 # Initialize logger
@@ -240,6 +239,8 @@ async def require_registration(update: Update, language: str) -> bool:
         return True
 
     try:
+        # Lazy import to avoid circular dependency
+        from db.db_client import player_exists
         exists = await player_exists(telegram_id)
 
         if exists:
@@ -258,10 +259,7 @@ async def require_registration(update: Update, language: str) -> bool:
         return False
     except Exception as e:
         logger.error(f"Registration check error: {e}")
-
-        # Default to allowing access in case of errors
         return True
-
 
 # Add this import for exponential backoff with jitter
 import random
