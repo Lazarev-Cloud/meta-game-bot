@@ -177,3 +177,4 @@ meta_db
 
 .qodo
 /logs
+logs/meta_log

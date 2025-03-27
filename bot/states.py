@@ -2,17 +2,13 @@
 
 import logging
 import functools
-from typing import Dict, Any, Optional, Callable, Awaitable
+from typing import Dict, Any, Optional, Callable, Awaitable, List
 
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
-from telegram.ext import CallbackQueryHandler, ConversationHandler, MessageHandler, filters
+from telegram.ext import CallbackQueryHandler, ConversationHandler, MessageHandler, filters, CommandHandler
 from telegram.ext import (
     ContextTypes,
-    CommandHandler
 )
-
-# Import for handling callback queries
-from bot.callbacks import join_collective_action_callback
 
 # Import constants from constants.py for state definitions
 from bot.constants import (
@@ -43,7 +39,6 @@ from bot.constants import (
 
 # Import keyboard factories
 from bot.keyboards import (
-    KeyboardFactory,
     get_ideology_keyboard,
     get_districts_keyboard,
     get_resource_type_keyboard,
@@ -52,8 +47,10 @@ from bot.keyboards import (
     get_confirmation_keyboard,
     get_language_keyboard,
     get_collective_action_keyboard,
+    get_politicians_keyboard,
     get_start_keyboard,
-    get_back_keyboard
+    get_back_keyboard,
+    get_yes_no_keyboard
 )
 
 # Import database functionality
@@ -64,11 +61,13 @@ from db import (
     exchange_resources,
     initiate_collective_action,
     join_collective_action,
-    get_player
+    get_player,
+    get_active_collective_actions,
+    get_collective_action
 )
 
 # Import utilities
-from utils.context_manager import get_user_data, set_user_data, clear_user_data, get_user_context, clear_user_context
+from utils.context_manager import get_user_data, set_user_data, clear_user_data
 from utils.error_handling import conversation_step, db_retry, DatabaseError
 from utils.i18n import _, get_user_language, set_user_language
 from utils.message_utils import send_message, edit_or_reply
@@ -105,29 +104,497 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
                 )
                 return ConversationHandler.END
 
-            except Exception as e:
-                logger.error(f"Error getting player data: {e}")
-                # Continue with registration if we can't get player data
 
-        # New player, start registration
-        await update.message.reply_text(
-            "Welcome to Novi-Sad, a city at the crossroads of Yugoslavia's future! "
-            "Please select your preferred language:",
-            reply_markup=get_language_keyboard()
-        )
+# Helper function for registration checks
+async def require_registration(update: Update, language: str) -> bool:
+    """Check player registration."""
+    telegram_id = str(update.effective_user.id)
 
-        return NAME_ENTRY
+    try:
+        exists = await player_exists(telegram_id)
 
+        if exists:
+            return True
+
+        # User not registered
+        message = _("You are not registered yet. Use /start to register.", language)
+
+        if update.callback_query:
+            await update.callback_query.answer(_("You need to register first.", language))
+            await update.callback_query.edit_message_text(message)
+        else:
+            await update.message.reply_text(message)
+        return False
     except Exception as e:
-        logger.error(f"Error checking if player exists: {e}")
+        logger.error(f"Registration check error: {e}")
+        # Fall through and allow access if we can't check
+        return True
 
-        # Fallback to language selection
-        await update.message.reply_text(
-            "Welcome to Novi-Sad! Let's start by selecting your language:",
-            reply_markup=get_language_keyboard()
+
+# Create conversation handlers
+registration_handler = ConversationHandler(
+    entry_points=[CommandHandler("start", start_command)],
+    states={
+        NAME_ENTRY: [
+            CallbackQueryHandler(language_callback, pattern=r"^language:"),
+            MessageHandler(filters.TEXT & ~filters.COMMAND, name_entry)
+        ],
+        IDEOLOGY_CHOICE: [
+            CallbackQueryHandler(ideology_choice, pattern=r"^ideology:")
+        ]
+    },
+    fallbacks=[
+        CommandHandler("cancel", cancel_registration),
+        MessageHandler(filters.COMMAND, cancel_registration)
+    ]
+)
+
+action_handler = ConversationHandler(
+    entry_points=[
+        CallbackQueryHandler(action_select_district, pattern=r"^action:"),
+        CallbackQueryHandler(action_select_district, pattern=r"^quick_action:")
+    ],
+    states={
+        ACTION_SELECT_DISTRICT: [
+            CallbackQueryHandler(district_selected, pattern=r"^district:")
+        ],
+        ACTION_SELECT_TARGET: [
+            MessageHandler(filters.TEXT & ~filters.COMMAND, target_entry)
+        ],
+        ACTION_SELECT_RESOURCE: [
+            CallbackQueryHandler(resource_selected, pattern=r"^resource:")
+        ],
+        ACTION_SELECT_AMOUNT: [
+            CallbackQueryHandler(amount_selected, pattern=r"^amount:")
+        ],
+        ACTION_PHYSICAL_PRESENCE: [
+            CallbackQueryHandler(physical_presence_selected, pattern=r"^physical:")
+        ],
+        ACTION_CONFIRM: [
+            CallbackQueryHandler(action_confirm, pattern=r"^confirm$"),
+            CallbackQueryHandler(action_confirm, pattern=r"^cancel_selection$")
+        ]
+    },
+    fallbacks=[
+        CallbackQueryHandler(cancel_registration, pattern=r"^cancel_selection$")
+    ]
+)
+
+resource_conversion_handler = ConversationHandler(
+    entry_points=[
+        CommandHandler("convert_resource", resource_conversion_start),
+        CallbackQueryHandler(resource_conversion_start, pattern=r"^exchange_resources$")
+    ],
+    states={
+        CONVERT_FROM_RESOURCE: [
+            CallbackQueryHandler(convert_from_selected, pattern=r"^resource:")
+        ],
+        CONVERT_AMOUNT: [
+            CallbackQueryHandler(convert_amount_selected, pattern=r"^amount:"),
+            MessageHandler(filters.TEXT & ~filters.COMMAND, convert_amount_text_handler)
+        ],
+        CONVERT_TO_RESOURCE: [
+            CallbackQueryHandler(convert_to_selected, pattern=r"^resource:")
+        ],
+        CONVERT_CONFIRM: [
+            CallbackQueryHandler(convert_confirm, pattern=r"^confirm$"),
+            CallbackQueryHandler(convert_confirm, pattern=r"^cancel_selection$")
+        ]
+    },
+    fallbacks=[
+        CallbackQueryHandler(cancel_registration, pattern=r"^cancel_selection$")
+    ]
+)
+
+collective_action_handler = ConversationHandler(
+    entry_points=[CommandHandler("collective", collective_action_start)],
+    states={
+        COLLECTIVE_ACTION_TYPE: [
+            CallbackQueryHandler(collective_action_type_selected, pattern=r"^collective:")
+        ],
+        COLLECTIVE_ACTION_DISTRICT: [
+            CallbackQueryHandler(collective_action_district_selected, pattern=r"^district:")
+        ],
+        COLLECTIVE_ACTION_TARGET: [
+            MessageHandler(filters.TEXT & ~filters.COMMAND, collective_action_target_entry)
+        ],
+        COLLECTIVE_ACTION_RESOURCE: [
+            CallbackQueryHandler(collective_action_resource_selected, pattern=r"^resource:")
+        ],
+        COLLECTIVE_ACTION_AMOUNT: [
+            CallbackQueryHandler(collective_action_amount_selected, pattern=r"^amount:")
+        ],
+        COLLECTIVE_ACTION_PHYSICAL: [
+            CallbackQueryHandler(collective_action_physical_presence_selected, pattern=r"^physical:")
+        ],
+        COLLECTIVE_ACTION_CONFIRM: [
+            CallbackQueryHandler(collective_action_confirm, pattern=r"^confirm$"),
+            CallbackQueryHandler(collective_action_confirm, pattern=r"^cancel_selection$")
+        ]
+    },
+    fallbacks=[
+        CallbackQueryHandler(cancel_registration, pattern=r"^cancel_selection$")
+    ]
+)
+
+join_action_handler = ConversationHandler(
+    entry_points=[
+        CommandHandler("join", join_collective_action_start),
+        CallbackQueryHandler(join_collective_action_start, pattern=r"^join_collective_action:")
+    ],
+    states={
+        JOIN_ACTION_RESOURCE: [
+            CallbackQueryHandler(join_action_resource_selected, pattern=r"^resource:")
+        ],
+        JOIN_ACTION_AMOUNT: [
+            CallbackQueryHandler(join_action_amount_selected, pattern=r"^amount:")
+        ],
+        JOIN_ACTION_PHYSICAL: [
+            CallbackQueryHandler(join_action_physical_presence_selected, pattern=r"^physical:")
+        ],
+        JOIN_ACTION_CONFIRM: [
+            CallbackQueryHandler(join_action_confirm, pattern=r"^confirm$"),
+            CallbackQueryHandler(join_action_confirm, pattern=r"^cancel_selection$")
+        ]
+    },
+    fallbacks=[
+        CallbackQueryHandler(cancel_registration, pattern=r"^cancel_selection$")
+    ]
+)
+
+# Export conversation handlers
+conversation_handlers = [
+    registration_handler,
+    action_handler,
+    resource_conversion_handler,
+    collective_action_handler,
+    join_action_handler
+]
+
+
+@conversation_step
+async def join_action_resource_selected(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle resource selection for joining collective action."""
+    query = update.callback_query
+    await query.answer()
+
+    telegram_id = str(update.effective_user.id)
+    language = await get_user_language(telegram_id)
+
+    # Extract resource type
+    resource_data = query.data.split(":", 1)
+    if len(resource_data) > 1:
+        resource_type = resource_data[1]
+
+        # Store resource type in user data
+        set_user_data(telegram_id, "join_resource_type", resource_type, context)
+
+        # Prompt for resource amount
+        await query.edit_message_text(
+            _("How much {resource_type} do you want to contribute to this collective action?", language).format(
+                resource_type=_(resource_type, language)
+            ),
+            reply_markup=get_resource_amount_keyboard(language)
         )
 
-        return NAME_ENTRY
+        return JOIN_ACTION_AMOUNT
+
+    # If we get here, there was a problem
+    await query.edit_message_text(
+        _("There was an error processing your selection. Please try again.", language)
+    )
+    return ConversationHandler.END
+
+
+@conversation_step
+async def join_action_amount_selected(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle amount selection for joining collective action."""
+    query = update.callback_query
+    await query.answer()
+
+    telegram_id = str(update.effective_user.id)
+    language = await get_user_language(telegram_id)
+
+    # Extract amount
+    amount_data = query.data.split(":", 1)
+    if len(amount_data) > 1:
+        resource_amount = int(amount_data[1])
+
+        # Store amount in user data
+        set_user_data(telegram_id, "join_resource_amount", resource_amount, context)
+
+        # Prompt for physical presence
+        await query.edit_message_text(
+            _("Will you be physically present for this collective action? Being present gives +10 control points.",
+              language),
+            reply_markup=get_physical_presence_keyboard(language)
+        )
+
+        return JOIN_ACTION_PHYSICAL
+
+    # If we get here, there was a problem
+    await query.edit_message_text(
+        _("There was an error processing your selection. Please try again.", language)
+    )
+    return ConversationHandler.END
+
+
+@conversation_step
+async def join_action_physical_presence_selected(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle physical presence selection for joining collective action."""
+    query = update.callback_query
+    await query.answer()
+
+    telegram_id = str(update.effective_user.id)
+    language = await get_user_language(telegram_id)
+
+    # Extract physical presence choice
+    presence_data = query.data.split(":", 1)
+    if len(presence_data) > 1:
+        physical_presence = presence_data[1] == "yes"
+
+        # Store physical presence in user data
+        set_user_data(telegram_id, "join_physical_presence", physical_presence, context)
+
+        # Collect all action details for confirmation
+        user_data = get_user_data(telegram_id, context)
+        action_id = user_data.get("join_action_id", "unknown")
+        action_info = user_data.get("join_action_info", {})
+        resource_type = user_data.get("join_resource_type", "unknown")
+        resource_amount = user_data.get("join_resource_amount", 0)
+        physical = user_data.get("join_physical_presence", False)
+
+        # Get action details for confirmation
+        action_type = action_info.get("action_type", "unknown") if action_info else "unknown"
+        district_name = "Unknown"
+        if action_info and "district_id" in action_info and action_info["district_id"]:
+            if isinstance(action_info["district_id"], dict):
+                district_name = action_info["district_id"].get("name", "Unknown")
+
+        # Create confirmation message
+        confirmation_text = _(
+            "Please confirm your participation in this collective action:\n\n"
+            "Action ID: {action_id}\n"
+            "Action Type: {action_type}\n"
+            "District: {district}\n"
+            "Your Contribution: {amount} {resource_type}\n"
+            "Physical Presence: {physical}",
+            language
+        ).format(
+            action_id=action_id,
+            action_type=_(action_type, language),
+            district=district_name,
+            amount=resource_amount,
+            resource_type=_(resource_type, language),
+            physical=_("Yes", language) if physical else _("No", language)
+        )
+
+        await query.edit_message_text(
+            confirmation_text,
+            reply_markup=get_confirmation_keyboard(language)
+        )
+
+        return JOIN_ACTION_CONFIRM
+
+    # If we get here, there was a problem
+    await query.edit_message_text(
+        _("There was an error processing your selection. Please try again.", language)
+    )
+    return ConversationHandler.END
+
+
+@db_retry
+@conversation_step
+async def join_action_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle confirmation for joining collective action."""
+    query = update.callback_query
+    await query.answer()
+
+    telegram_id = str(update.effective_user.id)
+    language = await get_user_language(telegram_id)
+
+    # Check if confirmed
+    if query.data == "confirm":
+        # Submit the join request
+        user_data = get_user_data(telegram_id, context)
+
+        try:
+            result = await join_collective_action(
+                telegram_id=telegram_id,
+                collective_action_id=user_data.get("join_action_id"),
+                resource_type=user_data.get("join_resource_type"),
+                resource_amount=user_data.get("join_resource_amount"),
+                physical_presence=user_data.get("join_physical_presence", False),
+                language=language
+            )
+
+            if result and result.get("success"):
+                # Success message
+                success_message = result.get("message", _("Successfully joined collective action!", language))
+
+                await query.edit_message_text(
+                    _(
+                        "You have successfully joined the collective action!\n\n"
+                        "Your contribution: {amount} {resource_type}\n"
+                        "Physical Presence: {physical}\n\n"
+                        "The action will be processed at the end of the current cycle.",
+                        language
+                    ).format(
+                        amount=user_data.get("join_resource_amount"),
+                        resource_type=_(user_data.get("join_resource_type"), language),
+                        physical=_("Yes", language) if user_data.get("join_physical_presence") else _("No", language)
+                    ),
+                    parse_mode="Markdown"
+                )
+            else:
+                # Error message
+                await query.edit_message_text(
+                    _("There was an error joining the collective action. Please try again.", language)
+                )
+        except DatabaseError as e:
+            logger.error(f"Database error joining collective action: {str(e)}")
+            await query.edit_message_text(
+                _("Database connection error. Please try again later.", language)
+            )
+        except Exception as e:
+            logger.error(f"Error joining collective action: {str(e)}")
+            await query.edit_message_text(
+                _("There was an error processing your request: {error}", language).format(error=str(e))
+            )
+    else:
+        # Canceled
+        await query.edit_message_text(
+            _("Join request canceled.", language)
+        )
+
+    # Clean up context
+    clear_user_data(telegram_id, context)
+
+    return ConversationHandler.END
+
+
+# Join collective action handlers
+@conversation_step
+async def join_collective_action_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Start joining a collective action."""
+    telegram_id = str(update.effective_user.id)
+    language = await get_user_language(telegram_id)
+
+    if not await require_registration(update, language):
+        return ConversationHandler.END
+
+    # Check for action ID in arguments
+    args = context.args if context else None
+
+    if args and len(args) > 0:
+        action_id = args[0]
+        set_user_data(telegram_id, "join_action_id", action_id, context)
+
+        try:
+            # Check if action exists
+            action_info = await get_collective_action(action_id)
+
+            if not action_info:
+                await update.message.reply_text(
+                    _("Collective action with ID {action_id} not found.", language).format(action_id=action_id)
+                )
+                return ConversationHandler.END
+
+            if action_info.get("status") != "active":
+                await update.message.reply_text(
+                    _("This collective action is no longer active.", language)
+                )
+                return ConversationHandler.END
+
+            # Store action details
+            set_user_data(telegram_id, "join_action_info", action_info, context)
+
+            # Display action info and prompt for resource contribution
+            action_type = action_info.get("action_type", "unknown")
+            district_name = "Unknown"
+            if "district_id" in action_info and action_info["district_id"]:
+                if isinstance(action_info["district_id"], dict):
+                    district_name = action_info["district_id"].get("name", "Unknown")
+
+            await update.message.reply_text(
+                _(
+                    "You are joining a collective {action_type} in {district}.\n\n"
+                    "What resource would you like to contribute?",
+                    language
+                ).format(
+                    action_type=_(action_type, language),
+                    district=district_name
+                ),
+                reply_markup=get_resource_type_keyboard(language)
+            )
+
+            return JOIN_ACTION_RESOURCE
+        except Exception as e:
+            logger.error(f"Error getting collective action info: {str(e)}")
+            await update.message.reply_text(
+                _("Error retrieving collective action information. Please try again.", language)
+            )
+            return ConversationHandler.END
+    else:
+        # No action ID provided, show list of active actions
+        try:
+            active_actions = await get_active_collective_actions()
+
+            if not active_actions or len(active_actions) == 0:
+                await update.message.reply_text(
+                    _("There are no active collective actions to join at the moment.", language)
+                )
+                return ConversationHandler.END
+
+            # Show list of actions to join
+            actions_text = _("Active collective actions:\n\n", language)
+
+            for action in active_actions:
+                action_id = action.get("collective_action_id", "unknown")
+                action_type = action.get("action_type", "unknown")
+                district_name = "Unknown"
+                if "district_id" in action and action["district_id"]:
+                    if isinstance(action["district_id"], dict):
+                        district_name = action["district_id"].get("name", "Unknown")
+
+                actions_text += f"ID: {action_id}\n"
+                actions_text += _("Type: {type}\n", language).format(type=_(action_type, language))
+                actions_text += _("District: {district}\n\n", language).format(district=district_name)
+
+            actions_text += _("To join an action, use the command /join [action_id]", language)
+
+            await update.message.reply_text(actions_text)
+            return ConversationHandler.END
+        except Exception as e:
+            logger.error(f"Error getting active collective actions: {str(e)}")
+            await update.message.reply_text(
+                _("Error retrieving active collective actions. Please try again.", language)
+            )
+            return ConversationHandler.END
+
+            except Exception as e:
+            logger.error(f"Error getting player data: {e}")
+            # Continue with registration if we can't get player data
+
+    # New player, start registration
+    await update.message.reply_text(
+        "Welcome to Novi-Sad, a city at the crossroads of Yugoslavia's future! "
+        "Please select your preferred language:",
+        reply_markup=get_language_keyboard()
+    )
+
+    return NAME_ENTRY
+
+except Exception as e:
+logger.error(f"Error checking if player exists: {e}")
+
+# Fallback to language selection
+await update.message.reply_text(
+    "Welcome to Novi-Sad! Let's start by selecting your language:",
+    reply_markup=get_language_keyboard()
+)
+
+return NAME_ENTRY
 
 
 @conversation_step
@@ -829,6 +1296,9 @@ async def collective_action_start(update: Update, context: ContextTypes.DEFAULT_
     telegram_id = str(update.effective_user.id)
     language = await get_user_language(telegram_id)
 
+    if not await require_registration(update, language):
+        return ConversationHandler.END
+
     # Initialize user data
     await update.message.reply_text(
         _("You're initiating a collective action. What type of action?", language),
@@ -873,4 +1343,261 @@ async def collective_action_type_selected(update: Update, context: ContextTypes.
 
 
 @conversation_step
-async
+async def collective_action_district_selected(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle district selection for collective action."""
+    query = update.callback_query
+    await query.answer()
+
+    telegram_id = str(update.effective_user.id)
+    language = await get_user_language(telegram_id)
+
+    # Extract district name
+    district_data = query.data.split(":", 1)
+    if len(district_data) > 1:
+        district_name = district_data[1]
+
+        # Store district in user data
+        set_user_data(telegram_id, "collective_district_name", district_name, context)
+
+        # Check if action needs a target
+        action_type = get_user_data(telegram_id, context).get("collective_action_type")
+
+        if action_type == "attack":
+            # Needs a target
+            await query.edit_message_text(
+                _("Please enter the name of your target player for this collective attack:", language)
+            )
+            return COLLECTIVE_ACTION_TARGET
+        else:
+            # No target needed, go to resource selection
+            await query.edit_message_text(
+                _("Please select a resource type to contribute to this collective action:", language),
+                reply_markup=get_resource_type_keyboard(language)
+            )
+            return COLLECTIVE_ACTION_RESOURCE
+
+    # If we get here, there was a problem
+    await query.edit_message_text(
+        _("There was an error processing your selection. Please try again.", language)
+    )
+    return ConversationHandler.END
+
+
+@conversation_step
+async def collective_action_target_entry(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle target entry for collective action."""
+    user_input = update.message.text
+    telegram_id = str(update.effective_user.id)
+    language = await get_user_language(telegram_id)
+
+    # Store target in user data
+    set_user_data(telegram_id, "collective_target_player_name", user_input, context)
+
+    # Prompt for resource selection
+    await update.message.reply_text(
+        _("Please select a resource type to contribute to this collective action:", language),
+        reply_markup=get_resource_type_keyboard(language)
+    )
+
+    return COLLECTIVE_ACTION_RESOURCE
+
+
+@conversation_step
+async def collective_action_resource_selected(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle resource selection for collective action."""
+    query = update.callback_query
+    await query.answer()
+
+    telegram_id = str(update.effective_user.id)
+    language = await get_user_language(telegram_id)
+
+    # Extract resource type
+    resource_data = query.data.split(":", 1)
+    if len(resource_data) > 1:
+        resource_type = resource_data[1]
+
+        # Store resource type in user data
+        set_user_data(telegram_id, "collective_resource_type", resource_type, context)
+
+        # Prompt for resource amount
+        await query.edit_message_text(
+            _("How much {resource_type} do you want to contribute to this collective action?", language).format(
+                resource_type=_(resource_type, language)
+            ),
+            reply_markup=get_resource_amount_keyboard(language)
+        )
+
+        return COLLECTIVE_ACTION_AMOUNT
+
+    # If we get here, there was a problem
+    await query.edit_message_text(
+        _("There was an error processing your selection. Please try again.", language)
+    )
+    return ConversationHandler.END
+
+
+@conversation_step
+async def collective_action_amount_selected(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle amount selection for collective action."""
+    query = update.callback_query
+    await query.answer()
+
+    telegram_id = str(update.effective_user.id)
+    language = await get_user_language(telegram_id)
+
+    # Extract amount
+    amount_data = query.data.split(":", 1)
+    if len(amount_data) > 1:
+        resource_amount = int(amount_data[1])
+
+        # Store amount in user data
+        set_user_data(telegram_id, "collective_resource_amount", resource_amount, context)
+
+        # Prompt for physical presence
+        await query.edit_message_text(
+            _("Will you be physically present for this collective action? Being present gives +20 control points.",
+              language),
+            reply_markup=get_physical_presence_keyboard(language)
+        )
+
+        return COLLECTIVE_ACTION_PHYSICAL
+
+    # If we get here, there was a problem
+    await query.edit_message_text(
+        _("There was an error processing your selection. Please try again.", language)
+    )
+    return ConversationHandler.END
+
+
+@conversation_step
+async def collective_action_physical_presence_selected(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle physical presence selection for collective action."""
+    query = update.callback_query
+    await query.answer()
+
+    telegram_id = str(update.effective_user.id)
+    language = await get_user_language(telegram_id)
+
+    # Extract physical presence choice
+    presence_data = query.data.split(":", 1)
+    if len(presence_data) > 1:
+        physical_presence = presence_data[1] == "yes"
+
+        # Store physical presence in user data
+        set_user_data(telegram_id, "collective_physical_presence", physical_presence, context)
+
+        # Collect all action details for confirmation
+        user_data = get_user_data(telegram_id, context)
+        action_type = user_data.get("collective_action_type", "unknown")
+        district_name = user_data.get("collective_district_name", "unknown")
+        resource_type = user_data.get("collective_resource_type", "unknown")
+        resource_amount = user_data.get("collective_resource_amount", 0)
+        physical = user_data.get("collective_physical_presence", False)
+
+        target_text = ""
+        if "collective_target_player_name" in user_data:
+            target_text = _("\nTarget Player: {target}", language).format(
+                target=user_data["collective_target_player_name"])
+
+        # Create confirmation message
+        confirmation_text = _(
+            "Please confirm your collective action:\n\n"
+            "Action Type: {action_type}\n"
+            "District: {district}{target_text}\n"
+            "Your Contribution: {amount} {resource_type}\n"
+            "Physical Presence: {physical}",
+            language
+        ).format(
+            action_type=_(action_type, language),
+            district=district_name,
+            target_text=target_text,
+            amount=resource_amount,
+            resource_type=_(resource_type, language),
+            physical=_("Yes", language) if physical else _("No", language)
+        )
+
+        await query.edit_message_text(
+            confirmation_text,
+            reply_markup=get_confirmation_keyboard(language)
+        )
+
+        return COLLECTIVE_ACTION_CONFIRM
+
+    # If we get here, there was a problem
+    await query.edit_message_text(
+        _("There was an error processing your selection. Please try again.", language)
+    )
+    return ConversationHandler.END
+
+
+@db_retry
+@conversation_step
+async def collective_action_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle collective action confirmation."""
+    query = update.callback_query
+    await query.answer()
+
+    telegram_id = str(update.effective_user.id)
+    language = await get_user_language(telegram_id)
+
+    # Check if confirmed
+    if query.data == "confirm":
+        # Submit the collective action
+        user_data = get_user_data(telegram_id, context)
+
+        try:
+            result = await initiate_collective_action(
+                telegram_id=telegram_id,
+                action_type=user_data.get("collective_action_type"),
+                district_name=user_data.get("collective_district_name"),
+                target_player_name=user_data.get("collective_target_player_name"),
+                resource_type=user_data.get("collective_resource_type"),
+                resource_amount=user_data.get("collective_resource_amount"),
+                physical_presence=user_data.get("collective_physical_presence", False),
+                language=language
+            )
+
+            if result and result.get("success"):
+                # Success message
+                success_message = result.get("message", _("Collective action initiated successfully!", language))
+                action_id = result.get("collective_action_id", "unknown")
+                join_command = result.get("join_command", f"/join {action_id}")
+
+                await query.edit_message_text(
+                    _(
+                        "Collective action initiated successfully!\n\n"
+                        "Action ID: {action_id}\n\n"
+                        "Other players can join using:\n{join_command}\n\n"
+                        "The action will be processed at the end of the current cycle.",
+                        language
+                    ).format(
+                        action_id=action_id,
+                        join_command=join_command
+                    ),
+                    parse_mode="Markdown"
+                )
+            else:
+                # Error message
+                await query.edit_message_text(
+                    _("There was an error initiating your collective action. Please try again.", language)
+                )
+        except DatabaseError as e:
+            logger.error(f"Database error initiating collective action: {str(e)}")
+            await query.edit_message_text(
+                _("Database connection error. Please try again later.", language)
+            )
+        except Exception as e:
+            logger.error(f"Error initiating collective action: {str(e)}")
+            await query.edit_message_text(
+                _("There was an error processing your collective action: {error}", language).format(error=str(e))
+            )
+    else:
+        # Canceled
+        await query.edit_message_text(
+            _("Collective action canceled.", language)
+        )
+
+    # Clean up context
+    clear_user_data(telegram_id, context)
+
+    return ConversationHandler.END
