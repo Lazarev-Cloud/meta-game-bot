@@ -1,10 +1,4 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-
-"""
-Meta Game - Telegram Bot
-A political strategy game set in Novi-Sad, Yugoslavia in 1999.
-"""
+# Updated main.py with improved initialization and error handling
 
 import asyncio
 import os
@@ -31,21 +25,16 @@ configure_telegram_logger()
 configure_supabase_logger()
 
 # Now import database components
-from db.supabase_client import init_supabase, get_supabase, check_schema_exists
-from db.permission_checker import check_database_permissions
+from db.supabase_client import init_supabase, get_supabase
+from db import initialize_db
 
 # Import core components
 from bot.handlers import register_all_handlers
 from bot.middleware import setup_middleware
 from utils.config import load_config
-from utils.i18n import load_translations, get_user_language, init_i18n
+from utils.i18n import load_translations_safely, init_i18n
 from utils.error_handling import handle_error
 from utils.context_manager import context_manager
-
-# Initialize db and i18n
-from db import initialize_db
-
-db_functions = initialize_db()
 
 
 async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -57,6 +46,7 @@ async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     if update and update.effective_user:
         telegram_id = str(update.effective_user.id)
         try:
+            from utils.i18n import get_user_language
             language = await get_user_language(telegram_id)
         except Exception as e:
             logger.error(f"Error getting user language: {e}")
@@ -66,7 +56,7 @@ async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
     # Get detailed error info for logging
     error_details = ''.join(traceback.format_exception(None, context.error, context.error.__traceback__))
-    logger.error(f"Detailed error trace: {error_details}")
+    logger.debug(f"Detailed error trace: {error_details}")
 
     # Use the centralized error handler
     await handle_error(
@@ -97,15 +87,7 @@ async def init_database_with_retry(max_attempts=3):
                 return True
             except Exception as e:
                 logger.warning(f"Tables access check failed: {e}")
-
-                # Try to create database schema if possible
-                try:
-                    # Run schema creation (optional based on your setup)
-                    logger.info("Tables don't exist. Will use memory fallbacks.")
-                except Exception as inner_e:
-                    logger.warning(f"Failed to create tables: {inner_e}")
-
-                # Continue anyway with memory fallbacks
+                logger.info("Tables don't exist or are inaccessible. Will use memory fallbacks.")
                 return True
 
         except Exception as e:
@@ -118,40 +100,6 @@ async def init_database_with_retry(max_attempts=3):
             else:
                 logger.warning("All database initialization attempts failed. Using in-memory fallbacks.")
                 return False
-
-
-async def init_translations():
-    """Initialize translations with better reliability and failsafes."""
-    logger.info("Initializing translation system...")
-
-    # Import i18n functions
-    from utils.i18n import load_default_translations
-
-    # Start with defaults (synchronous, always works)
-    load_default_translations()
-    logger.info("Basic translations loaded")
-
-    # Try to load complete translations with retries
-    try:
-        max_attempts = 3
-        for attempt in range(1, max_attempts + 1):
-            try:
-                await load_translations()
-                logger.info("Translation system fully initialized")
-                return
-            except Exception as e:
-                if attempt < max_attempts:
-                    wait_time = 2 ** attempt  # Exponential backoff
-                    logger.warning(
-                        f"Attempt {attempt}/{max_attempts} to load translations failed: {e}. "
-                        f"Retrying in {wait_time} seconds..."
-                    )
-                    await asyncio.sleep(wait_time)
-                else:
-                    raise
-    except Exception as e:
-        logger.error(f"All attempts to initialize translations failed: {e}")
-        logger.warning("Continuing with basic translations only")
 
 
 async def cleanup_task():
@@ -197,12 +145,15 @@ async def main():
     if not db_init_success:
         logger.warning("Bot will continue but database functionality may be limited")
 
+    # Initialize db module and get functions
+    db_functions = initialize_db()
+
     # Initialize i18n with correct dependencies
     init_i18n(player_exists_func=db_functions['player_exists'], get_supabase_func=get_supabase)
 
     # Asynchronously load translations
     logger.info("Loading translations...")
-    await init_translations()
+    await load_translations_safely()
 
     # Set up middleware FIRST
     logger.info("Setting up middleware...")

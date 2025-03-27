@@ -1,9 +1,4 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-
-"""
-Enhanced internationalization module for the Meta Game bot.
-"""
+# utils/i18n.py - Improved internationalization implementation
 
 import json
 import logging
@@ -61,7 +56,7 @@ async def get_user_language(telegram_id: str) -> str:
     # Try database as fallback
     try:
         if _get_supabase_func is not None:
-            client = _get_supabase_func
+            client = _get_supabase_func()  # Call the function to get the client
             response = client.table("players").select("language")
             response = response.eq("telegram_id", telegram_id).limit(1)
             data = response.execute().data
@@ -88,18 +83,27 @@ async def set_user_language(telegram_id: str, language: str) -> bool:
     # Try database update
     try:
         if _get_supabase_func is not None and _player_exists_func is not None:
-            client = _get_supabase_func()
+            client = _get_supabase_func()  # Call the function to get the client
             exists = await _player_exists_func(telegram_id)
 
             if exists:
-                client.table("players").update({"language": language})
-                client = client.eq("telegram_id", telegram_id)
-                client.execute()
+                update_query = client.table("players").update({"language": language})
+                update_query = update_query.eq("telegram_id", telegram_id)
+                update_query.execute()
+                return True
         # If player doesn't exist, language will be saved during registration
     except Exception as e:
         logger.warning(f"Database language update failed: {e}")
 
+    # Return True since we at least updated the cache
     return True
+
+
+async def load_translations_safely():
+    """Load translations from files only, without database dependency."""
+    load_default_translations()
+    await load_translations_from_file()
+    logger.info(f"Loaded translations from files: {len(_translations['en_US'])} English, {len(_translations['ru_RU'])} Russian keys")
 
 
 async def load_translations_from_db() -> None:
