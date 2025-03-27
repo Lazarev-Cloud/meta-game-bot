@@ -176,3 +176,4 @@ cython_debug/
 meta_db
 
 .qodo
+/logs
