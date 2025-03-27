@@ -1407,7 +1407,8 @@ resource_conversion_handler = ConversationHandler(
         ]
     },
     fallbacks=[
-        CallbackQueryHandler(lambda u, c: ConversationHandler.END, pattern=r"^cancel_selection$")
+        CallbackQueryHandler(lambda u, c: ConversationHandler.END, pattern=r"^cancel_selection$"),
+        CommandHandler("cancel", cancel_handler)
     ],
     per_message=False
 )

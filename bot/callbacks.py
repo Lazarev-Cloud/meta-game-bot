@@ -854,7 +854,6 @@ async def news_page_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
     except Exception as e:
         await handle_error(update, language, e, "news_page_callback")
 
-
 async def language_setting_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle language setting callbacks."""
     await answer_callback(update)

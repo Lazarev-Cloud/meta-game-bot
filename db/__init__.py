@@ -102,51 +102,39 @@ async def admin_process_actions(telegram_id: str) -> Optional[Dict[str, Any]]:
     }
 
 
-async def register_player(telegram_id: str, name: str, ideology_score: int, language: str = "en_US") -> Optional[
-    Dict[str, Any]]:
-    """Register a new player."""
-    client = get_supabase()
-    try:
-        # Check if player already exists
-        if await player_exists(telegram_id):
-            return await get_player(telegram_id)
+@db_retry
+async def register_player(telegram_id: str, name: str, ideology_score: int, language: str = "en_US") -> Optional[Dict[str, Any]]:
+    """Register a new player with better error handling."""
+    logger.info(f"Registering player: {telegram_id}, {name}")
 
-        # Create new player with language field
+    # Store in memory first for resilience
+    from utils.context_manager import context_manager
+    context_manager.set(telegram_id, "is_registered", True)
+    context_manager.set(telegram_id, "player_data", {
+        "player_name": name,
+        "ideology_score": ideology_score,
+        "language": language,
+        "resources": {"influence": 5, "money": 10, "information": 3, "force": 2}
+    })
+
+    try:
+        # Attempt database registration
+        client = get_supabase()
         player_data = {
             "telegram_id": telegram_id,
             "name": name,
             "ideology_score": ideology_score,
-            "language": language  # Include language field
+            "language": language
         }
 
-        # Memory cache
-        from utils.context_manager import context_manager
-        context_manager.set(telegram_id, "is_registered", True)
-        context_manager.set(telegram_id, "language", language)
-
-        # Insert to database
         response = client.table("players").insert(player_data).execute()
 
-        if hasattr(response, 'data') and response.data:
-            # Create resources
-            try:
-                player_id = response.data[0].get("player_id")
-                resource_data = {
-                    "player_id": player_id,
-                    "influence_amount": 5,
-                    "money_amount": 10,
-                    "information_amount": 3,
-                    "force_amount": 2
-                }
-                client.table("resources").insert(resource_data).execute()
-            except Exception as e:
-                logger.warning(f"Could not create resources: {e}")
-
-            return await get_player(telegram_id)
+        if response and hasattr(response, 'data') and response.data:
+            return response.data[0]
+        return context_manager.get(telegram_id, "player_data")
     except Exception as e:
-        logger.error(f"Error registering player: {e}")
-
-    return None
+        logger.error(f"Database registration failed: {e}")
+        return context_manager.get(telegram_id, "player_data")
 
 # Add stub implementations for other required functions
 async def get_cycle_info(language: str = "en_US"):

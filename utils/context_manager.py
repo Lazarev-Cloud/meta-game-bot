@@ -123,7 +123,6 @@ def get_user_data(telegram_id: str, context: Optional[ContextTypes.DEFAULT_TYPE]
 
     return data
 
-
 def set_user_data(telegram_id: str, key: str, value: Any, context: Optional[ContextTypes.DEFAULT_TYPE] = None) -> None:
     """Set user data in both our custom context and PTB context if provided."""
     # Set in our custom context

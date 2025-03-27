@@ -184,9 +184,6 @@ async def handle_error(
     tb = traceback.format_exception(type(error), error, error.__traceback__)
     logger.debug(f"Traceback for {operation}:\n{''.join(tb)}")
 
-    # Import translation function here to avoid circular imports
-    from utils.i18n import _
-
     # Default message
     message = custom_message or _("An error occurred. Please try again later.", language)
 
@@ -210,20 +207,15 @@ async def handle_error(
     try:
         # Deliver error message based on update type
         if update.callback_query:
-            # For callback queries
-            query = update.callback_query
-            # Callback answers have length limit
-            await query.answer(message[:200])
+            await update.callback_query.answer(message[:200])
             try:
-                await query.edit_message_text(message)
+                await update.callback_query.edit_message_text(message)
             except Exception:
                 # Message might be unchanged
                 pass
         elif update.message:
-            # For regular messages
             await update.message.reply_text(message)
         else:
-            # Just log if we can't respond
             logger.warning(f"Could not send error message to user: {message}")
     except Exception as e:
         logger.error(f"Error sending error message: {e}")

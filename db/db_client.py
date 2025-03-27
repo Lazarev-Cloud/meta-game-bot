@@ -45,7 +45,7 @@ async def db_operation(
     while retries < max_retries:
         try:
             result = await func(*args, **kwargs)
-            # Handle cases where result is a number that could be mistaken for an error
+            # Handle cases where result is a primitive type
             if result is not None or isinstance(result, (int, float, bool)):
                 return result
             return default_return
