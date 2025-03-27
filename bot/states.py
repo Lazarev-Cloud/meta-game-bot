@@ -6,15 +6,18 @@ Conversation states and handlers for the Meta Game bot.
 """
 
 import logging
+import functools
+from typing import Dict, Any, Optional, Callable, Awaitable
 
-from telegram import Update
+from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import CallbackQueryHandler, ConversationHandler, MessageHandler, filters
 from telegram.ext import (
     ContextTypes,
     CommandHandler
 )
+
 from bot.callbacks import join_collective_action_callback
-# Import constants instead of defining states here (breaking circular import)
+# Import constants instead of defining states here
 from bot.constants import (
     NAME_ENTRY,
     IDEOLOGY_CHOICE,
@@ -48,7 +51,8 @@ from bot.keyboards import (
     get_physical_presence_keyboard,
     get_confirmation_keyboard,
     get_language_keyboard,
-    get_collective_action_keyboard, get_start_keyboard
+    get_collective_action_keyboard,
+    get_start_keyboard
 )
 from db import (
     register_player,
@@ -56,18 +60,36 @@ from db import (
     submit_action,
     exchange_resources,
     initiate_collective_action,
-    join_collective_action, get_player
+    join_collective_action,
+    get_player
 )
 from utils.context_manager import get_user_context, clear_user_context, clear_user_data, get_user_data, set_user_data
-from utils.error_handling import db_retry, DatabaseError
+from utils.error_handling import db_retry, DatabaseError, handle_error
 from utils.i18n import _, get_user_language, set_user_language
+from utils.message_utils import send_message, edit_or_reply
 
 # Initialize logger
 logger = logging.getLogger(__name__)
 
 
-# Registration conversation handlers
+# Helper decorator for conversation steps
+def conversation_step(func):
+    @functools.wraps(func)
+    async def wrapper(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+        telegram_id = str(update.effective_user.id)
+        language = await get_user_language(telegram_id)
 
+        try:
+            return await func(update, context)
+        except Exception as e:
+            logger.error(f"Error in conversation step {func.__name__}: {e}")
+            await handle_error(update, language, e, func.__name__)
+            return ConversationHandler.END
+
+    return wrapper
+
+
+# Registration conversation handlers
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Start the conversation to register a new player."""
     user = update.effective_user
@@ -119,6 +141,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
         return NAME_ENTRY
 
 
+@conversation_step
 async def language_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle language selection for registration."""
     query = update.callback_query
@@ -140,6 +163,7 @@ async def language_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     return NAME_ENTRY
 
 
+@conversation_step
 async def name_entry(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle name entry during registration."""
     user_input = update.message.text
@@ -166,6 +190,7 @@ async def name_entry(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     return IDEOLOGY_CHOICE
 
 
+@conversation_step
 async def cancel_registration(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle cancellation of registration."""
     telegram_id = str(update.effective_user.id)
@@ -181,6 +206,7 @@ async def cancel_registration(update: Update, context: ContextTypes.DEFAULT_TYPE
     return ConversationHandler.END
 
 
+@conversation_step
 async def ideology_choice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle ideology selection with proper formatting."""
     query = update.callback_query
@@ -219,8 +245,9 @@ async def ideology_choice(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         await query.edit_message_text(_("Registration error. Please try again later.", language))
         return ConversationHandler.END
 
-# Action conversation handlers
 
+# Action conversation handlers
+@conversation_step
 async def action_select_district(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle district selection for an action."""
     query = update.callback_query
@@ -254,6 +281,7 @@ async def action_select_district(update: Update, context: ContextTypes.DEFAULT_T
     return ConversationHandler.END
 
 
+@conversation_step
 async def district_selected(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle selected district for an action."""
     query = update.callback_query
@@ -295,6 +323,7 @@ async def district_selected(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     return ConversationHandler.END
 
 
+@conversation_step
 async def target_entry(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle target entry for an action."""
     user_input = update.message.text
@@ -321,6 +350,7 @@ async def target_entry(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     return ACTION_SELECT_RESOURCE
 
 
+@conversation_step
 async def resource_selected(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle resource selection for an action."""
     query = update.callback_query
@@ -355,6 +385,7 @@ async def resource_selected(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     return ConversationHandler.END
 
 
+@conversation_step
 async def amount_selected(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle amount selection for an action."""
     query = update.callback_query
@@ -387,6 +418,7 @@ async def amount_selected(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     return ConversationHandler.END
 
 
+@conversation_step
 async def physical_presence_selected(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle physical presence selection for an action."""
     query = update.callback_query
@@ -451,6 +483,7 @@ async def physical_presence_selected(update: Update, context: ContextTypes.DEFAU
 
 
 @db_retry
+@conversation_step
 async def action_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle action confirmation."""
     query = update.callback_query
@@ -515,7 +548,7 @@ async def action_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
 
 # Resource conversion handlers
-
+@conversation_step
 async def resource_conversion_start(update: Update, context: ContextTypes.DEFAULT_TYPE,
                                     from_resource: str = None, amount: int = None) -> int:
     """Start resource conversion process."""
@@ -588,6 +621,7 @@ async def resource_conversion_start(update: Update, context: ContextTypes.DEFAUL
         return CONVERT_FROM_RESOURCE
 
 
+@conversation_step
 async def convert_from_selected(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle source resource selection for conversion."""
     query = update.callback_query
@@ -622,6 +656,7 @@ async def convert_from_selected(update: Update, context: ContextTypes.DEFAULT_TY
     return ConversationHandler.END
 
 
+@conversation_step
 async def convert_amount_selected(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle amount selection for conversion."""
     query = update.callback_query
@@ -655,6 +690,7 @@ async def convert_amount_selected(update: Update, context: ContextTypes.DEFAULT_
     return ConversationHandler.END
 
 
+@conversation_step
 async def convert_to_selected(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle destination resource selection for conversion."""
     query = update.callback_query
@@ -704,7 +740,42 @@ async def convert_to_selected(update: Update, context: ContextTypes.DEFAULT_TYPE
     return ConversationHandler.END
 
 
+@conversation_step
+async def convert_amount_text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle amount entry as text input for resource conversion."""
+    user_input = update.message.text
+    telegram_id = str(update.effective_user.id)
+    language = await get_user_language(telegram_id)
+
+    try:
+        convert_amount = int(user_input)
+        if convert_amount <= 0:
+            await update.message.reply_text(
+                _("Please enter a positive number.", language)
+            )
+            return CONVERT_AMOUNT
+
+        # Store in user context
+        user_data = get_user_context(telegram_id)
+        user_data["convert_amount"] = convert_amount
+        from_resource = user_data.get("from_resource")
+
+        # Prompt for destination resource
+        await update.message.reply_text(
+            _("What type of resource do you want to convert to?", language),
+            reply_markup=get_resource_type_keyboard(language, exclude_type=from_resource)
+        )
+
+        return CONVERT_TO_RESOURCE
+    except ValueError:
+        await update.message.reply_text(
+            _("Invalid input. Please enter a number.", language)
+        )
+        return CONVERT_AMOUNT
+
+
 @db_retry
+@conversation_step
 async def convert_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle conversion confirmation."""
     query = update.callback_query
@@ -772,7 +843,7 @@ async def convert_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
 
 # Collective action handlers
-
+@conversation_step
 async def collective_action_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Start collective action setup."""
     telegram_id = str(update.effective_user.id)
@@ -790,6 +861,7 @@ async def collective_action_start(update: Update, context: ContextTypes.DEFAULT_
     return COLLECTIVE_ACTION_TYPE
 
 
+@conversation_step
 async def collective_action_type_selected(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle collective action type selection."""
     query = update.callback_query
@@ -824,6 +896,7 @@ async def collective_action_type_selected(update: Update, context: ContextTypes.
     return ConversationHandler.END
 
 
+@conversation_step
 async def collective_action_district_selected(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle district selection for collective action."""
     query = update.callback_query
@@ -862,6 +935,7 @@ async def collective_action_district_selected(update: Update, context: ContextTy
     return ConversationHandler.END
 
 
+@conversation_step
 async def collective_action_target_entered(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle target entry for collective attack."""
     target_name = update.message.text
@@ -881,6 +955,7 @@ async def collective_action_target_entered(update: Update, context: ContextTypes
     return COLLECTIVE_ACTION_RESOURCE
 
 
+@conversation_step
 async def collective_action_resource_selected(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle resource selection for collective action."""
     query = update.callback_query
@@ -915,6 +990,7 @@ async def collective_action_resource_selected(update: Update, context: ContextTy
     return ConversationHandler.END
 
 
+@conversation_step
 async def collective_action_amount_selected(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle amount selection for collective action."""
     query = update.callback_query
@@ -947,6 +1023,7 @@ async def collective_action_amount_selected(update: Update, context: ContextType
     return ConversationHandler.END
 
 
+@conversation_step
 async def collective_action_physical_selected(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle physical presence selection for collective action."""
     query = update.callback_query
@@ -1009,6 +1086,7 @@ async def collective_action_physical_selected(update: Update, context: ContextTy
 
 
 @db_retry
+@conversation_step
 async def collective_action_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle collective action confirmation."""
     query = update.callback_query
@@ -1073,7 +1151,7 @@ async def collective_action_confirm(update: Update, context: ContextTypes.DEFAUL
 
 
 # Join collective action handlers
-
+@conversation_step
 async def join_collective_action_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Start the process of joining a collective action."""
     telegram_id = str(update.effective_user.id)
@@ -1107,6 +1185,7 @@ async def join_collective_action_start(update: Update, context: ContextTypes.DEF
         return ConversationHandler.END
 
 
+@conversation_step
 async def join_action_resource_selected(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle resource selection for joining a collective action."""
     query = update.callback_query
@@ -1141,6 +1220,7 @@ async def join_action_resource_selected(update: Update, context: ContextTypes.DE
     return ConversationHandler.END
 
 
+@conversation_step
 async def join_action_amount_selected(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle amount selection for joining a collective action."""
     query = update.callback_query
@@ -1173,6 +1253,7 @@ async def join_action_amount_selected(update: Update, context: ContextTypes.DEFA
     return ConversationHandler.END
 
 
+@conversation_step
 async def join_action_physical_selected(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle physical presence selection for joining a collective action."""
     query = update.callback_query
@@ -1224,40 +1305,8 @@ async def join_action_physical_selected(update: Update, context: ContextTypes.DE
     return ConversationHandler.END
 
 
-async def convert_amount_text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Handle amount entry as text input for resource conversion."""
-    user_input = update.message.text
-    telegram_id = str(update.effective_user.id)
-    language = await get_user_language(telegram_id)
-
-    try:
-        convert_amount = int(user_input)
-        if convert_amount <= 0:
-            await update.message.reply_text(
-                _("Please enter a positive number.", language)
-            )
-            return CONVERT_AMOUNT
-
-        # Store in user context
-        user_data = get_user_context(telegram_id)
-        user_data["convert_amount"] = convert_amount
-        from_resource = user_data.get("from_resource")
-
-        # Prompt for destination resource
-        await update.message.reply_text(
-            _("What type of resource do you want to convert to?", language),
-            reply_markup=get_resource_type_keyboard(language, exclude_type=from_resource)
-        )
-
-        return CONVERT_TO_RESOURCE
-    except ValueError:
-        await update.message.reply_text(
-            _("Invalid input. Please enter a number.", language)
-        )
-        return CONVERT_AMOUNT
-
-
 @db_retry
+@conversation_step
 async def join_action_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle confirmation for joining a collective action."""
     query = update.callback_query
@@ -1323,6 +1372,7 @@ async def join_action_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE
 
 
 # Cancel handler for all conversations
+@conversation_step
 async def cancel_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle /cancel command in any conversation."""
     telegram_id = str(update.effective_user.id)
@@ -1351,7 +1401,7 @@ registration_handler = ConversationHandler(
         ]
     },
     fallbacks=[CommandHandler("cancel", cancel_registration)],
-    per_message=False  # This is the correct setting for mixed handlers
+    per_message=True  # Fixed: This is the correct setting for mixed handlers
 )
 
 action_handler = ConversationHandler(
@@ -1382,14 +1432,13 @@ action_handler = ConversationHandler(
         CallbackQueryHandler(lambda u, c: ConversationHandler.END, pattern=r"^cancel_selection$"),
         CommandHandler("cancel", cancel_handler)
     ],
-    per_message=False  # Use this instead of True
+    per_message=True  # Fixed: Use True instead of False
 )
 
 # Reference function instead of directly importing
 resource_conversion_handler = ConversationHandler(
     entry_points=[
         CallbackQueryHandler(resource_conversion_start, pattern=r"^exchange_resources$")
-        # Remove CommandHandler("convert_resource", resource_conversion_command)
     ],
     states={
         CONVERT_FROM_RESOURCE: [
@@ -1410,11 +1459,8 @@ resource_conversion_handler = ConversationHandler(
         CallbackQueryHandler(lambda u, c: ConversationHandler.END, pattern=r"^cancel_selection$"),
         CommandHandler("cancel", cancel_handler)
     ],
-    per_message=False
+    per_message=True  # Fixed: Use True instead of False
 )
-
-
-
 
 collective_action_handler = ConversationHandler(
     entry_points=[
@@ -1447,7 +1493,7 @@ collective_action_handler = ConversationHandler(
         CallbackQueryHandler(lambda u, c: ConversationHandler.END, pattern=r"^cancel_selection$"),
         CommandHandler("cancel", cancel_handler)
     ],
-    per_message=False  # Use this instead of True
+    per_message=True  # Fixed: Use True instead of False
 )
 
 join_command_handler = ConversationHandler(
@@ -1471,12 +1517,12 @@ join_command_handler = ConversationHandler(
     fallbacks=[
         CommandHandler("cancel", cancel_handler)
     ],
-    per_message=False    # Add this parameter to fix the warning
+    per_message=True  # Fixed: Use True instead of False
 )
 
 join_callback_handler = ConversationHandler(
     entry_points=[
-        CallbackQueryHandler(join_collective_action_callback, pattern=r"^join_collective_action:")
+        CallbackQueryHandler(lambda u, c: join_collective_action_callback(u, c), pattern=r"^join_collective_action:")
     ],
     states={
         JOIN_ACTION_RESOURCE: [
@@ -1495,7 +1541,7 @@ join_callback_handler = ConversationHandler(
     fallbacks=[
         CallbackQueryHandler(lambda u, c: ConversationHandler.END, pattern=r"^cancel_selection$")
     ],
-    per_message=True
+    per_message=True  # Fixed: Keep this as True
 )
 
 # List of all conversation handlers
