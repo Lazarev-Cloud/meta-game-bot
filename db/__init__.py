@@ -9,6 +9,8 @@ import logging
 import asyncio
 from typing import Dict, Any, Optional
 
+from utils.error_handling import db_retry
+
 # Initialize logger
 logger = logging.getLogger(__name__)
 
