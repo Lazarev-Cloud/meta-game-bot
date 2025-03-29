@@ -1,0 +1,62 @@
+{
+  "start": {
+    "type": "callbackmenu",
+    "options": {
+      "register": { "next": "register_name" },
+      "about": { "next": "about" },
+      "settings": { "next": "settings" }
+    }
+  },
+
+  "settings": {
+    "type": "callbackmenu",
+    "prompt": "settings.prompt",
+    "options": {
+      "lang_ru": {
+        "handler": "set_lang_ru",
+        "next": "__back__"
+      },
+      "lang_en": {
+        "handler": "set_lang_en",
+        "next": "__back__"
+      },
+      "back": {
+        "next": "__back__"
+      }
+    }
+  },
+
+
+  "register_name": {
+    "type": "textinput",
+    "field": "name",
+    "handler": "validate_name",
+    "next": "register_greeting"
+  },
+
+  "register_greeting": {
+    "type": "callbackmenu",
+    "handler": "save_name_to_state",
+    "options": {
+      "to_menu": {
+        "next": "__menu__"
+      },
+      "restart": {
+        "next": "register_name"
+      }
+    }
+  },
+
+  "about": {
+    "type": "callbackmenu",
+    "preserve_message": true,
+    "options": {
+      "back": {
+        "next": "__back__"
+      },
+      "menu": {
+        "next": "__menu__"
+      }
+    }
+  }
+}

@@ -1,0 +1,78 @@
+# === Python ===
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+.eggs/
+pip-wheel-metadata/
+
+# === Virtualenv / Poetry ===
+.venv/
+venv/
+*.env
+.env.*
+.envrc
+.mypy_cache/
+.dmypy.json
+.pyre/
+
+# === PyCharm / JetBrains IDE ===
+.idea/
+*.iml
+*.iws
+*.ipr
+.idea_modules/
+
+# === SQLite DB files ===
+*.sqlite
+*.sqlite3
+*.db
+*.db-journal
+
+# === FastAPI / Uvicorn logs ===
+*.pid
+
+# === Alembic ===
+alembic/versions/*.pyc
+alembic/versions/__pycache__/
+# (если ты не хочешь игнорировать миграции, удали строку ниже)
+alembic/versions/*.py
+
+# === OS-specific ===
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# === Tests / Coverage ===
+.coverage
+htmlcov/
+.cache/
+.pytest_cache/
+.tox/
+nosetests.xml
+coverage.xml
+test-results.xml
+
+# === VS Code (на всякий) ===
+.vscode/
+
+# === Local dev files ===
+*.swp
+*.bak
+*.tmp
+*.orig
+*.rej
+
+# === Logs & Debug ===
+logs/
+*.log
+debug.log
+error.log
+
+# === Misc ===
+*.ipynb_checkpoints

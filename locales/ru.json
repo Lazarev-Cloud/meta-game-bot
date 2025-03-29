@@ -1,0 +1,25 @@
+{
+  "start.prompt": "Привет! Что вы хотите сделать?",
+  "start.options.register": "📝 Регистрация",
+  "start.options.about": "ℹ️ О боте",
+  "start.options.settings": "⚙️ Настройки",
+
+  "settings.prompt": "Выберите язык интерфейса:",
+  "settings.options.lang_ru": "🇷🇺 Русский",
+  "settings.options.lang_en": "🇬🇧 Английский",
+  "settings.options.back": "🔙 Назад",
+
+  "register_name.prompt": "Введите ваше имя:",
+
+  "register_greeting.prompt": "Отлично, {{name}}! Что дальше?",
+  "register_greeting.options.to_menu": "🏠 Вернуться в меню",
+  "register_greeting.options.restart": "🔁 Ввести имя заново",
+
+  "about.prompt": "Этот бот — пример универсального Flow-движка на aiogram.\n\nИсходники: GitHub\nАвтор: NotThatDroids",
+  "about.options.back": "🔙 Назад",
+  "about.options.menu": "🏠 В меню",
+
+  "__system__.invalid_text": "Ожидается текстовый ввод.",
+  "__system__.invalid_callback": "Ожидается выбор из меню.",
+  "__system__.invalid_option": "Неверный выбор."
+}

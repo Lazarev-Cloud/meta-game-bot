@@ -1,0 +1,25 @@
+{
+  "start.prompt": "Hello! What would you like to do?",
+  "start.options.register": "📝 Register",
+  "start.options.about": "ℹ️ About",
+  "start.options.settings": "⚙️ Settings",
+
+  "settings.prompt": "Choose your interface language:",
+  "settings.options.lang_ru": "🇷🇺 Russian",
+  "settings.options.lang_en": "🇬🇧 English",
+  "settings.options.back": "🔙 Back",
+
+  "register_name.prompt": "Please enter your name:",
+
+  "register_greeting.prompt": "Great, {{name}}! What's next?",
+  "register_greeting.options.to_menu": "🏠 Back to menu",
+  "register_greeting.options.restart": "🔁 Enter name again",
+
+  "about.prompt": "This bot is an example of a universal Flow engine using aiogram.\n\nSource: GitHub\nAuthor: NotThatDroids",
+  "about.options.back": "🔙 Back",
+  "about.options.menu": "🏠 Menu",
+
+  "__system__.invalid_text": "Text input expected.",
+  "__system__.invalid_callback": "Please choose an option from the menu.",
+  "__system__.invalid_option": "Invalid selection."
+}
