@@ -18,28 +18,32 @@ class CallbackMenuAction(FlowActionType):
 
         # Опции с локализацией label
         options = self.config.get("options", {})
-        buttons = [
-            [
-                InlineKeyboardButton(
-                    text=t(f"{self.step_id}.options.{key}", **data),
-                    callback_data=key,
-                )
-            ]
+        max_in_row = self.config.get("max_in_row", 1)
+
+        # Формируем кнопки
+        button_list = [
+            InlineKeyboardButton(
+                text=t(f"{self.step_id}.options.{key}", **data),
+                callback_data=key,
+            )
             for key in options
+        ]
+
+        # Разбиваем кнопки на строки
+        buttons = [
+            button_list[i:i + max_in_row]
+            for i in range(0, len(button_list), max_in_row)
         ]
 
         markup = InlineKeyboardMarkup(inline_keyboard=buttons)
 
-        data = await state.get_data()
         preserve_previous = data.pop("__preserve_previous", False)
         await state.update_data(__preserve_previous=False)
 
         if isinstance(event, CallbackQuery):
             if preserve_previous:
-                # просто отправляем новое сообщение, не трогая старое
                 await event.message.answer(prompt, reply_markup=markup)
             else:
-                # редактируем предыдущее
                 await event.message.edit_text(prompt, reply_markup=markup)
         else:
             await event.answer(prompt, reply_markup=markup)

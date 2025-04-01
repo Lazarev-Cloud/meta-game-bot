@@ -1,23 +1,11 @@
-import importlib
-import pkgutil
-import inspect
 import pathlib
-import logging
+from app.utils.module_loader import load_objects_from_package
 
-log = logging.getLogger(__name__)
 
-handler_registry = {}
-
-package_name = __name__  # "flow_engine.handlers"
-package_path = pathlib.Path(__file__).parent
-
-for _, module_name, _ in pkgutil.iter_modules([str(package_path)]):
-    if module_name.startswith("_"):
-        continue
-
-    module = importlib.import_module(f"{package_name}.{module_name}")
-
-    for name, obj in inspect.getmembers(module):
-        if inspect.iscoroutinefunction(obj):
-            handler_registry[name] = obj
-            log.info(f"⚙️ Handler registered: '{name}' -> {module.__name__}.{name}")
+handler_registry = load_objects_from_package(
+    package_path=pathlib.Path(__file__).parent,
+    package_name=__name__,
+    filter_func=lambda name, obj: callable(obj) and getattr(obj, "__code__", None) and obj.__code__.co_flags & 0x80,
+    key_func=lambda name, obj: name,
+    log_prefix="⚙️ Handler registered"
+)

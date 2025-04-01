@@ -3,7 +3,7 @@ from app.logger import configure_logging
 from api.routes import router as api_router
 
 app = FastAPI(
-    title="My Project API",
+    title="Not That Bot Template API",
     description="API documentation with Swagger UI",
     version="1.0.0"
 )
