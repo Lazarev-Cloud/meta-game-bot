@@ -14,7 +14,7 @@ def load_objects_from_package(
         filter_func: Callable[[str, Any], bool],
         key_func: Callable[[str, Any], str],
         on_load: Callable[[str, Any], None] | None = None,
-        skip_modules: str = None,
+        skip_modules: set[str] = None,
         log_prefix: str = "📦 Loaded"
 ) -> dict[str, Any]:
     """

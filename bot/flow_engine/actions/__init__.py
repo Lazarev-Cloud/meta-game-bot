@@ -1,9 +1,6 @@
 import pathlib
-import logging
 from app.utils.module_loader import load_objects_from_package
 from .base import FlowActionType
-
-log = logging.getLogger(__name__)
 
 action_types = load_objects_from_package(
     package_path=pathlib.Path(__file__).parent,

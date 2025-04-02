@@ -9,6 +9,7 @@
       "settings": { "next": "settings" }
     }
   },
+
   "settings": {
     "type": "callbackmenu",
     "max_in_row": 2,
@@ -27,13 +28,28 @@
       }
     }
   },
-  "register_name": {
-    "type": "textinput",
-    "field": "name",
-    "handler": "validate_name",
-    "next": "register_greeting"
+"register_name": {
+  "type": "textinput",
+  "prompt": "register_name.prompt",
+  "field": "name",
+  "handler": "validate_name",
+
+  "exceptions": {
+    "NameTooShortError": {
+      "prompt": "errors.name_too_short",
+      "next": "__repeat__"
+    },
+    "ValueError": {
+      "next": "__repeat__"
+    },
+    "Exception": {
+      "prompt": "errors.default",
+      "next": "__menu__"
+    }
   },
 
+  "next": "register_greeting"
+},
   "register_greeting": {
     "max_in_row": 2,
     "type": "callbackmenu",
