@@ -7,6 +7,7 @@ from aiogram.types import Message, CallbackQuery, InlineKeyboardButton, InlineKe
 from aiogram.fsm.context import FSMContext
 from .base import FlowActionType
 from app.translator import t
+from ..reply_factory import ReplyFactory
 
 
 class CallbackMenuAction(FlowActionType):
@@ -35,36 +36,18 @@ class CallbackMenuAction(FlowActionType):
         """
         data = await state.get_data()
 
-        prompt = t(f"{self.step_id}.prompt", **data)
+        # Дополняем конфиг нужными runtime-полями
+        flow_config = self.config.copy()
+        flow_config["prompt"] = t(f"{self.step_id}.prompt", **data)
 
-        options = self.config.get("options", {})
-        max_in_row = self.config.get("max_in_row", 1)
-
-        button_list = [
-            InlineKeyboardButton(
-                text=t(f"{self.step_id}.options.{key}", **data),
-                callback_data=key,
-            )
-            for key in options
-        ]
-
-        buttons = [
-            button_list[i:i + max_in_row]
-            for i in range(0, len(button_list), max_in_row)
-        ]
-
-        markup = InlineKeyboardMarkup(inline_keyboard=buttons)
-
+        # Учитываем preserve_previous для reply_type
         preserve_previous = data.pop("__preserve_previous", False)
         await state.update_data(__preserve_previous=False)
 
-        if isinstance(event, CallbackQuery):
-            if preserve_previous:
-                await event.message.answer(prompt, reply_markup=markup)
-            else:
-                await event.message.edit_text(prompt, reply_markup=markup)
-        else:
-            await event.answer(prompt, reply_markup=markup)
+        if flow_config.get("reply_type") is None:
+            flow_config["reply_type"] = "edit" if not preserve_previous else "new"
+
+        await ReplyFactory.send(event, state, flow_config, step_id=self.step_id)
 
     async def _handle_user_input(self, event: Message | CallbackQuery, state: FSMContext) -> str | None:
         """

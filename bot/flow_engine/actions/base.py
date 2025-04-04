@@ -106,6 +106,7 @@ class FlowActionType(ABC):
             action = exceptions_cfg.get(exc_type)
             data = await state.get_data()
             lang = data.get("lang", "ru")
+            data.pop("lang", None)
 
             if action:
                 prompt_key = action.get("prompt", exc.args[0] if not t(exc.args[0]) == exc.args[0]

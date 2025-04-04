@@ -3,6 +3,12 @@
     "type": "callbackmenu",
     "keyboard_type": "reply",
     "max_in_row": 2,
+    "media": [
+      {
+        "type": "photo",
+        "media": "https://png.pngtree.com/thumb_back/fw800/background/20230610/pngtree-picture-of-a-blue-bird-on-a-black-background-image_2937385.jpg"
+      }
+    ],
     "options": {
       "register": { "next": "register_name" },
       "about": { "next": "about" },
@@ -68,6 +74,15 @@
     "type": "callbackmenu",
     "max_in_row": 2,
     "preserve_message": true,
+    "reply_type": "edit",
+    "prompt": "about.prompt",
+    "media": [
+      {
+        "type": "photo",
+        "media": "https://example.com/photo.jpg",
+        "caption": "Приветствие"
+      }
+    ],
     "options": {
       "back": {
         "next": "__back__"
@@ -75,6 +90,17 @@
       "menu": {
         "next": "__menu__"
       }
+    }
+  },
+
+  "survey": {
+    "type": "poll",
+    "prompt": "survey.question",
+    "poll": {
+      "question": "Как вам бот?",
+      "options": ["Отлично", "Хорошо", "Неплохо", "Плохо"],
+      "is_anonymous": true,
+      "allows_multiple_answers": false
     }
   }
 }

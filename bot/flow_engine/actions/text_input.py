@@ -8,6 +8,7 @@ from aiogram.types import Message, CallbackQuery
 from aiogram.fsm.context import FSMContext
 from .base import FlowActionType
 from app.translator import t
+from ..reply_factory import ReplyFactory
 
 
 class TextInputAction(FlowActionType):
@@ -34,19 +35,16 @@ class TextInputAction(FlowActionType):
         """
         data = await state.get_data()
 
-        prompt = t(f"{self.step_id}.prompt", **data)
+        flow_config = self.config.copy()
+        flow_config["prompt"] = t(f"{self.step_id}.prompt", **data)
 
-        data = await state.get_data()
         preserve_previous = data.pop("__preserve_previous", False)
         await state.update_data(__preserve_previous=False)
 
-        if isinstance(event, CallbackQuery):
-            if preserve_previous:
-                await event.message.answer(prompt)
-            else:
-                await event.message.edit_text(prompt)
-        else:
-            await event.answer(prompt)
+        if flow_config.get("reply_type") is None:
+            flow_config["reply_type"] = "edit" if not preserve_previous else "new"
+
+        await ReplyFactory.send(event, state, flow_config, step_id=self.step_id)
 
     async def _handle_user_input(self, event: Message | CallbackQuery, state: FSMContext) -> str | None:
         """
