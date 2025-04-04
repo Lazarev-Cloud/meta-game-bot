@@ -8,7 +8,6 @@ from aiogram.types import Message, CallbackQuery
 from aiogram.fsm.context import FSMContext
 from .base import FlowActionType
 from app.translator import t
-from ..reply_factory import ReplyFactory
 
 
 class TextInputAction(FlowActionType):
@@ -20,31 +19,6 @@ class TextInputAction(FlowActionType):
     Configuration Options:
         field (str, optional): The name of the field to store the user input under. Defaults to "value".
     """
-
-    async def render(self, event: Message | CallbackQuery, state: FSMContext) -> None:
-        """
-        Render a prompt asking the user for text input.
-
-        Args:
-            event (Message | CallbackQuery): Incoming user event.
-            state (FSMContext): Current FSM context.
-
-        Behavior:
-            - Sends or edits a localized prompt message based on the event type.
-            - Resets the "__preserve_previous" flag in the FSM context after use.
-        """
-        data = await state.get_data()
-
-        flow_config = self.config.copy()
-        flow_config["prompt"] = t(f"{self.step_id}.prompt", **data)
-
-        preserve_previous = data.pop("__preserve_previous", False)
-        await state.update_data(__preserve_previous=False)
-
-        if flow_config.get("reply_type") is None:
-            flow_config["reply_type"] = "edit" if not preserve_previous else "new"
-
-        await ReplyFactory.send(event, state, flow_config, step_id=self.step_id)
 
     async def _handle_user_input(self, event: Message | CallbackQuery, state: FSMContext) -> str | None:
         """

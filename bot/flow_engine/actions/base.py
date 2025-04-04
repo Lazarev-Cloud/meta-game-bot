@@ -15,6 +15,7 @@ from bot.flow_engine.handlers import handler_registry
 
 # Импорт ошибок
 from bot.flow_engine.exceptions.base import *  # noqa: F401,F403
+from bot.flow_engine.reply_factory import ReplyFactory
 
 log = logging.getLogger(__name__)
 
@@ -51,7 +52,18 @@ class FlowActionType(ABC):
 
         Must be implemented by subclasses.
         """
-        ...
+        data = await state.get_data()
+
+        flow_config = self.config.copy()
+        flow_config["prompt"] = t(f"{self.step_id}.prompt", **data)
+
+        preserve_previous = data.pop("__preserve_previous", False)
+        await state.update_data(__preserve_previous=False)
+
+        if flow_config.get("reply_type") is None:
+            flow_config["reply_type"] = "edit" if not preserve_previous else "new"
+
+        await ReplyFactory.send(event, state, flow_config, step_id=self.step_id)
 
     @abstractmethod
     async def _handle_user_input(self, event: Message | CallbackQuery, state: FSMContext) -> str | None:

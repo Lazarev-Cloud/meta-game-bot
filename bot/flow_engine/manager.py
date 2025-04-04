@@ -54,19 +54,11 @@ class FlowManager:
         """
         data = await state.get_data()
         step_id = data.get("current_step", "start")
-        # TODO: Make duplicate as protected function
-        step_cfg = self.config.get(step_id)
 
-        if not step_cfg:
-            await self._answer(event, t("__system__.step_not_found"))
+        action = await self._get_action_for_step(event, step_id)
+        if not action:
             return
 
-        action_cls = action_types.get(step_cfg.get("type"))
-        if not action_cls:
-            await self._answer(event, t("__system__.unknown_action_type"))
-            return
-
-        action = action_cls(step_id, step_cfg)
         await action.render(event, state)
 
     async def handle(self, event: Message | CallbackQuery, state: FSMContext):
@@ -79,18 +71,11 @@ class FlowManager:
         """
         data = await state.get_data()
         step_id = data.get("current_step")
-        step_cfg = self.config.get(step_id)
 
-        if not step_cfg:
-            await self._answer(event, t("__system__.step_not_found"))
+        action = await self._get_action_for_step(event, step_id)
+        if not action:
             return
 
-        action_cls = action_types.get(step_cfg.get("type"))
-        if not action_cls:
-            await self._answer(event, t("__system__.unknown_action_type"))
-            return
-
-        action = action_cls(step_id, step_cfg)
         next_step = await action.handle_input(event, state)
         await self._process_transition(event, state, next_step)
 
@@ -132,6 +117,30 @@ class FlowManager:
         cfg = self.config.get(step_id, {})
         preserve = cfg.get("preserve_message", False)
         await state.update_data(__preserve_previous=preserve)
+
+    async def _get_action_for_step(self, event: Message | CallbackQuery, step_id: str):
+        """
+        Retrieve the action class instance for the given step.
+
+        Args:
+            event (Message | CallbackQuery): Incoming user event.
+            step_id (str): Identifier of the step.
+
+        Returns:
+            FlowActionType | None: Instantiated action class or None if step/action type not found.
+        """
+        step_cfg = self.config.get(step_id)
+
+        if not step_cfg:
+            await self._answer(event, t("__system__.step_not_found"))
+            return None
+
+        action_cls = action_types.get(step_cfg.get("type"))
+        if not action_cls:
+            await self._answer(event, t("__system__.unknown_action_type"))
+            return None
+
+        return action_cls(step_id, step_cfg)
 
     async def _go_back(self, event: Message | CallbackQuery, state: FSMContext):
         """
