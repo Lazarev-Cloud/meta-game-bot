@@ -1,8 +1,9 @@
 [project]
-name = "not-that-bot-template"
+name = "meta-game-bot"
 version = "0.1.0"
-description = "Aiogram bot template"
+description = "Aiogram bot for Novisad LARP game."
 authors = [
+    {name = "Anatoly Lazarev",email = "support@lazarev.cloud"},
     {name = "Not That Droids",email = "dv.tarkov@google.com"}
 ]
 readme = "README.md"
