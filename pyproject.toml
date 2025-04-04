@@ -1,5 +1,5 @@
 [project]
-name = "meta-game-bot"
+name = "meta_game_bot"
 version = "0.1.0"
 description = "Aiogram bot for Novisad LARP game."
 authors = [
