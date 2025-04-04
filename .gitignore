@@ -76,3 +76,4 @@ error.log
 
 # === Misc ===
 *.ipynb_checkpoints
+/flake8.errors

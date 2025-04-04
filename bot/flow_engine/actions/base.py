@@ -1,3 +1,9 @@
+"""
+Base class for flow actions in the bot's flow engine.
+
+Defines the abstract FlowActionType and common utility methods
+for handling user input, rendering prompts, managing handlers, and exception processing.
+"""
 import logging
 import re
 from abc import ABC, abstractmethod
@@ -5,26 +11,68 @@ from aiogram.types import Message, CallbackQuery
 from aiogram.fsm.context import FSMContext
 
 from app.translator import t
-from bot.flow_engine.exceptions.base import *
 from bot.flow_engine.handlers import handler_registry
+
+# Импорт ошибок
+from bot.flow_engine.exceptions.base import *  # noqa: F401,F403
 
 log = logging.getLogger(__name__)
 
 
 class FlowActionType(ABC):
+    """
+    Abstract base class for all flow action types.
+
+    Attributes:
+        step_id (str): Identifier for the current step in the flow.
+        config (dict): Configuration dictionary for the action.
+
+    Methods:
+        render(event, state): Abstract method to render the step.
+        handle_input(event, state): Handles user input and invokes handlers or transitions.
+        _handle_user_input(event, state): Abstract method to process the user input.
+    """
+
     def __init__(self, step_id: str, config: dict):
+        """
+        Initialize a FlowActionType.
+
+        Args:
+            step_id (str): Identifier of the flow step.
+            config (dict): Step-specific configuration.
+        """
         self.step_id = step_id
         self.config = config
 
     @abstractmethod
     async def render(self, event: Message | CallbackQuery, state: FSMContext) -> None:
+        """
+        Abstract method to render the action's initial prompt or view.
+
+        Must be implemented by subclasses.
+        """
         ...
 
     @abstractmethod
     async def _handle_user_input(self, event: Message | CallbackQuery, state: FSMContext) -> str | None:
+        """
+        Abstract method to process the user's input.
+
+        Must be implemented by subclasses.
+        """
         ...
 
     async def handle_input(self, event: Message | CallbackQuery, state: FSMContext) -> str | None:
+        """
+        Handle the user input, process the action, manage exceptions, and invoke custom handlers if needed.
+
+        Args:
+            event (Message | CallbackQuery): Incoming event from the user.
+            state (FSMContext): Current FSM context.
+
+        Returns:
+            str | None: The next step identifier, or None if the flow should terminate.
+        """
         special = await self.__check_special_command(event)
         if special:
             return special
@@ -75,7 +123,13 @@ class FlowActionType(ABC):
     @staticmethod
     async def _send_prompt(event: Message | CallbackQuery, prompt_key: str, lang: str, **kwargs):
         """
-        Утилита для отправки сообщения с ошибкой.
+        Send a localized prompt to the user.
+
+        Args:
+            event (Message | CallbackQuery): Incoming event.
+            prompt_key (str): Key to fetch the localized prompt.
+            lang (str): Language code.
+            **kwargs: Data for rendering template variables.
         """
         message = t(prompt_key, lang=lang, **kwargs)
         if isinstance(event, CallbackQuery):
@@ -85,6 +139,17 @@ class FlowActionType(ABC):
 
     @staticmethod
     async def __check_special_command(event: Message | CallbackQuery) -> str | None:
+        """
+        Check if the user input corresponds to a special command.
+
+        Special commands include back, menu, and repeat actions.
+
+        Args:
+            event (Message | CallbackQuery): Incoming event.
+
+        Returns:
+            str | None: Special command identifier if matched, otherwise None.
+        """
         text = None
         if isinstance(event, Message):
             text = event.text
@@ -107,7 +172,14 @@ class FlowActionType(ABC):
 
     async def _get_prompt(self, state: FSMContext, placeholder="") -> str:
         """
-        Возвращает отрендеренный prompt с подстановкой {{переменных}} из state.
+        Retrieve the rendered prompt string with variable substitution from the state.
+
+        Args:
+            state (FSMContext): Current FSM context.
+            placeholder (str, optional): Fallback text if no prompt is configured.
+
+        Returns:
+            str: Rendered prompt text.
         """
         template = self.config.get("prompt", placeholder)
         data = await state.get_data()
@@ -115,7 +187,27 @@ class FlowActionType(ABC):
 
     @staticmethod
     def _render_template(template: str, data: dict) -> str:
+        """
+        Replace template placeholders {{variable}} with corresponding values from a dictionary.
+
+        Args:
+            template (str): Template string containing placeholders.
+            data (dict): Data to substitute into the template.
+
+        Returns:
+            str: Rendered string.
+        """
         def replacer(match):
+            """
+            Replace a template placeholder with the corresponding value from the data dictionary.
+
+            Args:
+                match (re.Match): A regex match object capturing a placeholder key.
+
+            Returns:
+                str: The corresponding value from the data dictionary,
+                     or the original placeholder if the key is not found.
+            """
             key = match.group(1)
             return str(data.get(key, f"{{{{{key}}}}}"))
 
@@ -123,8 +215,13 @@ class FlowActionType(ABC):
 
     def _get_next_step(self, result: str | None) -> str | None:
         """
-        Определяет, какой шаг будет следующим после текущего ввода.
-        Универсально работает как для text_input, так и для callback_menu.
+        Determine the next step based on the user input result and action configuration.
+
+        Args:
+            result (str | None): The processed user input result.
+
+        Returns:
+            str | None: Identifier of the next step, or None if not defined.
         """
         # Если есть options — ищем в них
         if "options" in self.config and result:

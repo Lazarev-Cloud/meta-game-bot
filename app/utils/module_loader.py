@@ -1,9 +1,17 @@
+"""
+Dynamic loader for objects from a specified Python package.
+
+This module provides a utility function to import modules dynamically
+from a given package path and collect objects that match a filter condition.
+Useful for automatic registration patterns such as loading command handlers,
+plugins, or route definitions.
+"""
 import importlib
 import inspect
 import logging
 import pathlib
 import pkgutil
-from typing import Callable, Any, Literal
+from typing import Callable, Any
 
 log = logging.getLogger(__name__)
 
@@ -18,13 +26,24 @@ def load_objects_from_package(
         log_prefix: str = "📦 Loaded"
 ) -> dict[str, Any]:
     """
-    Универсальный загрузчик объектов из модулей пакета.
+    Load objects from modules within a given package.
 
-    - `filter_func(name, obj)` — фильтрация нужных объектов (например, isclass + issubclass)
-    - `key_func(name, obj)` — ключ в результирующем словаре (например, `obj.__name__.lower()`)
-    - `on_load(key, obj)` — побочный эффект (например, логгирование)
+    Args:
+        package_path (pathlib.Path): Filesystem path to the package directory.
+        package_name (str): Importable name of the package (e.g. 'app.utils').
+        filter_func (Callable): A function that determines whether an object should be loaded.
+            Signature: (name: str, obj: Any) -> bool.
+        key_func (Callable): A function that determines the key name in the resulting dictionary.
+            Signature: (name: str, obj: Any) -> str.
+        on_load (Callable, optional): Optional callback to execute when an object is loaded.
+            Signature: (key: str, obj: Any) -> None.
+        skip_modules (set[str], optional): Set of module names to skip during import.
+            Defaults to {"__init__", "base"}.
+        log_prefix (str, optional): Prefix for log entries when an object is loaded.
+
+    Returns:
+        dict[str, Any]: A dictionary mapping keys (as returned by `key_func`) to loaded objects.
     """
-
     if skip_modules is None:
         skip_modules = {"__init__", "base"}
 

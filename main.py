@@ -1,3 +1,8 @@
+"""
+Entry point for running the bot application.
+
+Initializes logging, loads translations, sets up the dispatcher, and starts polling updates.
+"""
 import logging
 
 from app.logger import configure_logging
@@ -15,6 +20,11 @@ log.info("Translations loaded successfully")
 
 
 async def main():
+    """
+    Initialize the dispatcher and start polling for updates.
+
+    Sets up all handlers and begins listening for incoming bot events.
+    """
     from bot.dispatcher import get_dispatcher
     dp = get_dispatcher()
     await dp.start_polling(bot)
